@@ -41,6 +41,8 @@ export interface MemoryPlatform extends Platform {
   externalWrite(path: string, text: string): void;
   /** Delete a file or directory as another program would (watchers are notified). */
   externalRemove(path: string): void;
+  /** URLs passed to `openExternal`, in order. */
+  readonly openedUrls: readonly string[];
   /** Messages of the question dialogs shown so far. */
   readonly questions: readonly string[];
   /** Whether this window has closed. */
@@ -65,6 +67,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
   const questions: string[] = [];
   let commands: Extract<MenuItemSpec, { kind: "command" }>[] = [];
   let windowTitle = "";
+  const openedUrls: string[] = [];
   let closeHandler: (() => Promise<boolean>) | null = null;
   let closed = false;
   const settingsListeners = new Set<(file: SettingsFile) => void>();
@@ -132,6 +135,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     files,
     trash,
     appData,
+    openedUrls,
     get windowTitle() {
       return windowTitle;
     },
@@ -224,6 +228,9 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     },
     async writeAppData(name, text) {
       appData.set(name, text);
+    },
+    async openExternal(url) {
+      openedUrls.push(url);
     },
     async showQuestionDialog({ message }) {
       questions.push(message);

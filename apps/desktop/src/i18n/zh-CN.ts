@@ -20,6 +20,8 @@ export const zhCN: Messages = {
   "command.file.save": "保存",
   "command.file.openFolder": "打开文件夹…",
   "command.view.toggleSidebar": "显示/隐藏侧边栏",
+  "command.view.toggleSourceMode": "切换源码模式",
+
   "command.tab.close": "关闭标签页",
   "command.tab.next": "显示下一个标签页",
   "command.tab.previous": "显示上一个标签页",
@@ -85,6 +87,8 @@ export const zhCN: Messages = {
 
   "status.saved": "已保存",
   "status.unsaved": "有未保存的改动",
+  "status.mode.livePreview": "实时预览",
+  "status.mode.source": "源码模式",
 
   "error.open": "无法打开 {path}：{reason}",
   "error.save": "无法保存 {path}：{reason}",

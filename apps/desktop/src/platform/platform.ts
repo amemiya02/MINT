@@ -57,6 +57,9 @@ export interface Platform {
   /** Ask a three-way question (e.g. save / don't save / cancel). Dismissing the dialog answers `cancel`. */
   showQuestionDialog(options: QuestionDialogOptions): Promise<"yes" | "no" | "cancel">;
 
+  /** Open a URL (`https:`, `mailto:`, ...) in the user's default browser or handler. */
+  openExternal(url: string): Promise<void>;
+
   setWindowTitle(title: string): Promise<void>;
 
   /** Install the application menu for this window. Item accelerators are active shortcuts. */

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import type { LinkTarget } from "@mint/editor";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { buildMenu, type CommandId } from "./commands.ts";
 import { EditorPane } from "./EditorPane.tsx";
 import { FindBar, type FindMode } from "./find/FindBar.tsx";
@@ -7,7 +8,7 @@ import type { Platform } from "./platform/platform.ts";
 import { SettingsDialog } from "./settings/SettingsDialog.tsx";
 import { SettingsIssues } from "./settings/SettingsIssues.tsx";
 import { TabStoreContext, useTabStore, useTabsState } from "./tabs/context.ts";
-import { baseName } from "./tabs/paths.ts";
+import { baseName, resolveFrom } from "./tabs/paths.ts";
 import { TabBar } from "./tabs/TabBar.tsx";
 import { createTabStore, type Tab, type TabError, type TabStore } from "./tabs/tab-store.ts";
 import { documentExtensions } from "./workspace/paths.ts";
@@ -83,6 +84,9 @@ function Window({ platform, store }: { readonly platform: Platform; readonly sto
     const path = await platform.showOpenFolderDialog({ title: t("dialog.openFolder.title") });
     if (path) await openFolder(path);
   }, [platform, t, openFolder]);
+  // The editor owns its mode; re-render when it reports a change.
+  const [, modeChanged] = useReducer((n: number) => n + 1, 0);
+  const mode = (activeId !== null && store.editor(activeId)?.getMode()) || "livePreview";
 
   const open = useCallback(async () => {
     const path = await platform.showOpenDialog({
@@ -115,6 +119,9 @@ function Window({ platform, store }: { readonly platform: Platform; readonly sto
     "view.toggleSidebar": () => setSidebarVisible((visible) => !visible),
     "window.new": () => void platform.openWindow(),
     "app.settings": () => setSettingsOpen(true),
+    "view.toggleSourceMode": () => {
+      if (activeId !== null) store.editor(activeId)?.execute("toggleSourceMode");
+    },
   };
 
   useEffect(() => {
@@ -169,7 +176,13 @@ function Window({ platform, store }: { readonly platform: Platform; readonly sto
           )}
           <main className="min-h-0 flex-1">
             {tabs.map((tab) => (
-              <TabPanel key={tab.id} tab={tab} active={tab.id === activeId} />
+              <TabPanel
+                key={tab.id}
+                tab={tab}
+                active={tab.id === activeId}
+                platform={platform}
+                onModeChange={modeChanged}
+              />
             ))}
             {tabs.length === 0 && (
               <Welcome
@@ -184,7 +197,12 @@ function Window({ platform, store }: { readonly platform: Platform; readonly sto
           {active && (
             <footer className="flex items-center justify-between border-t border-(--mint-border) px-4 py-1 text-xs text-(--mint-muted)">
               <span title={active.path}>{name}</span>
-              <span>{t(dirty ? "status.unsaved" : "status.saved")}</span>
+              <span className="flex gap-4">
+                <span>
+                  {t(mode === "source" ? "status.mode.source" : "status.mode.livePreview")}
+                </span>
+                <span>{t(dirty ? "status.unsaved" : "status.saved")}</span>
+              </span>
             </footer>
           )}
         </div>
@@ -200,14 +218,31 @@ function Window({ platform, store }: { readonly platform: Platform; readonly sto
 }
 
 /** Every open tab keeps its editor mounted, so undo history and selection survive switching. */
-function TabPanel({ tab, active }: { readonly tab: Tab; readonly active: boolean }) {
+function TabPanel({
+  tab,
+  active,
+  platform,
+  onModeChange,
+}: {
+  readonly tab: Tab;
+  readonly active: boolean;
+  readonly platform: Platform;
+  readonly onModeChange: () => void;
+}) {
   const store = useTabStore();
-  const { id } = tab;
+  const { id, path } = tab;
   const onReady = useCallback(
     (editor: Parameters<TabStore["attachEditor"]>[1]) => store.attachEditor(id, editor),
     [store, id],
   );
   const onChange = useCallback(() => store.markChanged(id), [store, id]);
+  const onOpenLink = useCallback(
+    (link: LinkTarget) => {
+      if (link.kind === "external") void platform.openExternal(link.url);
+      else void store.openDocument(resolveFrom(path, link.path));
+    },
+    [platform, store, path],
+  );
   return (
     <div
       role="tabpanel"
@@ -216,7 +251,14 @@ function TabPanel({ tab, active }: { readonly tab: Tab; readonly active: boolean
       hidden={!active}
       className="h-full"
     >
-      <EditorPane text={tab.text} active={active} onReady={onReady} onChange={onChange} />
+      <EditorPane
+        text={tab.text}
+        active={active}
+        onReady={onReady}
+        onChange={onChange}
+        onModeChange={onModeChange}
+        onOpenLink={onOpenLink}
+      />
     </div>
   );
 }

@@ -10,6 +10,7 @@ import {
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { message, open } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import type { DirectoryEntry, MenuItemSpec, Platform, SettingsFile } from "./platform.ts";
 
 const nativeItems = {
@@ -51,6 +52,7 @@ export function createTauriPlatform(): Platform {
     },
     readAppData: (name) => invoke<string | null>("read_app_data", { name }),
     writeAppData: (name, text) => invoke<void>("write_app_data", { name, text }),
+    openExternal: (url) => openUrl(url),
     async showQuestionDialog({ title, message: text, yes, no, cancel }) {
       const answer = await message(text, {
         title,

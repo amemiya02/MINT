@@ -71,6 +71,14 @@ export function externalRemove(page: Page, path: string): Promise<void> {
   );
 }
 
+/** URLs the shell asked the in-memory platform to open externally. */
+export function openedUrls(page: Page): Promise<readonly string[]> {
+  return page.evaluate(() => [
+    ...(window as unknown as { __MINT_MEMORY_PLATFORM__: { openedUrls: readonly string[] } })
+      .__MINT_MEMORY_PLATFORM__.openedUrls,
+  ]);
+}
+
 /**
  * Change a file as another program would. Watchers are notified, so this is how
  * tests edit settings.json behind MINT's back.

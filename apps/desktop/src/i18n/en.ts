@@ -19,6 +19,8 @@ export const en = {
   "command.file.save": "Save",
   "command.file.openFolder": "Open Folder…",
   "command.view.toggleSidebar": "Toggle Sidebar",
+  "command.view.toggleSourceMode": "Toggle Source Mode",
+
   "command.tab.close": "Close Tab",
   "command.tab.next": "Show Next Tab",
   "command.tab.previous": "Show Previous Tab",
@@ -86,6 +88,8 @@ export const en = {
 
   "status.saved": "Saved",
   "status.unsaved": "Unsaved changes",
+  "status.mode.livePreview": "Live Preview",
+  "status.mode.source": "Source Mode",
 
   "error.open": "Could not open {path}: {reason}",
   "error.save": "Could not save {path}: {reason}",
