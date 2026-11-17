@@ -5,6 +5,7 @@
 mod app_data;
 mod folder;
 mod fs;
+mod recovery;
 mod search;
 mod settings;
 mod walk;
@@ -52,6 +53,29 @@ fn write_settings(
     values: Map<String, Value>,
 ) -> Result<(), String> {
     settings::save(&state.path, &values).map_err(|e| e.to_string())
+}
+
+/// Snapshots of unsaved work left by an earlier run; only the first caller gets them.
+#[tauri::command]
+fn take_recovery_snapshots(area: State<'_, recovery::RecoveryArea>) -> Vec<recovery::Snapshot> {
+    area.take_left_over()
+}
+
+#[tauri::command]
+fn write_recovery_snapshot(
+    area: State<'_, recovery::RecoveryArea>,
+    id: String,
+    contents: String,
+) -> Result<(), String> {
+    area.write(&id, &contents).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_recovery_snapshot(
+    area: State<'_, recovery::RecoveryArea>,
+    id: String,
+) -> Result<(), String> {
+    area.remove(&id).map_err(|e| e.to_string())
 }
 
 /// Event sent to every window with the reloaded `SettingsFile` whenever the file changes on disk.
@@ -205,6 +229,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(Watchers::default())
         .manage(Searches::default())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let path = app.path().app_config_dir()?.join(settings::FILE_NAME);
             let handle = app.handle().clone();
@@ -217,6 +242,8 @@ pub fn run() {
                 path,
                 _watcher: watcher,
             });
+            let recovery_dir = app.path().app_data_dir()?.join(recovery::DIR_NAME);
+            app.manage(recovery::RecoveryArea::open(recovery_dir));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -237,6 +264,9 @@ pub fn run() {
             unwatch_folder,
             read_app_data,
             write_app_data,
+            take_recovery_snapshots,
+            write_recovery_snapshot,
+            delete_recovery_snapshot
         ])
         .run(tauri::generate_context!())
         .expect("error while running MINT");

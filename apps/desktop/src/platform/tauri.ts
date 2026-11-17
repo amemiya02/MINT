@@ -10,11 +10,13 @@ import {
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { message, open } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import type {
   DirectoryEntry,
   FileMatches,
   MenuItemSpec,
   Platform,
+  RecoverySnapshot,
   SettingsFile,
 } from "./platform.ts";
 
@@ -83,6 +85,7 @@ export function createTauriPlatform(): Platform {
     },
     readAppData: (name) => invoke<string | null>("read_app_data", { name }),
     writeAppData: (name, text) => invoke<void>("write_app_data", { name, text }),
+    openExternal: (url) => openUrl(url),
     async showQuestionDialog({ title, message: text, yes, no, cancel }) {
       const answer = await message(text, {
         title,
@@ -139,6 +142,10 @@ export function createTauriPlatform(): Platform {
       const unlisten = listen<SettingsFile>("settings-changed", (event) => listener(event.payload));
       return () => void unlisten.then((stop) => stop());
     },
+    takeRecoverySnapshots: () => invoke<RecoverySnapshot[]>("take_recovery_snapshots"),
+    writeRecoverySnapshot: (id, contents) =>
+      invoke<void>("write_recovery_snapshot", { id, contents }),
+    deleteRecoverySnapshot: (id) => invoke<void>("delete_recovery_snapshot", { id }),
   };
 }
 

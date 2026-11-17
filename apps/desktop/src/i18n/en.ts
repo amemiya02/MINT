@@ -20,6 +20,8 @@ export const en = {
   "command.file.openFolder": "Open Folder…",
   "command.file.quickOpen": "Quick Open…",
   "command.view.toggleSidebar": "Toggle Sidebar",
+  "command.view.toggleSourceMode": "Toggle Source Mode",
+
   "command.tab.close": "Close Tab",
   "command.tab.next": "Show Next Tab",
   "command.tab.previous": "Show Previous Tab",
@@ -77,6 +79,7 @@ export const en = {
   "settings.language.system": "Follow system",
   "settings.language.zh-CN": "简体中文",
   "settings.language.en": "English",
+  "settings.autosave": "Save automatically",
 
   "dialog.open.title": "Open Document",
   "dialog.filter.markdown": "Markdown",
@@ -107,6 +110,8 @@ export const en = {
 
   "status.saved": "Saved",
   "status.unsaved": "Unsaved changes",
+  "status.mode.livePreview": "Live Preview",
+  "status.mode.source": "Source Mode",
 
   "error.open": "Could not open {path}: {reason}",
   "error.save": "Could not save {path}: {reason}",
@@ -125,4 +130,12 @@ export const en = {
   "unsaved.save": "Save",
   "unsaved.discard": "Don't Save",
   "unsaved.cancel": "Cancel",
+
+  "recovery.title": "Restore Unsaved Changes",
+  "recovery.message":
+    "MINT did not quit normally last time. Do you want to restore the unsaved changes to {names}?",
+  "recovery.separator": ", ",
+  "recovery.restore": "Restore",
+  "recovery.discard": "Discard",
+  "recovery.later": "Decide Later",
 } as const;

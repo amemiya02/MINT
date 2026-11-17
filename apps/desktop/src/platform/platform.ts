@@ -79,6 +79,9 @@ export interface Platform {
   /** Ask a three-way question (e.g. save / don't save / cancel). Dismissing the dialog answers `cancel`. */
   showQuestionDialog(options: QuestionDialogOptions): Promise<"yes" | "no" | "cancel">;
 
+  /** Open a URL (`https:`, `mailto:`, ...) in the user's default browser or handler. */
+  openExternal(url: string): Promise<void>;
+
   setWindowTitle(title: string): Promise<void>;
 
   /** Install the application menu for this window. Item accelerators are active shortcuts. */
@@ -110,6 +113,30 @@ export interface Platform {
    * whoever changed it. Returns a function that stops listening.
    */
   onSettingsChanged(listener: (file: SettingsFile) => void): () => void;
+
+  /**
+   * The snapshots left in the recovery area (a directory in the application data
+   * directory, never in a working folder) by an earlier run that did not exit
+   * cleanly. Only the first call in a run returns them; later calls, e.g. from
+   * windows opened afterwards, resolve to an empty list. The snapshots stay in
+   * the recovery area until deleted.
+   */
+  takeRecoverySnapshots(): Promise<RecoverySnapshot[]>;
+
+  /**
+   * Create or replace a snapshot in the recovery area, atomically. `id` may only
+   * contain ASCII letters, digits, `-` and `_`.
+   */
+  writeRecoverySnapshot(id: string, contents: string): Promise<void>;
+
+  /** Remove a snapshot from the recovery area; removing one that does not exist is not an error. */
+  deleteRecoverySnapshot(id: string): Promise<void>;
+}
+
+/** One entry of the recovery area. `contents` is opaque to the platform. */
+export interface RecoverySnapshot {
+  readonly id: string;
+  readonly contents: string;
 }
 
 export interface FolderSearchQuery {

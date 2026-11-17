@@ -21,6 +21,8 @@ export const zhCN: Messages = {
   "command.file.openFolder": "打开文件夹…",
   "command.file.quickOpen": "快速打开…",
   "command.view.toggleSidebar": "显示/隐藏侧边栏",
+  "command.view.toggleSourceMode": "切换源码模式",
+
   "command.tab.close": "关闭标签页",
   "command.tab.next": "显示下一个标签页",
   "command.tab.previous": "显示上一个标签页",
@@ -75,6 +77,7 @@ export const zhCN: Messages = {
   "settings.language.system": "跟随系统",
   "settings.language.zh-CN": "简体中文",
   "settings.language.en": "English",
+  "settings.autosave": "自动保存",
 
   "dialog.open.title": "打开文档",
   "dialog.filter.markdown": "Markdown",
@@ -105,6 +108,8 @@ export const zhCN: Messages = {
 
   "status.saved": "已保存",
   "status.unsaved": "有未保存的改动",
+  "status.mode.livePreview": "实时预览",
+  "status.mode.source": "源码模式",
 
   "error.open": "无法打开 {path}：{reason}",
   "error.save": "无法保存 {path}：{reason}",
@@ -122,4 +127,11 @@ export const zhCN: Messages = {
   "unsaved.save": "保存",
   "unsaved.discard": "不保存",
   "unsaved.cancel": "取消",
+
+  "recovery.title": "恢复未保存的改动",
+  "recovery.message": "MINT 上次没有正常退出。是否恢复对 {names} 的未保存改动？",
+  "recovery.separator": "、",
+  "recovery.restore": "恢复",
+  "recovery.discard": "丢弃",
+  "recovery.later": "稍后再说",
 };

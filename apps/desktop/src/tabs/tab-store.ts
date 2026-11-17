@@ -6,7 +6,10 @@ import { isWithin, rebasePath } from "./paths.ts";
 export interface Tab {
   readonly id: number;
   readonly path: string;
-  /** Text as read from disk; the tab's editor owns the live text. */
+  /**
+   * Text the tab's editor starts from: as read from disk, or unsaved work
+   * restored from the recovery area. The editor owns the live text.
+   */
   readonly text: string;
   readonly dirty: boolean;
 }
@@ -54,6 +57,12 @@ export interface TabStore {
 
   /** With `select`, the range is selected and scrolled into view once the document shows. */
   openDocument(path: string, select?: LineRange): Promise<void>;
+  /**
+   * Open a tab showing unsaved `text` for the document at `path` (e.g. work
+   * recovered after a crash), without reading the file. If the document is
+   * already open its tab is focused instead. Returns the tab's id.
+   */
+  restoreDocument(path: string, text: string): number;
   activate(id: number): void;
   activateNext(): void;
   activatePrevious(): void;
@@ -148,6 +157,18 @@ export function createTabStore({ platform, askUnsaved }: TabStoreOptions): TabSt
       const editor = editors.get(tab.id);
       if (editor) reveal(editor, select);
       else pendingSelections.set(tab.id, select);
+    },
+
+    restoreDocument(path, text) {
+      const existing = state.tabs.find((t) => t.path === path);
+      if (existing) {
+        set({ activeId: existing.id });
+        return existing.id;
+      }
+      const tab: Tab = { id: nextId++, path, text, dirty: true };
+      versions.set(tab.id, 0);
+      set({ tabs: [...state.tabs, tab], activeId: tab.id });
+      return tab.id;
     },
 
     activate(id) {

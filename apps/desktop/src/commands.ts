@@ -19,7 +19,8 @@ export type CommandId =
   | "tab.previous"
   | "view.toggleSidebar"
   | "window.new"
-  | "app.settings";
+  | "app.settings"
+  | "view.toggleSourceMode";
 
 export interface Command {
   readonly id: CommandId;
@@ -57,6 +58,11 @@ export const commands: readonly Command[] = [
   { id: "tab.previous", title: "command.tab.previous", accelerator: "Ctrl+Shift+Tab" },
   { id: "window.new", title: "command.window.new", accelerator: "CmdOrCtrl+Shift+N" },
   { id: "app.settings", title: "command.app.settings", accelerator: "CmdOrCtrl+," },
+  {
+    id: "view.toggleSourceMode",
+    title: "command.view.toggleSourceMode",
+    accelerator: "CmdOrCtrl+/",
+  },
 ];
 
 export function buildMenu(t: Translate, run: (id: CommandId) => void): MenuSpec[] {
@@ -105,7 +111,7 @@ export function buildMenu(t: Translate, run: (id: CommandId) => void): MenuSpec[
         item("edit.searchFolder"),
       ],
     },
-    { label: t("menu.view"), items: [item("view.toggleSidebar")] },
+    { label: t("menu.view"), items: [item("view.toggleSidebar"), item("view.toggleSourceMode")] },
     {
       label: t("menu.window"),
       items: [item("window.new"), { kind: "separator" }, item("tab.next"), item("tab.previous")],
