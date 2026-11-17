@@ -8,6 +8,7 @@ export const zhCN: Messages = {
   "menu.app": "MINT",
   "menu.file": "文件",
   "menu.edit": "编辑",
+  "menu.view": "显示",
   "menu.window": "窗口",
   "menu.quit": "退出 MINT",
   "menu.cut": "剪切",
@@ -17,10 +18,29 @@ export const zhCN: Messages = {
 
   "command.file.open": "打开…",
   "command.file.save": "保存",
+  "command.file.openFolder": "打开文件夹…",
+  "command.view.toggleSidebar": "显示/隐藏侧边栏",
   "command.tab.close": "关闭标签页",
   "command.tab.next": "显示下一个标签页",
   "command.tab.previous": "显示上一个标签页",
   "command.window.new": "新建窗口",
+
+  "command.edit.find": "查找…",
+  "command.edit.replace": "替换…",
+
+  "find.label": "查找",
+  "find.replaceWith": "替换为",
+  "find.caseSensitive": "区分大小写",
+  "find.wholeWord": "全字匹配",
+  "find.regexp": "使用正则表达式",
+  "find.previous": "上一个匹配项",
+  "find.next": "下一个匹配项",
+  "find.close": "关闭",
+  "find.replace": "替换",
+  "find.replaceAll": "全部替换",
+  "find.count": "第 {current} 个，共 {total} 个",
+  "find.noResults": "无结果",
+  "find.invalid": "正则表达式无效",
 
   "command.app.settings": "设置…",
 
@@ -46,16 +66,34 @@ export const zhCN: Messages = {
 
   "dialog.open.title": "打开文档",
   "dialog.filter.markdown": "Markdown",
+  "dialog.openFolder.title": "打开文件夹",
 
   "welcome.title": "没有打开的文档",
   "welcome.body": "打开一个 Markdown 文档，开始写作。",
   "welcome.open": "打开文档…",
+  "welcome.openFolder": "打开文件夹…",
+  "welcome.recent": "最近打开",
+
+  "sidebar.label": "侧边栏",
+  "sidebar.hide": "隐藏侧边栏",
+  "tree.newDocument": "新建文档",
+  "tree.newFolder": "新建文件夹",
+  "tree.rename": "重命名",
+  "tree.trash": "移到废纸篓",
+  "tree.name": "名称",
+  "tree.untitledDocument": "未命名",
+  "tree.untitledFolder": "未命名文件夹",
 
   "status.saved": "已保存",
   "status.unsaved": "有未保存的改动",
 
   "error.open": "无法打开 {path}：{reason}",
   "error.save": "无法保存 {path}：{reason}",
+  "error.openFolder": "无法打开文件夹 {path}：{reason}",
+  "error.invalidName": "“{name}”不是有效的名称",
+  "error.create": "无法创建 {name}：{reason}",
+  "error.rename": "无法重命名为 {name}：{reason}",
+  "error.trash": "无法将 {name} 移到废纸篓：{reason}",
 
   "tabs.label": "已打开的文档",
   "tabs.close": "关闭 {name}",

@@ -8,10 +8,14 @@ import type { MenuSpec } from "./platform/platform.ts";
  */
 export type CommandId =
   | "file.open"
+  | "file.openFolder"
   | "file.save"
+  | "edit.find"
+  | "edit.replace"
   | "tab.close"
   | "tab.next"
   | "tab.previous"
+  | "view.toggleSidebar"
   | "window.new"
   | "app.settings";
 
@@ -22,9 +26,24 @@ export interface Command {
   readonly accelerator?: string;
 }
 
+const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+
 export const commands: readonly Command[] = [
   { id: "file.open", title: "command.file.open", accelerator: "CmdOrCtrl+O" },
+  { id: "file.openFolder", title: "command.file.openFolder" },
   { id: "file.save", title: "command.file.save", accelerator: "CmdOrCtrl+S" },
+  {
+    id: "view.toggleSidebar",
+    title: "command.view.toggleSidebar",
+    accelerator: "CmdOrCtrl+Shift+L",
+  },
+  { id: "edit.find", title: "command.edit.find", accelerator: "CmdOrCtrl+F" },
+  // Typora's replace shortcut: ⌘⌥F on macOS, Ctrl+H elsewhere (Ctrl+Alt is AltGr on Windows).
+  {
+    id: "edit.replace",
+    title: "command.edit.replace",
+    accelerator: isMac ? "Cmd+Alt+F" : "Ctrl+H",
+  },
   { id: "tab.close", title: "command.tab.close", accelerator: "CmdOrCtrl+W" },
   { id: "tab.next", title: "command.tab.next", accelerator: "Ctrl+Tab" },
   { id: "tab.previous", title: "command.tab.previous", accelerator: "Ctrl+Shift+Tab" },
@@ -55,7 +74,13 @@ export function buildMenu(t: Translate, run: (id: CommandId) => void): MenuSpec[
     },
     {
       label: t("menu.file"),
-      items: [item("file.open"), item("file.save"), { kind: "separator" }, item("tab.close")],
+      items: [
+        item("file.open"),
+        item("file.openFolder"),
+        { kind: "separator" },
+        item("file.save"),
+        item("tab.close"),
+      ],
     },
     {
       label: t("menu.edit"),
@@ -65,8 +90,12 @@ export function buildMenu(t: Translate, run: (id: CommandId) => void): MenuSpec[
         { kind: "native", action: "paste", label: t("menu.paste") },
         { kind: "separator" },
         { kind: "native", action: "selectAll", label: t("menu.selectAll") },
+        { kind: "separator" },
+        item("edit.find"),
+        item("edit.replace"),
       ],
     },
+    { label: t("menu.view"), items: [item("view.toggleSidebar")] },
     {
       label: t("menu.window"),
       items: [item("window.new"), { kind: "separator" }, item("tab.next"), item("tab.previous")],

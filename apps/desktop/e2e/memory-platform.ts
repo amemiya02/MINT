@@ -6,7 +6,9 @@ export {
   memorySettingsPath as settingsPath,
 } from "../src/platform/memory.ts";
 
-type MemoryWindow = { __MINT_MEMORY__: MemoryPlatformOptions } & {
+// Page functions are serialised into the browser, so they reach the platform through `window`.
+type MintWindow = {
+  __MINT_MEMORY__: MemoryPlatformOptions;
   __MINT_MEMORY_PLATFORM__: MemoryPlatform;
 };
 
@@ -16,7 +18,7 @@ type MemoryWindow = { __MINT_MEMORY__: MemoryPlatformOptions } & {
  */
 export async function launch(page: Page, options: MemoryPlatformOptions = {}): Promise<void> {
   await page.context().addInitScript((seed) => {
-    (window as unknown as MemoryWindow).__MINT_MEMORY__ = seed;
+    (window as unknown as MintWindow).__MINT_MEMORY__ = seed;
   }, options);
   await page.goto("/");
 }
@@ -24,15 +26,50 @@ export async function launch(page: Page, options: MemoryPlatformOptions = {}): P
 /** Messages of the question dialogs (e.g. "save changes?") shown so far. */
 export function questionsAsked(page: Page): Promise<string[]> {
   return page.evaluate(() => [
-    ...(window as unknown as { __MINT_MEMORY_PLATFORM__: { questions: readonly string[] } })
-      .__MINT_MEMORY_PLATFORM__.questions,
+    ...(window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.questions,
   ]);
 }
 
 /** Read a file back from the in-memory platform. */
 export function readFile(page: Page, path: string): Promise<string | undefined> {
   return page.evaluate(
-    (p) => (window as unknown as MemoryWindow).__MINT_MEMORY_PLATFORM__.files.get(p),
+    (p) => (window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.files.get(p),
+    path,
+  );
+}
+
+/** Every file and directory path that exists in the in-memory platform, sorted. */
+export function listPaths(page: Page): Promise<string[]> {
+  return page.evaluate(() =>
+    (window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.listPaths(),
+  );
+}
+
+/** Paths moved to the trash, in order. */
+export function trashed(page: Page): Promise<string[]> {
+  return page.evaluate(() => [...(window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.trash]);
+}
+
+/** Read a file from MINT's app data directory. */
+export function readAppData(page: Page, name: string): Promise<string | undefined> {
+  return page.evaluate(
+    (n) => (window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.appData.get(n),
+    name,
+  );
+}
+
+/** Change a file the way another program would. */
+export function externalWrite(page: Page, path: string, text: string): Promise<void> {
+  return page.evaluate(
+    ([p, t]) => (window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.externalWrite(p, t),
+    [path, text] as const,
+  );
+}
+
+/** Delete a file or directory the way another program would. */
+export function externalRemove(page: Page, path: string): Promise<void> {
+  return page.evaluate(
+    (p) => (window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.externalRemove(p),
     path,
   );
 }
@@ -43,7 +80,7 @@ export function readFile(page: Page, path: string): Promise<string | undefined> 
  */
 export async function writeFile(page: Page, path: string, text: string): Promise<void> {
   await page.evaluate(
-    ([p, t]) => (window as unknown as MemoryWindow).__MINT_MEMORY_PLATFORM__.writeTextFile(p, t),
+    ([p, t]) => (window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.writeTextFile(p, t),
     [path, text] as const,
   );
 }
@@ -51,6 +88,6 @@ export async function writeFile(page: Page, path: string, text: string): Promise
 /** Every file the in-memory platform holds, keyed by path (documents, settings, recovery area). */
 export function files(page: Page): Promise<Record<string, string>> {
   return page.evaluate(() =>
-    Object.fromEntries((window as unknown as MemoryWindow).__MINT_MEMORY_PLATFORM__.files),
+    Object.fromEntries((window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.files),
   );
 }

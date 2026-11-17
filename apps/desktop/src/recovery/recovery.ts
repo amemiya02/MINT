@@ -74,7 +74,7 @@ export function createRecovery({
       version: 1,
       path: tab.path,
       // Before its editor mounts, a tab's text is the text it starts from.
-      text: store.getText(id) ?? tab.text,
+      text: store.editor(id)?.getText() ?? tab.text,
       takenAt: Date.now(),
     };
     written.add(id);
