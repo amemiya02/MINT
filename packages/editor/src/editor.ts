@@ -15,6 +15,13 @@ import {
 import { type LinkTarget, linkOpening } from "./links.ts";
 import { inlineSpans } from "./live-preview/inline-spans.ts";
 import { livePreview, previewRenderer } from "./live-preview/preview.ts";
+import { type TableCommands, tableCommands } from "./table/commands.ts";
+import {
+  focusTableCell,
+  runInFocusedTable,
+  tableRenderer,
+  tableTheme,
+} from "./table/table-widget.ts";
 
 /**
  * Capabilities the editor core needs from whatever hosts it (desktop shell,
@@ -42,6 +49,11 @@ export interface EditorOptions {
   readonly host?: HostAdapter;
   /** Initial mode; defaults to `livePreview`. */
   readonly mode?: EditorMode;
+  /**
+   * Translations of the editor's own UI copy, keyed by the English text
+   * (the exported `tablePhrases`). Untranslated text stays English.
+   */
+  readonly phrases?: Readonly<Record<string, string>>;
 }
 
 /** A selection range in {@link MintEditor.getText} offsets (UTF-16 code units). */
@@ -51,7 +63,7 @@ export interface TextSelection {
 }
 
 /** Named commands and their arguments. */
-export interface EditorCommands extends FindCommands {
+export interface EditorCommands extends FindCommands, TableCommands {
   undo: [];
   redo: [];
   /** Replace the selection with text, as if typed. Line breaks take the document's line ending. */
@@ -97,6 +109,7 @@ export function createEditor(options: EditorOptions): MintEditor {
       doc: parsed.doc,
       extensions: [
         parsed.extension,
+        options.phrases ? EditorState.phrases.of(options.phrases) : [],
         history(),
         findReplace(),
         // Mod-/ belongs to the host's command registry (toggle source mode), not to comments.
@@ -104,6 +117,8 @@ export function createEditor(options: EditorOptions): MintEditor {
         markdownSupport(dialect),
         syntaxHighlighting(defaultHighlightStyle),
         previewRenderer.of(inlineSpans),
+        previewRenderer.of(tableRenderer),
+        tableTheme,
         preview.of(modeExtension()),
         host.openLink ? linkOpening((link) => host.openLink?.(link)) : [],
         EditorView.lineWrapping,
@@ -121,6 +136,7 @@ export function createEditor(options: EditorOptions): MintEditor {
 
   const commands: { [C in EditorCommand]: (...args: EditorCommands[C]) => boolean } = {
     ...findCommands(view),
+    ...tableCommands(view, runInFocusedTable, focusTableCell),
     undo: () => undo(view),
     redo: () => redo(view),
     insertText: (text) => {

@@ -13,3 +13,5 @@ export type { FindQuery, FindStatus } from "./find.ts";
 export type { LinkTarget } from "./links.ts";
 export type { PreviewContext, PreviewRenderer } from "./live-preview/preview.ts";
 export { previewRenderer } from "./live-preview/preview.ts";
+export type { TableAlignment } from "./table/commands.ts";
+export { tablePhrases } from "./table/table-widget.ts";

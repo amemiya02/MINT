@@ -1,5 +1,7 @@
 import { createEditor, type LinkTarget, type MintEditor } from "@mint/editor";
 import { useEffect, useRef } from "react";
+import { editorPhrases } from "./editor-phrases.ts";
+import { useT } from "./i18n/index.ts";
 
 interface EditorPaneProps {
   /** Initial file text. The editor is recreated only when the pane is remounted (use a `key`). */
@@ -23,6 +25,10 @@ export function EditorPane({
   onOpenLink,
 }: EditorPaneProps) {
   const parent = useRef<HTMLDivElement>(null);
+  const t = useT();
+  // Taken when the editor is created; a language change applies to editors opened afterwards.
+  const phrases = useRef<Record<string, string>>({});
+  phrases.current = editorPhrases(t);
   const editor = useRef<MintEditor | null>(null);
   const callbacks = useRef({ onReady, onChange, onModeChange, onOpenLink });
   callbacks.current = { onReady, onChange, onModeChange, onOpenLink };
@@ -32,6 +38,7 @@ export function EditorPane({
     const instance = createEditor({
       parent: parent.current,
       text,
+      phrases: phrases.current,
       host: { openLink: (link) => callbacks.current.onOpenLink(link) },
     });
     const unsubscribe = instance.subscribe((event) => {
