@@ -1,6 +1,6 @@
 import { defaultKeymap, history, historyKeymap, redo, undo } from "@codemirror/commands";
 import { syntaxTree } from "@codemirror/language";
-import { Compartment, EditorSelection, EditorState } from "@codemirror/state";
+import { Compartment, EditorSelection, EditorState, type Extension } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { type Dialect, defaultDialect, renderHtml } from "@mint/markdown";
 import { markdownSupport } from "./dialect.ts";
@@ -33,6 +33,7 @@ import { mathPreview } from "./live-preview/math.ts";
 import { mermaidDiagrams } from "./live-preview/mermaid.ts";
 import { livePreview, previewRenderer } from "./live-preview/preview.ts";
 import { quotesAndRules } from "./live-preview/quotes-and-rules.ts";
+import { tableOfContents } from "./live-preview/toc.ts";
 import { markupContinuation } from "./markup-continuation.ts";
 import { type OutlineHeading, outline, sameOutline } from "./outline.ts";
 import { editorPreferences } from "./preferences.ts";
@@ -183,6 +184,11 @@ export interface MintEditor {
   getVisibleRange(): { readonly from: number; readonly to: number };
   /** Matches of the find query set with the `setFindQuery` command. */
   getFindStatus(): FindStatus;
+  /**
+   * Parse and render with another dialect from now on (e.g. an extended
+   * syntax switched on in the settings). Text and selection are unchanged.
+   */
+  setDialect(dialect: Dialect): void;
   /** Run a named command. Returns whether it did anything. */
   execute<C extends EditorCommand>(command: C, ...args: EditorCommands[C]): boolean;
   /** Listen for text, selection, mode, outline and scroll changes. Returns an unsubscribe function. */
@@ -199,12 +205,24 @@ export interface MintEditor {
  */
 const hostKeys = new Set(["Mod-/", "Mod-i", "Shift-Mod-k"]);
 
+/** Everything that depends on the dialect: the parser and the renderers of optional syntax. */
+function dialectExtensions(dialect: Dialect): Extension {
+  return [
+    markdownSupport(dialect),
+    richPaste(dialect),
+    // Table cells are rendered like the export renders them.
+    previewRenderer.of(tableRenderer((markdown) => renderHtml(markdown, dialect))),
+    // Mermaid takes over its fences from codeBlocks (it matches only ```mermaid; the rest stay code blocks).
+    dialect.mermaid ? mermaidDiagrams() : [],
+  ];
+}
+
 export function createEditor(options: EditorOptions): MintEditor {
   const listeners = new Set<(event: EditorEvent) => void>();
   const parsed = parseFileText(options.text);
-  const dialect = options.dialect ?? defaultDialect;
   const host = options.host ?? {};
   const preview = new Compartment();
+  const syntax = new Compartment();
   let mode: EditorMode = options.mode ?? "livePreview";
   let lastOutline: readonly OutlineHeading[] = [];
   let settings: EditorSettings = { ...defaultSettings, ...options.settings };
@@ -229,26 +247,23 @@ export function createEditor(options: EditorOptions): MintEditor {
           ...defaultKeymap.filter((b) => !b.key || !hostKeys.has(b.key)),
           ...historyKeymap,
         ]),
-        markdownSupport(dialect),
+        syntax.of(dialectExtensions(options.dialect ?? defaultDialect)),
         markupContinuation,
         themeable(),
         previewRenderer.of(inlineSpans),
-        previewRenderer.of(tableRenderer((markdown) => renderHtml(markdown, dialect))),
         tableTheme,
         mathPreview(),
         headings,
         lists,
         quotesAndRules,
         footnotes,
-        // Mermaid takes over its fences from codeBlocks (it matches only ```mermaid; the rest stay code blocks).
-        dialect.mermaid ? mermaidDiagrams() : [],
+        tableOfContents,
         codeBlocks,
         imagePreview(),
         host.resolveImageUrl
           ? imageUrlResolver.of((path) => host.resolveImageUrl?.(path) ?? null)
           : [],
         host.saveImage ? imageFileInsertion(host.saveImage.bind(host)) : [],
-        richPaste(dialect),
         frontMatterPreview,
         preview.of(modeExtension()),
         focus.of(focusExtension()),
@@ -361,6 +376,9 @@ export function createEditor(options: EditorOptions): MintEditor {
       };
     },
     getFindStatus: () => findStatus(view.state),
+    setDialect(dialect) {
+      view.dispatch({ effects: syntax.reconfigure(dialectExtensions(dialect)) });
+    },
     execute: (command, ...args) => (commands[command] as (...a: typeof args) => boolean)(...args),
     subscribe(listener) {
       listeners.add(listener);

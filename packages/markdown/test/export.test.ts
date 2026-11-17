@@ -1,7 +1,7 @@
 // Seam 2: the Markdown package's export interface.
 // Feed Markdown + a dialect in, assert on the HTML that comes out.
 import { describe, expect, it } from "vitest";
-import { defaultDialect, renderHtml } from "../src/index.ts";
+import { type Dialect, defaultDialect, renderHtml } from "../src/index.ts";
 
 describe("defaultDialect", () => {
   it("enables CommonMark/GFM, math, Mermaid and front matter, and no extended syntax (ADR-0004)", () => {
@@ -50,6 +50,69 @@ describe("math", () => {
     const html = renderHtml("$\\frac{1}{$ and $y$\n", defaultDialect);
     expect(html).toContain('class="katex-error"');
     expect(html).toContain(tex("y"));
+  });
+});
+
+describe("extended syntax (ADR-0004)", () => {
+  const extended = (switches: Partial<Dialect["extended"]>): Dialect => ({
+    ...defaultDialect,
+    extended: { ...defaultDialect.extended, ...switches },
+  });
+
+  it("leaves every extended syntax as plain text by default", () => {
+    expect(renderHtml("==a== ^b^ ~c~\n\n[TOC]\n", defaultDialect)).toBe(
+      "<p>==a== ^b^ ~c~</p>\n<p>[TOC]</p>",
+    );
+  });
+
+  it("renders ==highlight== as <mark>, with inline Markdown inside, when enabled", () => {
+    expect(renderHtml("A ==very **big**== deal\n", extended({ highlight: true }))).toBe(
+      "<p>A <mark>very <strong>big</strong></mark> deal</p>",
+    );
+  });
+
+  it("renders ^superscript^ as <sup> when enabled; spaces end it, backslash escapes stay escapes", () => {
+    expect(renderHtml("x^2^ and 2^10\\^3^ and a^b c^\n", extended({ superscript: true }))).toBe(
+      "<p>x<sup>2</sup> and 2<sup>10^3</sup> and a^b c^</p>",
+    );
+  });
+
+  it("renders ~subscript~ as <sub> when enabled, next to ~~strikethrough~~", () => {
+    expect(renderHtml("H~2~O is ~~not~~ water~ ~\n", extended({ subscript: true }))).toBe(
+      "<p>H<sub>2</sub>O is <del>not</del> water~ ~</p>",
+    );
+  });
+
+  it("renders a [TOC] line as a nested list linking to the document's headings when enabled", () => {
+    const html = renderHtml(
+      "# Guide\n\n[TOC]\n\n## Set *up*\n\n### Install\n\n## Set up\n\n# Notes\n",
+      extended({ toc: true }),
+    );
+    expect(html).toBe(
+      [
+        '<h1 id="guide">Guide</h1>',
+        '<nav class="toc"><ul><li><a href="#guide">Guide</a><ul>' +
+          '<li><a href="#set-up">Set up</a><ul><li><a href="#install">Install</a></li></ul></li>' +
+          '<li><a href="#set-up-1">Set up</a></li></ul></li>' +
+          '<li><a href="#notes">Notes</a></li></ul></nav>',
+        '<h2 id="set-up">Set <em>up</em></h2>',
+        '<h3 id="install">Install</h3>',
+        '<h2 id="set-up-1">Set up</h2>',
+        '<h1 id="notes">Notes</h1>',
+      ].join("\n"),
+    );
+  });
+
+  it("recognises [TOC] only alone on its line, not inside a paragraph", () => {
+    expect(renderHtml("text\n[TOC]\n\n[TOC] here\n\n  [TOC]  \n", extended({ toc: true }))).toBe(
+      '<p>text\n[TOC]</p>\n<p>[TOC] here</p>\n<nav class="toc"></nav>',
+    );
+  });
+
+  it("enables each extended syntax on its own", () => {
+    expect(renderHtml("==a== ^b^ ~c~\n", extended({ superscript: true }))).toBe(
+      "<p>==a== <sup>b</sup> ~c~</p>",
+    );
   });
 });
 

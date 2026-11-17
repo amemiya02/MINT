@@ -20,6 +20,7 @@ import { createRecovery, type Recovery, type RecoveryChoice } from "./recovery/r
 import { FolderSearch } from "./search/FolderSearch.tsx";
 import { SettingsDialog } from "./settings/SettingsDialog.tsx";
 import { SettingsIssues } from "./settings/SettingsIssues.tsx";
+import { useDialect } from "./settings/useDialect.ts";
 import { useSettings, useSettingsStore } from "./settings/useSettings.ts";
 import { TabStoreContext, useTabStore, useTabsState } from "./tabs/context.ts";
 import { ExternalChangeNotice } from "./tabs/ExternalChangeNotice.tsx";
@@ -441,6 +442,7 @@ function TabPanel({
   }, [store, id, onEdited]);
   const currentPath = useRef(path);
   currentPath.current = path;
+  const dialect = useDialect();
   const settings = useSettingsStore();
   const [imageFailure, setImageFailure] = useState<ImageSaveFailure | null>(null);
   const [imageHost] = useState(() =>
@@ -480,6 +482,7 @@ function TabPanel({
           onOpenLink={onOpenLink}
           imageHost={imageHost}
           onWordCount={onWordCount}
+          dialect={dialect}
         />
       </div>
     </div>

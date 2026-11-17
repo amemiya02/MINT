@@ -64,6 +64,11 @@ export const settingsSchema = {
   vimMode: toggle({ label: "settings.vimMode", default: false }),
   /** The system spellchecker underlines misspelled words (not in code, math or URLs). */
   spellcheck: toggle({ label: "settings.spellcheck", default: true }),
+  // Extended syntax (ADR-0004), each off by default: the dialect's `extended` switches (see dialect.ts).
+  extendedToc: toggle({ label: "settings.extendedToc", default: false }),
+  extendedHighlight: toggle({ label: "settings.extendedHighlight", default: false }),
+  extendedSuperscript: toggle({ label: "settings.extendedSuperscript", default: false }),
+  extendedSubscript: toggle({ label: "settings.extendedSubscript", default: false }),
   /** Where pasted and dropped images are saved (the asset folder). */
   assetFolder: choice({
     label: "settings.assetFolder",

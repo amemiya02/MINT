@@ -1,8 +1,14 @@
 import { commonmarkLanguage, markdown } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
 import type { Extension } from "@codemirror/state";
-import { GFM, type MarkdownConfig, Subscript, Superscript } from "@lezer/markdown";
+import { GFM, type MarkdownConfig } from "@lezer/markdown";
 import type { Dialect, ExtendedSyntax } from "@mint/markdown";
+import {
+  highlightSyntax,
+  subscriptSyntax,
+  superscriptSyntax,
+  tocSyntax,
+} from "./extended-syntax.ts";
 import { footnoteSyntax } from "./footnote-syntax.ts";
 import { FrontMatter } from "./front-matter.ts";
 import { MathSyntax } from "./math-syntax.ts";
@@ -12,18 +18,17 @@ type Switches = Omit<Dialect, "extended"> & ExtendedSyntax;
 /**
  * Lezer parser extensions for each dialect switch. The table is exhaustive
  * over the dialect, so adding a switch to the dialect fails type checking
- * until the editor says how to parse it. Switches whose syntax the editor
- * does not parse yet map to no extensions.
+ * until the editor says how to parse it.
  */
 const parserExtensions: { readonly [K in keyof Switches]: readonly MarkdownConfig[] } = {
   gfm: [...GFM, footnoteSyntax],
   math: [MathSyntax],
   mermaid: [], // plain fenced code; rendered by the Mermaid block widget
   frontMatter: [FrontMatter],
-  toc: [],
-  highlight: [],
-  superscript: [Superscript],
-  subscript: [Subscript],
+  toc: [tocSyntax], // rendered by the table of contents block widget
+  highlight: [highlightSyntax],
+  superscript: [superscriptSyntax],
+  subscript: [subscriptSyntax],
 };
 
 /** The Lezer extensions a dialect enables. */

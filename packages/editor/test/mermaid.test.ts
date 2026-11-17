@@ -45,7 +45,8 @@ const flowchart = "```mermaid\ngraph TD\n  A --> B\n```";
 describe("mermaid block widget", () => {
   it("renders a mermaid code block as a diagram while the cursor is elsewhere", async () => {
     const { diagrams, shown } = open(`intro\n\n${flowchart}\n`);
-    expect(shown()).toBe("intro\n\n");
+    // The first editor of a run may finish parsing in the background.
+    await vi.waitFor(() => expect(shown()).toBe("intro\n\n"));
     await vi.waitFor(() =>
       expect(diagrams()[0]?.querySelector("svg")?.getAttribute("data-source")).toBe(
         "graph TD\n  A --> B",

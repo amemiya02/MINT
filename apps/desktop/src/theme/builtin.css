@@ -53,6 +53,7 @@
   --mint-code-fg: #3b4048;
   --mint-code-bg: #eff1f3;
   --mint-quote-fg: #5b616a;
+  --mint-highlight-bg: #fff0a6;
   --mint-marker: #8a9099;
   --mint-find-match: #ffe58a99;
   --mint-find-current: #ffb84d;
@@ -84,6 +85,7 @@
   --mint-code-fg: #d5d9de;
   --mint-code-bg: #2a2d31;
   --mint-quote-fg: #a3a9b1;
+  --mint-highlight-bg: #5c4f1a;
   --mint-marker: #6f757d;
   --mint-find-match: #8a6d0066;
   --mint-find-current: #b8741a;

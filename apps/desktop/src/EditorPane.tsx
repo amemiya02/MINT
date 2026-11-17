@@ -5,6 +5,7 @@ import {
   type MintEditor,
   type WordCount,
 } from "@mint/editor";
+import type { Dialect } from "@mint/markdown";
 import { useEffect, useRef } from "react";
 import type { ImageHost } from "./assets/image-host.ts";
 import { editorPhrases } from "./editor-phrases.ts";
@@ -25,6 +26,8 @@ interface EditorPaneProps {
   readonly imageHost: ImageHost;
   /** The document's word count, reported while the pane is active: on activation and shortly after edits. */
   readonly onWordCount: (count: WordCount) => void;
+  /** The syntax to recognise; a change applies to the open editor at once. */
+  readonly dialect: Dialect;
 }
 
 /** How long typing must pause before the word count is refreshed; counting reads the whole document. */
@@ -40,6 +43,7 @@ export function EditorPane({
   onOpenLink,
   imageHost,
   onWordCount,
+  dialect,
 }: EditorPaneProps) {
   const parent = useRef<HTMLDivElement>(null);
   const t = useT();
@@ -63,6 +67,7 @@ export function EditorPane({
     onWordCount,
     active,
     editorSettings,
+    dialect,
   });
   callbacks.current = {
     onReady,
@@ -73,6 +78,7 @@ export function EditorPane({
     onWordCount,
     active,
     editorSettings,
+    dialect,
   };
 
   useEffect(() => {
@@ -80,6 +86,7 @@ export function EditorPane({
     const instance = createEditor({
       parent: parent.current,
       text,
+      dialect: callbacks.current.dialect,
       phrases: phrases.current,
       settings: callbacks.current.editorSettings,
       host: {
@@ -116,6 +123,10 @@ export function EditorPane({
     editor.current.focus();
     callbacks.current.onWordCount(editor.current.getWordCount());
   }, [active]);
+
+  useEffect(() => {
+    editor.current?.setDialect(dialect);
+  }, [dialect]);
 
   const { focusMode, typewriterMode, vim, spellcheck } = editorSettings;
   useEffect(() => {

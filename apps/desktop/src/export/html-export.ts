@@ -1,7 +1,8 @@
 import { renderMermaid } from "@mint/editor";
-import { defaultDialect, type ExportImage, exportHtml } from "@mint/markdown";
+import { type ExportImage, exportHtml } from "@mint/markdown";
 import { createImageHost } from "../assets/image-host.ts";
 import type { Platform } from "../platform/platform.ts";
+import { dialectOf } from "../settings/dialect.ts";
 import type { Settings } from "../settings/schema.ts";
 import builtinThemeCss from "../theme/builtin.css?raw";
 import { readUserTheme, typographyCss } from "../theme/theme.ts";
@@ -45,7 +46,8 @@ export async function documentHtml(source: HtmlExportSource, choice: HtmlExportC
     () => {},
   );
   return exportHtml(source.text, {
-    dialect: defaultDialect,
+    // The dialect the editor uses, so an export reads the document as it was edited.
+    dialect: dialectOf(settings),
     title: source.title,
     themeCss: [builtinThemeCss, userTheme, typographyCss(settings)].join("\n"),
     appearance: choice.appearance,

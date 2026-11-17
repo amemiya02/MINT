@@ -173,7 +173,7 @@ class TableController {
   constructor(
     private readonly view: EditorView,
     table: Table,
-    private readonly toHtml: MarkdownToHtml,
+    readonly toHtml: MarkdownToHtml,
   ) {
     this.table = table;
     this.html = renderCells(table, toHtml);
@@ -553,7 +553,7 @@ class TableWidget extends WidgetType {
   }
 
   override eq(other: TableWidget): boolean {
-    return other.source === this.source;
+    return other.source === this.source && other.toHtml === this.toHtml;
   }
 
   toDOM(view: EditorView): HTMLElement {
@@ -562,7 +562,8 @@ class TableWidget extends WidgetType {
 
   override updateDOM(dom: HTMLElement): boolean {
     const controller = controllers.get(dom);
-    if (!controller) return false;
+    // Cells rendered with another dialect are drawn anew.
+    if (!controller || controller.toHtml !== this.toHtml) return false;
     controller.update(this.table);
     return true;
   }

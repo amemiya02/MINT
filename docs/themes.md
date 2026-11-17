@@ -82,6 +82,7 @@ MINT 会在 `<html>` 上设置 `data-appearance="light"` 或 `data-appearance="d
 | `--mint-code-fg` | 行内代码文字颜色 | `#3b4048` |
 | `--mint-code-bg` | 实时预览中行内代码的背景 | `#eff1f3` |
 | `--mint-quote-fg` | 引用块文字颜色 | `#5b616a` |
+| `--mint-highlight-bg` | 实时预览中 `==高亮==`（扩展语法）的背景 | `#fff0a6` |
 | `--mint-marker` | Markdown 标记（`#`、`**`、`>` 等）在显示时的颜色 | `#8a9099` |
 | `--mint-find-match` | 查找时所有匹配项的背景 | `#ffe58a99` |
 | `--mint-find-current` | 查找时当前匹配项的背景 | `#ffb84d` |
@@ -101,7 +102,8 @@ MINT 会在 `<html>` 上设置 `data-appearance="light"` 或 `data-appearance="d
 | `.cm-mint-md-link`，`.cm-mint-md-url` | 链接文字、链接地址 |
 | `.cm-mint-md-code` | 行内代码 |
 | `.cm-mint-md-mark`，`.cm-mint-md-rule` | Markdown 标记、分隔线 |
-| `.cm-mint-strong`，`.cm-mint-emphasis`，`.cm-mint-strikethrough`，`.cm-mint-superscript`，`.cm-mint-subscript` | 实时预览中渲染后的粗体、斜体、删除线、上标、下标 |
+| `.cm-mint-strong`，`.cm-mint-emphasis`，`.cm-mint-strikethrough`，`.cm-mint-superscript`，`.cm-mint-subscript`，`.cm-mint-highlight` | 实时预览中渲染后的粗体、斜体、删除线、上标、下标、高亮 |
+| `.cm-mint-toc`，`.cm-mint-toc-entry` | 实时预览中 `[TOC]` 渲染成的目录及其中的每一项 |
 | `.cm-mint-code`，`.cm-mint-link` | 实时预览中渲染后的行内代码、链接文字 |
 | `.cm-mint-marker` | 实时预览中因片段显露而可见的 Markdown 标记 |
 | `.mint-find-match`，`.mint-find-match-current` | 查找匹配项、当前匹配项 |
