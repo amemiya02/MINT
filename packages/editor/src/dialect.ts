@@ -2,6 +2,7 @@ import { commonmarkLanguage, markdown } from "@codemirror/lang-markdown";
 import type { Extension } from "@codemirror/state";
 import { GFM, type MarkdownConfig, Subscript, Superscript } from "@lezer/markdown";
 import type { Dialect, ExtendedSyntax } from "@mint/markdown";
+import { FrontMatter } from "./front-matter.ts";
 
 type Switches = Omit<Dialect, "extended"> & ExtendedSyntax;
 
@@ -15,7 +16,7 @@ const parserExtensions: { readonly [K in keyof Switches]: readonly MarkdownConfi
   gfm: GFM, // footnotes: added with the block-structure renderers
   math: [], // added with the math block widget
   mermaid: [], // plain fenced code; rendered by the Mermaid block widget
-  frontMatter: [], // added with the front matter block widget
+  frontMatter: [FrontMatter],
   toc: [],
   highlight: [],
   superscript: [Superscript],

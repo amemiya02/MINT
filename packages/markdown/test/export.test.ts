@@ -30,3 +30,23 @@ describe("renderHtml", () => {
     expect(renderHtml("~~gone~~\n", { ...defaultDialect, gfm: false })).toBe("<p>~~gone~~</p>");
   });
 });
+
+describe("front matter", () => {
+  const post = "---\ntitle: Hello\ntags: [a, b]\n---\n\n# Body\n";
+
+  it("leaves a leading YAML front matter block out of the HTML", () => {
+    expect(renderHtml(post, defaultDialect)).toBe("<h1>Body</h1>");
+  });
+
+  it("recognises front matter only at the very start of the document", () => {
+    expect(renderHtml(`Intro\n\n${post}`, defaultDialect)).toBe(
+      "<p>Intro</p>\n<hr>\n<h2>title: Hello\ntags: [a, b]</h2>\n<h1>Body</h1>",
+    );
+  });
+
+  it("treats the block as a rule and a heading when the dialect disables front matter", () => {
+    expect(renderHtml(post, { ...defaultDialect, frontMatter: false })).toBe(
+      "<hr>\n<h2>title: Hello\ntags: [a, b]</h2>\n<h1>Body</h1>",
+    );
+  });
+});

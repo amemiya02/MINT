@@ -13,6 +13,7 @@ import {
   findStatus,
 } from "./find.ts";
 import { type LinkTarget, linkOpening } from "./links.ts";
+import { frontMatterPreview } from "./live-preview/front-matter.ts";
 import { inlineSpans } from "./live-preview/inline-spans.ts";
 import { livePreview, previewRenderer } from "./live-preview/preview.ts";
 
@@ -104,6 +105,7 @@ export function createEditor(options: EditorOptions): MintEditor {
         markdownSupport(dialect),
         syntaxHighlighting(defaultHighlightStyle),
         previewRenderer.of(inlineSpans),
+        frontMatterPreview,
         preview.of(modeExtension()),
         host.openLink ? linkOpening((link) => host.openLink?.(link)) : [],
         EditorView.lineWrapping,
