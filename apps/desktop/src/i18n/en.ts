@@ -126,6 +126,13 @@ export const en = {
   "settings.fontSize": "Font size (px)",
   "settings.lineHeight": "Line height",
   "settings.contentWidth": "Content width (px)",
+  "settings.assetFolder": "Asset folder",
+  "settings.assetFolder.document": "Same folder as the document",
+  "settings.assetFolder.assets": "assets/",
+  "settings.assetFolder.documentName": "<document name>.assets/",
+  "settings.assetFolder.custom": "Custom folder",
+  "settings.assetFolderPath": "Custom asset folder",
+  "settings.assetFolderPath.placeholder": "Relative to the document, or absolute",
 
   "theme.issue.missing":
     "The theme “{name}” was not found in {path}. The built-in theme is in use.",
@@ -171,6 +178,8 @@ export const en = {
   "error.create": "Could not create {name}: {reason}",
   "error.rename": "Could not rename to {name}: {reason}",
   "error.trash": "Could not move {name} to the trash: {reason}",
+  "error.saveImage": "Could not save the image {name} in {folder}: {reason}",
+  "error.dismiss": "Dismiss",
 
   "tabs.label": "Open documents",
   "tabs.close": "Close {name}",

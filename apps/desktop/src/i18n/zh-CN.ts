@@ -123,6 +123,13 @@ export const zhCN: Messages = {
   "settings.fontSize": "字号（px）",
   "settings.lineHeight": "行高",
   "settings.contentWidth": "内容宽度（px）",
+  "settings.assetFolder": "资源目录",
+  "settings.assetFolder.document": "与文档同目录",
+  "settings.assetFolder.assets": "assets/",
+  "settings.assetFolder.documentName": "<文档名>.assets/",
+  "settings.assetFolder.custom": "自定义目录",
+  "settings.assetFolderPath": "自定义资源目录",
+  "settings.assetFolderPath.placeholder": "相对于文档的路径，或绝对路径",
 
   "theme.issue.missing": "在 {path} 中找不到主题“{name}”，正在使用内置主题。",
   "theme.issue.unreadable": "无法读取主题“{name}”（{reason}），正在使用内置主题。",
@@ -166,6 +173,8 @@ export const zhCN: Messages = {
   "error.create": "无法创建 {name}：{reason}",
   "error.rename": "无法重命名为 {name}：{reason}",
   "error.trash": "无法将 {name} 移到废纸篓：{reason}",
+  "error.saveImage": "无法将图片 {name} 保存到 {folder}：{reason}",
+  "error.dismiss": "关闭提示",
 
   "tabs.label": "已打开的文档",
   "tabs.close": "关闭 {name}",
