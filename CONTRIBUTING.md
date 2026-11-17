@@ -32,6 +32,7 @@ apps/desktop/            Tauri app
     platform/            Platform interface + Tauri and in-memory implementations
     i18n/                UI strings (en is the reference, zh-CN must match it)
     workspace/           Folder sidebar: file tree, recent list; opens documents via the tab store
+    quick-open/          Quick open (⌘P): fuzzy file-name search over the folder's documents
     tabs/                Tab store of one window; show a document with useTabStore().openDocument(path)
     commands.ts          Command registry (menus and shortcuts derive from it)
     settings/            Settings schema, store synced with settings.json, settings window

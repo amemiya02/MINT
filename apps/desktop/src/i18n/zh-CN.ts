@@ -19,6 +19,7 @@ export const zhCN: Messages = {
   "command.file.open": "打开…",
   "command.file.save": "保存",
   "command.file.openFolder": "打开文件夹…",
+  "command.file.quickOpen": "快速打开…",
   "command.view.toggleSidebar": "显示/隐藏侧边栏",
   "command.tab.close": "关闭标签页",
   "command.tab.next": "显示下一个标签页",
@@ -55,6 +56,13 @@ export const zhCN: Messages = {
   "welcome.open": "打开文档…",
   "welcome.openFolder": "打开文件夹…",
   "welcome.recent": "最近打开",
+
+  "quickOpen.title": "快速打开",
+  "quickOpen.placeholder": "按文件名搜索文档",
+  "quickOpen.placeholderRecent": "搜索最近打开的文档",
+  "quickOpen.recent": "最近打开",
+  "quickOpen.noMatches": "没有匹配的文档",
+  "quickOpen.empty": "没有可打开的文档",
 
   "sidebar.label": "侧边栏",
   "sidebar.hide": "隐藏侧边栏",
