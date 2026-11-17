@@ -5,7 +5,13 @@ import { EditorSelection, EditorState } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { GFM } from "@lezer/markdown";
 import { type Dialect, defaultDialect } from "@mint/markdown";
-import { fileText, fromFileOffset, parseFileText, toFileOffset } from "./file-text.ts";
+import {
+  fileText,
+  fromFileOffset,
+  parseFileText,
+  replaceFileText,
+  toFileOffset,
+} from "./file-text.ts";
 
 /**
  * Capabilities the editor core needs from whatever hosts it (desktop shell,
@@ -45,6 +51,11 @@ export type EditorEvent = { readonly type: "change" } | { readonly type: "select
 export interface MintEditor {
   /** The full file text, ready to be written to disk byte for byte. */
   getText(): string;
+  /**
+   * Replace the whole text with new file text, e.g. the document reloaded from
+   * disk. The selection stays next to the text around it; undo restores the old text.
+   */
+  replaceText(text: string): void;
   getSelection(): TextSelection;
   setSelection(selection: { anchor: number; head?: number }): void;
   /** Run a named command. Returns whether it did anything. */
@@ -97,6 +108,9 @@ export function createEditor(options: EditorOptions): MintEditor {
 
   return {
     getText: () => fileText(view.state),
+    replaceText(text) {
+      view.dispatch(replaceFileText(view.state, text));
+    },
     getSelection() {
       const { anchor, head } = view.state.selection.main;
       return { anchor: toFileOffset(view.state, anchor), head: toFileOffset(view.state, head) };

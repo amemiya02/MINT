@@ -119,4 +119,24 @@ describe("source fidelity", () => {
       }),
     );
   });
+
+  it("reloading takes the file from disk exactly, and undo brings the old text back", () => {
+    fc.assert(
+      fc.property(fileText, fileText, edit, (text, reloaded, { a, b, text: inserted }) => {
+        const editor = open(text);
+        const length = text.length;
+        editor.setSelection({ anchor: Math.round(a * length), head: Math.round(b * length) });
+        editor.execute("insertText", inserted);
+        const edited = editor.getText();
+
+        editor.replaceText(reloaded);
+        expect(editor.getText()).toBe(reloaded);
+
+        editor.execute("undo");
+        expect(editor.getText()).toBe(edited);
+        editor.execute("redo");
+        expect(editor.getText()).toBe(reloaded);
+      }),
+    );
+  });
 });
