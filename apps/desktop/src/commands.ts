@@ -82,6 +82,7 @@ export const commands = [
     group: "save",
   },
   { id: "file.exportHtml", title: "command.file.exportHtml", menu: "file", group: "export" },
+  { id: "file.exportPdf", title: "command.file.exportPdf", menu: "file", group: "export" },
 
   { id: "edit.find", title: "command.edit.find", accelerator: "CmdOrCtrl+F", menu: "edit" },
   // Typora's replace shortcut: ⌘⌥F on macOS, Ctrl+H elsewhere (Ctrl+Alt is AltGr on Windows).

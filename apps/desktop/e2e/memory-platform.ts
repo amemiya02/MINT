@@ -157,3 +157,10 @@ export function savedDialogs(page: Page): Promise<string[]> {
     ...(window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.saveDialogs,
   ]);
 }
+
+/** The documents sent to the printer so far, in order. */
+export function printedDocuments(page: Page): Promise<{ html: string; title: string }[]> {
+  return page.evaluate(() => [
+    ...(window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.printed,
+  ]);
+}

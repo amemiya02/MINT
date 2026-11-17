@@ -87,9 +87,22 @@ pre.mint-mermaid-error {
   color: var(--mint-error-fg, #a1260d);
   background: var(--mint-error-bg, #fdecea);
 }
+@page { margin: 16mm 14mm; }
 @media print {
+  /* Print the theme's colours (a dark theme's background too), not the printer's defaults. */
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .mint-document { max-width: none; padding: 0; }
-  pre, blockquote, table, figure, img { break-inside: avoid; }
-  h1, h2, h3, h4, h5, h6 { break-after: avoid; }
+  /* Keep code blocks, images, diagrams and display formulas whole on a page where they fit. */
+  pre, blockquote, figure, img, svg, tr, .katex-display {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  h1, h2, h3, h4, h5, h6 { break-after: avoid; page-break-after: avoid; }
+  p, li { orphans: 3; widows: 3; }
+  /* Paper does not scroll: wrap long code lines and show wide content whole. */
+  pre { white-space: pre-wrap; overflow: visible; }
+  table { display: table; overflow: visible; }
+  .katex-display { overflow: visible; }
+  img, svg { max-width: 100%; }
 }
 `.trim();
