@@ -9,6 +9,7 @@ export const zhCN: Messages = {
   "menu.file": "文件",
   "menu.edit": "编辑",
   "menu.view": "显示",
+  "menu.window": "窗口",
   "menu.quit": "退出 MINT",
   "menu.cut": "剪切",
   "menu.copy": "拷贝",
@@ -19,6 +20,10 @@ export const zhCN: Messages = {
   "command.file.save": "保存",
   "command.file.openFolder": "打开文件夹…",
   "command.view.toggleSidebar": "显示/隐藏侧边栏",
+  "command.tab.close": "关闭标签页",
+  "command.tab.next": "显示下一个标签页",
+  "command.tab.previous": "显示上一个标签页",
+  "command.window.new": "新建窗口",
 
   "dialog.open.title": "打开文档",
   "dialog.filter.markdown": "Markdown",
@@ -50,4 +55,13 @@ export const zhCN: Messages = {
   "error.create": "无法创建 {name}：{reason}",
   "error.rename": "无法重命名为 {name}：{reason}",
   "error.trash": "无法将 {name} 移到废纸篓：{reason}",
+
+  "tabs.label": "已打开的文档",
+  "tabs.close": "关闭 {name}",
+
+  "unsaved.title": "未保存的改动",
+  "unsaved.message": "是否保存对 {name} 的改动？如果不保存，改动将会丢失。",
+  "unsaved.save": "保存",
+  "unsaved.discard": "不保存",
+  "unsaved.cancel": "取消",
 };

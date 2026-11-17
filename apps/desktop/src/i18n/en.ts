@@ -8,6 +8,7 @@ export const en = {
   "menu.file": "File",
   "menu.edit": "Edit",
   "menu.view": "View",
+  "menu.window": "Window",
   "menu.quit": "Quit MINT",
   "menu.cut": "Cut",
   "menu.copy": "Copy",
@@ -18,6 +19,10 @@ export const en = {
   "command.file.save": "Save",
   "command.file.openFolder": "Open Folder…",
   "command.view.toggleSidebar": "Toggle Sidebar",
+  "command.tab.close": "Close Tab",
+  "command.tab.next": "Show Next Tab",
+  "command.tab.previous": "Show Previous Tab",
+  "command.window.new": "New Window",
 
   "dialog.open.title": "Open Document",
   "dialog.filter.markdown": "Markdown",
@@ -49,4 +54,14 @@ export const en = {
   "error.create": "Could not create {name}: {reason}",
   "error.rename": "Could not rename to {name}: {reason}",
   "error.trash": "Could not move {name} to the trash: {reason}",
+
+  "tabs.label": "Open documents",
+  "tabs.close": "Close {name}",
+
+  "unsaved.title": "Unsaved Changes",
+  "unsaved.message":
+    "Do you want to save the changes you made to {name}? Your changes will be lost if you don't save them.",
+  "unsaved.save": "Save",
+  "unsaved.discard": "Don't Save",
+  "unsaved.cancel": "Cancel",
 } as const;

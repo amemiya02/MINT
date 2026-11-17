@@ -50,7 +50,7 @@ test("opening a folder shows its file tree, highlighting Markdown documents", as
   await expect(editor(page)).toContainText("# Todo");
 });
 
-test("switching documents keeps the edits made to the previous one", async ({ page }) => {
+test("documents opened from the tree open in tabs and keep their edits", async ({ page }) => {
   await openFolder(page);
   await item(page, "todo.md").click();
   const text = editor(page);
@@ -60,8 +60,13 @@ test("switching documents keeps the edits made to the previous one", async ({ pa
 
   await item(page, "ideas.markdown").click();
   await expect(text).toContainText("# Ideas");
+  await expect(page.getByRole("tab")).toHaveCount(2);
 
-  expect(await readFile(page, "/notes/todo.md")).toBe("# Todo\n- milk");
+  // Choosing an open document in the tree shows its existing tab.
+  await item(page, "todo.md").click();
+  await expect(text).toContainText("- milk");
+  await expect(page.getByRole("tab")).toHaveCount(2);
+  await expect(page.getByRole("tab", { name: "todo.md" })).toHaveAttribute("aria-selected", "true");
 });
 
 test("create, rename and delete documents and folders from the sidebar", async ({ page }) => {

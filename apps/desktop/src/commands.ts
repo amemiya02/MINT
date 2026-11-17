@@ -6,7 +6,15 @@ import type { MenuSpec } from "./platform/platform.ts";
  * an i18n title and an optional default shortcut; the native menu (and later
  * the command palette and shortcut overrides) are derived from this list.
  */
-export type CommandId = "file.open" | "file.openFolder" | "file.save" | "view.toggleSidebar";
+export type CommandId =
+  | "file.open"
+  | "file.openFolder"
+  | "file.save"
+  | "tab.close"
+  | "tab.next"
+  | "tab.previous"
+  | "view.toggleSidebar"
+  | "window.new";
 
 export interface Command {
   readonly id: CommandId;
@@ -24,6 +32,10 @@ export const commands: readonly Command[] = [
     title: "command.view.toggleSidebar",
     accelerator: "CmdOrCtrl+Shift+L",
   },
+  { id: "tab.close", title: "command.tab.close", accelerator: "CmdOrCtrl+W" },
+  { id: "tab.next", title: "command.tab.next", accelerator: "Ctrl+Tab" },
+  { id: "tab.previous", title: "command.tab.previous", accelerator: "Ctrl+Shift+Tab" },
+  { id: "window.new", title: "command.window.new", accelerator: "CmdOrCtrl+Shift+N" },
 ];
 
 export function buildMenu(t: Translate, run: (id: CommandId) => void): MenuSpec[] {
@@ -42,7 +54,13 @@ export function buildMenu(t: Translate, run: (id: CommandId) => void): MenuSpec[
     { label: t("menu.app"), items: [{ kind: "native", action: "quit", label: t("menu.quit") }] },
     {
       label: t("menu.file"),
-      items: [item("file.open"), item("file.openFolder"), { kind: "separator" }, item("file.save")],
+      items: [
+        item("file.open"),
+        item("file.openFolder"),
+        { kind: "separator" },
+        item("file.save"),
+        item("tab.close"),
+      ],
     },
     {
       label: t("menu.edit"),
@@ -55,5 +73,9 @@ export function buildMenu(t: Translate, run: (id: CommandId) => void): MenuSpec[
       ],
     },
     { label: t("menu.view"), items: [item("view.toggleSidebar")] },
+    {
+      label: t("menu.window"),
+      items: [item("window.new"), { kind: "separator" }, item("tab.next"), item("tab.previous")],
+    },
   ];
 }

@@ -31,7 +31,8 @@ apps/desktop/            Tauri app
   src/                   React shell
     platform/            Platform interface + Tauri and in-memory implementations
     i18n/                UI strings (en is the reference, zh-CN must match it)
-    workspace/           Folder sidebar: file tree, recent list (no document/tab state)
+    workspace/           Folder sidebar: file tree, recent list; opens documents via the tab store
+    tabs/                Tab store of one window; show a document with useTabStore().openDocument(path)
     commands.ts          Command registry (menus and shortcuts derive from it)
   src-tauri/             Rust backend (kept thin, see ADR-0005)
   e2e/                   Playwright tests

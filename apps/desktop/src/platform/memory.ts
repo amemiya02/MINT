@@ -11,6 +11,8 @@ export interface MemoryPlatformOptions {
   readonly openFolderDialogResults?: readonly (string | null)[];
   /** Initial contents of the app data directory, keyed by name. */
   readonly appData?: Readonly<Record<string, string>>;
+  /** Answers the question dialog gives, in order; once used up it answers `cancel`. */
+  readonly questionDialogResults?: readonly ("yes" | "no" | "cancel")[];
   readonly locale?: string;
 }
 
@@ -29,6 +31,10 @@ export interface MemoryPlatform extends Platform {
   externalWrite(path: string, text: string): void;
   /** Delete a file or directory as another program would (watchers are notified). */
   externalRemove(path: string): void;
+  /** Messages of the question dialogs shown so far. */
+  readonly questions: readonly string[];
+  /** Whether this window has closed. */
+  readonly closed: boolean;
   /** Activate a menu item by id, as a click in a native menu would. */
   runMenuItem(id: string): void;
 }
@@ -41,8 +47,12 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
   const dialogResults = [...(options.openDialogResults ?? [])];
   const folderDialogResults = [...(options.openFolderDialogResults ?? [])];
   const watchers = new Set<{ root: string; onChange: (paths: readonly string[]) => void }>();
+  const questionResults = [...(options.questionDialogResults ?? [])];
+  const questions: string[] = [];
   let commands: Extract<MenuItemSpec, { kind: "command" }>[] = [];
   let windowTitle = "";
+  let closeHandler: (() => Promise<boolean>) | null = null;
+  let closed = false;
 
   // Without a native menu, accelerators are handled in the page.
   window.addEventListener("keydown", (event) => {
@@ -95,6 +105,12 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       requireParent(path);
       files.set(path, text);
       notify(path);
+    },
+    get questions() {
+      return questions;
+    },
+    get closed() {
+      return closed;
     },
     async showOpenDialog() {
       return dialogResults.shift() ?? null;
@@ -167,6 +183,25 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     },
     async writeAppData(name, text) {
       appData.set(name, text);
+    },
+    async showQuestionDialog({ message }) {
+      questions.push(message);
+      return questionResults.shift() ?? "cancel";
+    },
+    async openWindow() {
+      // A browser window running the same shell, with its own in-memory platform.
+      window.open(location.href, "_blank");
+    },
+    async closeWindow() {
+      if (closeHandler && !(await closeHandler())) return;
+      closed = true;
+      window.close();
+    },
+    onCloseRequested(handler) {
+      closeHandler = handler;
+      return () => {
+        if (closeHandler === handler) closeHandler = null;
+      };
     },
     async setWindowTitle(title) {
       windowTitle = title;

@@ -54,11 +54,33 @@ export interface Platform {
 
   /** Write a small named file to MINT's app data directory, atomically. */
   writeAppData(name: string, text: string): Promise<void>;
+  /** Ask a three-way question (e.g. save / don't save / cancel). Dismissing the dialog answers `cancel`. */
+  showQuestionDialog(options: QuestionDialogOptions): Promise<"yes" | "no" | "cancel">;
 
   setWindowTitle(title: string): Promise<void>;
 
-  /** Install the application menu. Item accelerators are active shortcuts. */
+  /** Install the application menu for this window. Item accelerators are active shortcuts. */
   setMenu(menu: readonly MenuSpec[]): Promise<void>;
+
+  /** Open a new, independent window of the shell. */
+  openWindow(): Promise<void>;
+
+  /** Ask to close this window; it goes through the close-request handler like a click on its close button. */
+  closeWindow(): Promise<void>;
+
+  /**
+   * Intercept requests to close this window. The window closes only if the
+   * handler resolves to `true`. Returns an unsubscribe function.
+   */
+  onCloseRequested(handler: () => Promise<boolean>): () => void;
+}
+
+export interface QuestionDialogOptions {
+  readonly title: string;
+  readonly message: string;
+  readonly yes: string;
+  readonly no: string;
+  readonly cancel: string;
 }
 
 export interface DirectoryEntry {

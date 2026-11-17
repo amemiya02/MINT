@@ -229,10 +229,7 @@ export function Sidebar(props: SidebarProps) {
       className="flex h-full w-60 shrink-0 flex-col border-r border-(--mint-border) bg-(--mint-sidebar-bg)"
     >
       <header className="flex items-center gap-1 border-b border-(--mint-border) px-2 py-1.5">
-        <span
-          className="flex-1 truncate text-xs font-semibold"
-          title={root}
-        >
+        <span className="flex-1 truncate text-xs font-semibold" title={root}>
           {baseName(root)}
         </span>
         <IconButton label={t("tree.newDocument")} onClick={() => void startCreate("file", root)}>
