@@ -119,7 +119,7 @@ const mathTheme = EditorView.baseTheme({
   [`.${mathClass}-block`]: { padding: "0.5em 0", textAlign: "center", overflowX: "auto" },
   [`.${mathClass}-block .katex-display`]: { margin: "0" },
   [`.${mathClass}-error`]: {
-    color: "var(--mint-error, #c0392b)",
+    color: "var(--mint-error-fg)",
     fontFamily: "var(--mint-font-code, monospace)",
     fontSize: "0.9em",
   },
