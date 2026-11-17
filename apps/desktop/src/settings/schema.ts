@@ -26,6 +26,7 @@ export const settingsSchema = {
     label: "settings.autosave",
     default: true,
   }),
+  checkForUpdates: toggle({ label: "settings.checkForUpdates", default: true }),
 } as const satisfies Record<string, SettingDefinition>;
 
 export type SettingKey = keyof typeof settingsSchema;

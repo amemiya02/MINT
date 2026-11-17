@@ -19,7 +19,8 @@ export type CommandId =
   | "view.toggleSidebar"
   | "window.new"
   | "app.settings"
-  | "view.toggleSourceMode";
+  | "view.toggleSourceMode"
+  | "app.checkForUpdates";
 
 export interface Command {
   readonly id: CommandId;
@@ -57,6 +58,7 @@ export const commands: readonly Command[] = [
     title: "command.view.toggleSourceMode",
     accelerator: "CmdOrCtrl+/",
   },
+  { id: "app.checkForUpdates", title: "command.app.checkForUpdates" },
 ];
 
 export function buildMenu(t: Translate, run: (id: CommandId) => void): MenuSpec[] {
@@ -75,6 +77,8 @@ export function buildMenu(t: Translate, run: (id: CommandId) => void): MenuSpec[
     {
       label: t("menu.app"),
       items: [
+        item("app.checkForUpdates"),
+        { kind: "separator" },
         item("app.settings"),
         { kind: "separator" },
         { kind: "native", action: "quit", label: t("menu.quit") },

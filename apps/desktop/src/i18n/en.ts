@@ -45,6 +45,17 @@ export const en = {
   "find.invalid": "Invalid regular expression",
 
   "command.app.settings": "Settings…",
+  "command.app.checkForUpdates": "Check for Updates…",
+
+  "update.available": "MINT {version} is available.",
+  "update.install": "Install and Restart",
+  "update.later": "Later",
+  "update.installing": "Installing MINT {version}… MINT will restart when it is done.",
+  "update.upToDate": "MINT is up to date.",
+  "update.unavailable":
+    "Automatic updates are not available for this copy of MINT. Get new versions from the release page or your package manager.",
+  "update.checkFailed": "Could not check for updates: {reason}",
+  "update.installFailed": "Could not install MINT {version}: {reason}",
 
   "settings.title": "Settings",
   "settings.close": "Close",
@@ -67,6 +78,7 @@ export const en = {
   "settings.language.zh-CN": "简体中文",
   "settings.language.en": "English",
   "settings.autosave": "Save automatically",
+  "settings.checkForUpdates": "Check for updates at startup",
 
   "dialog.open.title": "Open Document",
   "dialog.filter.markdown": "Markdown",

@@ -107,3 +107,18 @@ export function files(page: Page): Promise<Record<string, string>> {
     Object.fromEntries((window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.files),
   );
 }
+
+/** Activate a native menu item by its command id, as a click in the menu bar would. */
+export async function runMenuItem(page: Page, id: string): Promise<void> {
+  await page.evaluate(
+    (menuId) => (window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.runMenuItem(menuId),
+    id,
+  );
+}
+
+/** Versions MINT has installed (and restarted into) so far. */
+export function updatesInstalled(page: Page): Promise<string[]> {
+  return page.evaluate(() => [
+    ...(window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.updatesInstalled,
+  ]);
+}

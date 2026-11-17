@@ -16,6 +16,7 @@ import { ExternalChangeNotice } from "./tabs/ExternalChangeNotice.tsx";
 import { baseName, resolveFrom } from "./tabs/paths.ts";
 import { TabBar } from "./tabs/TabBar.tsx";
 import { createTabStore, type Tab, type TabError, type TabStore } from "./tabs/tab-store.ts";
+import { UpdateNotice, useUpdates } from "./updates/updates.tsx";
 import { documentExtensions } from "./workspace/paths.ts";
 import { type RecentList, useRecent } from "./workspace/recent.ts";
 import { Sidebar } from "./workspace/Sidebar.tsx";
@@ -97,6 +98,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [quickOpenVisible, setQuickOpenVisible] = useState(false);
   const active = tabs.find((tab) => tab.id === activeId) ?? null;
+  const updates = useUpdates(platform);
   const [folder, setFolder] = useState<string | null>(null);
   const [sidebarVisible, setSidebarVisible] = useState(true);
   /** Errors from folder actions; document errors live in the tab store. */
@@ -170,6 +172,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     "view.toggleSourceMode": () => {
       if (activeId !== null) store.editor(activeId)?.execute("toggleSourceMode");
     },
+    "app.checkForUpdates": () => updates.check(),
   };
 
   useEffect(() => {
@@ -198,6 +201,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
 
   return (
     <div className="flex h-full flex-col bg-(--mint-bg) text-(--mint-fg)">
+      <UpdateNotice updates={updates} />
       <SettingsIssues />
       {(folderError || error) && (
         <div

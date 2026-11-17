@@ -7,6 +7,7 @@ mod folder;
 mod fs;
 mod recovery;
 mod settings;
+mod updates;
 mod walk;
 
 use std::collections::HashMap;
@@ -75,6 +76,15 @@ fn delete_recovery_snapshot(
     id: String,
 ) -> Result<(), String> {
     area.remove(&id).map_err(|e| e.to_string())
+}
+
+/// Whether this copy of MINT can check for and install new versions itself.
+#[tauri::command]
+fn updates_supported(app: tauri::AppHandle) -> bool {
+    updates::supported(
+        app.config().plugins.0.get("updater"),
+        updates::Build::current(),
+    )
 }
 
 /// Event sent to every window with the reloaded `SettingsFile` whenever the file changes on disk.
@@ -191,6 +201,12 @@ pub fn run() {
         .manage(Watchers::default())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            #[cfg(desktop)]
+            {
+                app.handle()
+                    .plugin(tauri_plugin_updater::Builder::new().build())?;
+                app.handle().plugin(tauri_plugin_process::init())?;
+            }
             let path = app.path().app_config_dir()?.join(settings::FILE_NAME);
             let handle = app.handle().clone();
             let watcher = settings::watch(path.clone(), move |file| {
@@ -212,6 +228,7 @@ pub fn run() {
             settings_path,
             read_settings,
             write_settings,
+            updates_supported,
             read_directory,
             create_file,
             create_directory,

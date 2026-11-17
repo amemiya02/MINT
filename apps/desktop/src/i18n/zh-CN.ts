@@ -46,6 +46,16 @@ export const zhCN: Messages = {
   "find.invalid": "正则表达式无效",
 
   "command.app.settings": "设置…",
+  "command.app.checkForUpdates": "检查更新…",
+
+  "update.available": "MINT {version} 已发布。",
+  "update.install": "安装并重启",
+  "update.later": "稍后",
+  "update.installing": "正在安装 MINT {version}…完成后 MINT 会自动重启。",
+  "update.upToDate": "MINT 已是最新版本。",
+  "update.unavailable": "此 MINT 副本不支持自动更新。请从发布页面或包管理器获取新版本。",
+  "update.checkFailed": "无法检查更新：{reason}",
+  "update.installFailed": "无法安装 MINT {version}：{reason}",
 
   "settings.title": "设置",
   "settings.close": "关闭",
@@ -66,6 +76,7 @@ export const zhCN: Messages = {
   "settings.language.zh-CN": "简体中文",
   "settings.language.en": "English",
   "settings.autosave": "自动保存",
+  "settings.checkForUpdates": "启动时检查更新",
 
   "dialog.open.title": "打开文档",
   "dialog.filter.markdown": "Markdown",
