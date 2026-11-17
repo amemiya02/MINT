@@ -71,6 +71,9 @@ export const zhCN: Messages = {
   "find.invalid": "正则表达式无效",
 
   "command.edit.searchFolder": "在工作文件夹中搜索…",
+  "command.edit.pastePlainText": "粘贴为纯文本",
+  "command.edit.toggleSpellcheck": "切换拼写检查",
+  "command.view.toggleVimMode": "切换 Vim 键位",
   "search.label": "在工作文件夹中搜索",
   "search.close": "关闭搜索",
   "search.searching": "正在搜索…",
@@ -133,6 +136,8 @@ export const zhCN: Messages = {
   "settings.contentWidth": "内容宽度（px）",
   "settings.focusMode": "专注模式",
   "settings.typewriterMode": "打字机模式",
+  "settings.vimMode": "Vim 键位",
+  "settings.spellcheck": "拼写检查",
   "settings.assetFolder": "资源目录",
   "settings.assetFolder.document": "与文档同目录",
   "settings.assetFolder.assets": "assets/",

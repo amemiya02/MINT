@@ -35,6 +35,8 @@ import { livePreview, previewRenderer } from "./live-preview/preview.ts";
 import { quotesAndRules } from "./live-preview/quotes-and-rules.ts";
 import { markupContinuation } from "./markup-continuation.ts";
 import { type OutlineHeading, outline, sameOutline } from "./outline.ts";
+import { editorPreferences } from "./preferences.ts";
+import { pasteText, richPaste } from "./rich-paste.ts";
 import { type TableCommands, tableCommands } from "./table/commands.ts";
 import {
   focusTableCell,
@@ -83,9 +85,18 @@ export interface EditorSettings {
   readonly focusMode: boolean;
   /** Typewriter mode: the line with the cursor stays at the vertical middle of the editor. */
   readonly typewriterMode: boolean;
+  /** Vim key bindings: normal, insert and visual modes, and `:` commands. */
+  readonly vim: boolean;
+  /** The system spellchecker underlines misspelled words in the text (not in code, math or URLs). */
+  readonly spellcheck: boolean;
 }
 
-const defaultSettings: EditorSettings = { focusMode: false, typewriterMode: false };
+const defaultSettings: EditorSettings = {
+  focusMode: false,
+  typewriterMode: false,
+  vim: false,
+  spellcheck: false,
+};
 
 export interface EditorOptions {
   /** Element the editor mounts into. */
@@ -117,6 +128,11 @@ export interface EditorCommands extends FindCommands, FormattingCommands, TableC
   redo: [];
   /** Replace the selection with text, as if typed. Line breaks take the document's line ending. */
   insertText: [text: string];
+  /**
+   * Paste text exactly as given, never read as rich text (the host reads it
+   * from the clipboard). One undo step; line breaks take the document's line ending.
+   */
+  pastePlainText: [text: string];
   /** Switch between live preview and source mode. Text and selection are unchanged. */
   toggleSourceMode: [];
   /** Set the language of the fenced code block at the cursor; only its info string changes. */
@@ -196,6 +212,7 @@ export function createEditor(options: EditorOptions): MintEditor {
   const typewriter = new Compartment();
   const focusExtension = () => (settings.focusMode ? focusMode() : []);
   const typewriterExtension = () => (settings.typewriterMode ? typewriterMode() : []);
+  const preferences = editorPreferences(settings);
   const modeExtension = () => (mode === "livePreview" ? livePreview() : []);
 
   const view = new EditorView({
@@ -205,6 +222,7 @@ export function createEditor(options: EditorOptions): MintEditor {
       extensions: [
         parsed.extension,
         options.phrases ? EditorState.phrases.of(options.phrases) : [],
+        preferences.extension,
         history(),
         findReplace(),
         keymap.of([
@@ -230,6 +248,7 @@ export function createEditor(options: EditorOptions): MintEditor {
           ? imageUrlResolver.of((path) => host.resolveImageUrl?.(path) ?? null)
           : [],
         host.saveImage ? imageFileInsertion(host.saveImage.bind(host)) : [],
+        richPaste(dialect),
         frontMatterPreview,
         preview.of(modeExtension()),
         focus.of(focusExtension()),
@@ -272,6 +291,10 @@ export function createEditor(options: EditorOptions): MintEditor {
       });
       return true;
     },
+    pastePlainText: (text) => {
+      pasteText(view, text);
+      return true;
+    },
     setCodeBlockLanguage: (language) => setCodeBlockLanguage(view, language),
     toggleSourceMode: () => {
       mode = mode === "livePreview" ? "source" : "livePreview";
@@ -295,7 +318,7 @@ export function createEditor(options: EditorOptions): MintEditor {
     updateSettings(changes) {
       const previous = settings;
       settings = { ...settings, ...changes };
-      const effects = [];
+      const effects = preferences.reconfigure(previous, settings);
       if (settings.focusMode !== previous.focusMode) {
         effects.push(focus.reconfigure(focusExtension()));
       }

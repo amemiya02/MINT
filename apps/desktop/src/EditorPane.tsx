@@ -51,6 +51,8 @@ export function EditorPane({
   const editorSettings: EditorSettings = {
     focusMode: settings.focusMode,
     typewriterMode: settings.typewriterMode,
+    vim: settings.vimMode,
+    spellcheck: settings.spellcheck,
   };
   const callbacks = useRef({
     onReady,
@@ -115,10 +117,10 @@ export function EditorPane({
     callbacks.current.onWordCount(editor.current.getWordCount());
   }, [active]);
 
-  const { focusMode, typewriterMode } = editorSettings;
+  const { focusMode, typewriterMode, vim, spellcheck } = editorSettings;
   useEffect(() => {
-    editor.current?.updateSettings({ focusMode, typewriterMode });
-  }, [focusMode, typewriterMode]);
+    editor.current?.updateSettings({ focusMode, typewriterMode, vim, spellcheck });
+  }, [focusMode, typewriterMode, vim, spellcheck]);
 
   return <div ref={parent} className="mint-editor h-full" />;
 }

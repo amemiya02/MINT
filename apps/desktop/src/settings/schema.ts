@@ -60,6 +60,10 @@ export const settingsSchema = {
   focusMode: toggle({ label: "settings.focusMode", default: false }),
   /** Typewriter mode: the line with the cursor stays at the vertical middle of the window. */
   typewriterMode: toggle({ label: "settings.typewriterMode", default: false }),
+  /** Vim key bindings in the editor. */
+  vimMode: toggle({ label: "settings.vimMode", default: false }),
+  /** The system spellchecker underlines misspelled words (not in code, math or URLs). */
+  spellcheck: toggle({ label: "settings.spellcheck", default: true }),
   /** Where pasted and dropped images are saved (the asset folder). */
   assetFolder: choice({
     label: "settings.assetFolder",

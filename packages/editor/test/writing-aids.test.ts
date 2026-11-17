@@ -86,7 +86,7 @@ describe("focus mode", () => {
 
   it("is off by default", () => {
     const { editor, focused, inFocusMode } = open(text);
-    expect(editor.getSettings()).toEqual({ focusMode: false, typewriterMode: false });
+    expect(editor.getSettings()).toMatchObject({ focusMode: false, typewriterMode: false });
     expect(inFocusMode()).toBe(false);
     expect(focused()).toBe("");
   });
@@ -138,11 +138,11 @@ describe("typewriter mode", () => {
   it("is switched on from the initial settings or later, independently of focus mode", () => {
     const { editor, parent } = open("text\n", { settings: { typewriterMode: true } });
     expect(isOn(parent)).toBe(true);
-    expect(editor.getSettings()).toEqual({ focusMode: false, typewriterMode: true });
+    expect(editor.getSettings()).toMatchObject({ focusMode: false, typewriterMode: true });
     editor.updateSettings({ focusMode: true });
     editor.updateSettings({ typewriterMode: false });
     expect(isOn(parent)).toBe(false);
-    expect(editor.getSettings()).toEqual({ focusMode: true, typewriterMode: false });
+    expect(editor.getSettings()).toMatchObject({ focusMode: true, typewriterMode: false });
   });
 
   it("leaves typing and the selection as they are", () => {

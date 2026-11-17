@@ -193,6 +193,18 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     "edit.find": () => showFind("find"),
     "edit.replace": () => showFind("replace"),
     "edit.searchFolder": () => setFolderSearch((request) => (request ?? 0) + 1),
+    "edit.pastePlainText": () => {
+      const editor = activeId === null ? undefined : store.editor(activeId);
+      if (!editor) return;
+      void platform.readClipboardText().then((text) => {
+        if (text) editor.execute("pastePlainText", text);
+        editor.focus();
+      });
+    },
+    "edit.toggleSpellcheck": () =>
+      void settings.set("spellcheck", !settings.getSnapshot().settings.spellcheck),
+    "view.toggleVimMode": () =>
+      void settings.set("vimMode", !settings.getSnapshot().settings.vimMode),
     "tab.close": () => {
       if (activeId !== null) void store.close(activeId);
       else void platform.closeWindow();

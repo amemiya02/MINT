@@ -116,6 +116,9 @@ export interface Platform {
   /** Ask a three-way question (e.g. save / don't save / cancel). Dismissing the dialog answers `cancel`. */
   showQuestionDialog(options: QuestionDialogOptions): Promise<"yes" | "no" | "cancel">;
 
+  /** The text on the system clipboard (empty if it holds no text), e.g. to paste it as plain text. */
+  readClipboardText(): Promise<string>;
+
   /** Open a URL (`https:`, `mailto:`, ...) in the user's default browser or handler. */
   openExternal(url: string): Promise<void>;
 
