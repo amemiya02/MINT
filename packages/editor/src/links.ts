@@ -1,5 +1,5 @@
 import { syntaxTree } from "@codemirror/language";
-import type { EditorState, Extension } from "@codemirror/state";
+import { type EditorState, type Extension, Facet } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import type { SyntaxNode } from "@lezer/common";
 import { linkClass, urlOwners } from "./live-preview/inline-spans.ts";
@@ -83,7 +83,8 @@ function referenceDefinition(state: EditorState, name: string): string | null {
   return found;
 }
 
-function classify(rawHref: string): LinkTarget | null {
+/** The target of a link destination as written (`<...>` allowed), or `null` if MINT cannot open it. */
+export function classify(rawHref: string): LinkTarget | null {
   const href = rawHref.startsWith("<") && rawHref.endsWith(">") ? rawHref.slice(1, -1) : rawHref;
   // A scheme has at least two characters, so `C:\notes\a.md` is a path.
   if (/^[a-z][a-z0-9+.-]+:/i.test(href)) return { kind: "external", url: href };
@@ -102,19 +103,33 @@ function decode(path: string): string {
 
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 
+/** Whether a mouse event carries the modifier that opens links: ⌘ on macOS, Ctrl elsewhere. */
+export function isOpenLinkClick(event: MouseEvent): boolean {
+  return event.button === 0 && (isMac ? event.metaKey : event.ctrlKey);
+}
+
+/** Where opened links go: the host's `openLink`, if any. Widgets with links of their own use it too. */
+export const linkOpener = Facet.define<
+  (link: LinkTarget) => void,
+  ((link: LinkTarget) => void) | null
+>({ combine: (values) => values[0] ?? null });
+
 /** ⌘-click (Ctrl-click off macOS) on a link hands its target to `open`. */
 export function linkOpening(open: (link: LinkTarget) => void): Extension {
-  return EditorView.domEventHandlers({
-    mousedown(event, view) {
-      if (event.button !== 0 || !(isMac ? event.metaKey : event.ctrlKey)) return false;
-      const element =
-        event.target instanceof Element ? event.target.closest(`.${linkClass}`) : null;
-      if (!element || !view.contentDOM.contains(element)) return false;
-      const target = linkAt(view.state, view.posAtDOM(element, 0));
-      if (!target) return false;
-      event.preventDefault();
-      open(target);
-      return true;
-    },
-  });
+  return [
+    linkOpener.of(open),
+    EditorView.domEventHandlers({
+      mousedown(event, view) {
+        if (!isOpenLinkClick(event)) return false;
+        const element =
+          event.target instanceof Element ? event.target.closest(`.${linkClass}`) : null;
+        if (!element || !view.contentDOM.contains(element)) return false;
+        const target = linkAt(view.state, view.posAtDOM(element, 0));
+        if (!target) return false;
+        event.preventDefault();
+        open(target);
+        return true;
+      },
+    }),
+  ];
 }

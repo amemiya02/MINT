@@ -50,10 +50,16 @@ function syntaxPlugins(dialect: Dialect): PluggableList {
  * What may reach the app's DOM: GitHub's sanitation (no scripts, event handlers,
  * `javascript:` URLs, frames or styles; ids are prefixed with `user-content-` so
  * they cannot clobber globals) plus the elements MINT's own syntax renders to.
+ * Presentational HTML of READMEs (`align`, `width`, `height`, `<details>`,
+ * `<kbd>`, `<picture>`...) is kept, and so are `data:` images.
  * KaTeX renders after sanitation, from the math code it keeps here.
  */
 const appSchema: SanitizeSchema = {
   ...defaultSchema,
+  // Inline images (`data:`) are only ever loaded as images; they cannot run code there.
+  protocols: { ...defaultSchema.protocols, src: [...(defaultSchema.protocols?.src ?? []), "data"] },
+  // A `<style>` would restyle the whole app; drop it with its text rather than unwrapping it.
+  strip: [...(defaultSchema.strip ?? []), "style"],
   tagNames: [...(defaultSchema.tagNames ?? []), "mark", "nav"],
   attributes: {
     ...defaultSchema.attributes,

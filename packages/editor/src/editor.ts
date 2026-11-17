@@ -33,6 +33,7 @@ import { codeBlocks, setCodeBlockLanguage } from "./live-preview/code-blocks.ts"
 import { footnotes } from "./live-preview/footnotes.ts";
 import { frontMatterPreview } from "./live-preview/front-matter.ts";
 import { headings } from "./live-preview/headings.ts";
+import { htmlBlockPreview } from "./live-preview/html-blocks.ts";
 import { imagePreview, imageUrlResolver } from "./live-preview/images.ts";
 import { inlineSpans } from "./live-preview/inline-spans.ts";
 import { lists } from "./live-preview/lists.ts";
@@ -229,6 +230,8 @@ function dialectExtensions(dialect: Dialect): Extension {
     richPaste(dialect),
     // Table cells are rendered like the export renders them.
     previewRenderer.of(tableRenderer((markdown) => renderHtml(markdown, dialect))),
+    // Raw HTML blocks go through the same sanitising rendering as table cells.
+    htmlBlockPreview((markdown) => renderHtml(markdown, dialect)),
     // Mermaid takes over its fences from codeBlocks (it matches only ```mermaid; the rest stay code blocks).
     dialect.mermaid ? mermaidDiagrams() : [],
   ];

@@ -119,3 +119,31 @@ describe("editor and export highlight code alike", () => {
     await vi.waitFor(() => expect(tokens(parent)).toEqual(expected), { timeout: 10_000 });
   });
 });
+
+describe("editor and export agree on raw HTML blocks", () => {
+  const samples = [
+    '<p align="center">\n<img alt="banner" src="https://e.com/banner.png" width="300"/>\n</p>\n',
+    '<a href="https://e.com/r"><img src="https://e.com/r.svg" alt="release"/></a>\n<a href="https://e.com/b"><img src="https://e.com/b.svg" alt="build"/></a>\n',
+    '<div onclick="alert(1)"><script>alert(2)</script><kbd>K</kbd> <a href="javascript:x()">j</a></div>\n',
+  ];
+  const shape = (root: ParentNode) => ({
+    images: [...root.querySelectorAll("img")].map((img) => [img.alt, img.getAttribute("width")]),
+    links: [...root.querySelectorAll("a")].map((a) => [a.textContent, a.getAttribute("href")]),
+    aligned: [...root.querySelectorAll("[align]")].map((el) => el.getAttribute("align")),
+    kbd: [...root.querySelectorAll("kbd")].map((k) => k.textContent),
+    scripts: root.querySelectorAll("script, [onclick]").length,
+  });
+  it.each(samples)("%j", async (sample) => {
+    const text = `start\n\n${sample}`;
+    const { parent } = open(text, defaultDialect);
+    const doc = await exported(text, defaultDialect);
+    const rendered = [...parent.querySelectorAll(".cm-mint-html")];
+    expect(rendered.length).toBeGreaterThan(0);
+    const root = document.createElement("div");
+    root.append(...rendered.map((block) => block.cloneNode(true)));
+    const editorShape = shape(root);
+    const exportShape = shape(doc.body);
+    expect({ ...editorShape, scripts: 0 }).toEqual({ ...exportShape, scripts: 0 });
+    expect(editorShape.scripts).toBe(0);
+  });
+});
