@@ -1,6 +1,7 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useT } from "../i18n/index.ts";
 import { useTheme } from "../theme/useTheme.ts";
+import { useModalDialog } from "../window/useModalDialog.ts";
 import { ShortcutsSettings } from "./ShortcutsSettings.tsx";
 import {
   type SettingDefinition,
@@ -22,18 +23,13 @@ interface SettingsDialogProps {
 export function SettingsDialog({ onClose, onOpenFile, onRecordingShortcut }: SettingsDialogProps) {
   const t = useT();
   const { path } = useSettings();
-  const dialog = useRef<HTMLDialogElement>(null);
+  const { close, props: dialogProps } = useModalDialog(onClose);
   const titleId = useId();
-
-  useEffect(() => {
-    dialog.current?.showModal();
-  }, []);
 
   return (
     <dialog
-      ref={dialog}
+      {...dialogProps}
       aria-labelledby={titleId}
-      onClose={onClose}
       className="m-auto w-[min(32rem,calc(100%-2rem))] rounded-lg border border-(--mint-border) bg-(--mint-bg) p-0 text-(--mint-fg) shadow-xl backdrop:bg-black/30"
     >
       <div className="flex items-center justify-between border-b border-(--mint-border) px-5 py-3">
@@ -42,7 +38,7 @@ export function SettingsDialog({ onClose, onOpenFile, onRecordingShortcut }: Set
         </h2>
         <button
           type="button"
-          onClick={() => dialog.current?.close()}
+          onClick={close}
           className="rounded px-2 py-0.5 text-sm text-(--mint-muted) hover:bg-(--mint-hover) focus-visible:outline-2 focus-visible:outline-(--mint-accent)"
         >
           {t("settings.close")}
@@ -64,7 +60,7 @@ export function SettingsDialog({ onClose, onOpenFile, onRecordingShortcut }: Set
         <button
           type="button"
           onClick={() => {
-            dialog.current?.close();
+            close();
             onOpenFile(path);
           }}
           className="shrink-0 rounded-md border border-(--mint-border) px-3 py-1 text-(--mint-fg) hover:bg-(--mint-hover) focus-visible:outline-2 focus-visible:outline-(--mint-accent)"

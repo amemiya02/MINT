@@ -40,6 +40,34 @@ test("⌘⇧P fuzzy-searches commands by name, shows their shortcuts and runs th
   await expect(page.locator(".cm-content")).toBeFocused();
 });
 
+test("the palette opens again at once after running a command", async ({ page }) => {
+  await openDocument(page, "text\n");
+  await page.keyboard.press("ControlOrMeta+Shift+P");
+  await search(page).fill("tglsrc");
+  await expect(results(page)).toHaveCount(1);
+  // Choose with Enter, then press ⌘⇧P again before the dialog's close event
+  // (a task of its own) arrives, as on a busy machine.
+  await search(page).evaluate(async (input) => {
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    const mac = /Mac/.test(navigator.platform);
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "P",
+        code: "KeyP",
+        shiftKey: true,
+        metaKey: mac,
+        ctrlKey: !mac,
+        bubbles: true,
+      }),
+    );
+  });
+  await expect(statusBar(page).getByText("Source Mode", { exact: true })).toBeVisible();
+  await page.waitForTimeout(200);
+  await expect(search(page)).toBeVisible();
+  await expect(search(page)).toHaveValue("");
+});
+
 test("Escape closes the palette without running anything", async ({ page }) => {
   await openDocument(page, "text\n");
   await page.keyboard.press("ControlOrMeta+Shift+P");
