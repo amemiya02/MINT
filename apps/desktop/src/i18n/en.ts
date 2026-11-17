@@ -44,6 +44,19 @@ export const en = {
   "find.noResults": "No results",
   "find.invalid": "Invalid regular expression",
 
+  "command.edit.searchFolder": "Search in Folder…",
+  "search.label": "Search in Folder",
+  "search.close": "Close Search",
+  "search.searching": "Searching…",
+  "search.summary": "{matches} in {documents}",
+  "search.matches.one": "1 result",
+  "search.matches.other": "{count} results",
+  "search.documents.one": "1 document",
+  "search.documents.other": "{count} documents",
+  "search.truncated":
+    "Showing the first {count} matching lines. Refine the search to see the rest.",
+  "search.noFolder": "Open a folder to search its documents.",
+
   "command.app.settings": "Settings…",
   "command.app.checkForUpdates": "Check for Updates…",
 
@@ -71,6 +84,7 @@ export const en = {
   "settings.expected.oneOf": "one of {values}",
   "settings.expected.toggle": "true or false",
   "settings.expected.number": "a number from {min} to {max}",
+  "settings.expected.text": "text of at most {max} characters",
 
   // One block per setting (see settings/schema.ts).
   "settings.language": "Interface language",
@@ -79,6 +93,25 @@ export const en = {
   "settings.language.en": "English",
   "settings.autosave": "Save automatically",
   "settings.checkForUpdates": "Check for updates at startup",
+
+  "settings.appearance": "Appearance",
+  "settings.appearance.system": "Follow system",
+  "settings.appearance.light": "Light",
+  "settings.appearance.dark": "Dark",
+  "settings.theme": "Theme",
+  "settings.theme.builtin": "MINT (built-in)",
+  "settings.theme.missing": "{name} (not found)",
+  "settings.theme.folder": "Themes are .css files in {path}",
+  "settings.fontFamily": "Font",
+  "settings.fontFamily.placeholder": "Theme default",
+  "settings.fontSize": "Font size (px)",
+  "settings.lineHeight": "Line height",
+  "settings.contentWidth": "Content width (px)",
+
+  "theme.issue.missing":
+    "The theme “{name}” was not found in {path}. The built-in theme is in use.",
+  "theme.issue.unreadable":
+    "The theme “{name}” could not be read ({reason}). The built-in theme is in use.",
 
   "dialog.open.title": "Open Document",
   "dialog.filter.markdown": "Markdown",

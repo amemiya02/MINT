@@ -24,6 +24,14 @@ export type ExternalChange =
 
 /** How the user settles a conflict between the tab and the document on disk. */
 export type ConflictChoice = "keepMine" | "loadDisk";
+/** A range within one line of a document, e.g. a global search match. */
+export interface LineRange {
+  /** 1-based line number; lines end at a line feed. */
+  readonly line: number;
+  /** `[from, to)` as UTF-16 offsets into the line. */
+  readonly from: number;
+  readonly to: number;
+}
 
 export interface TabsState {
   readonly tabs: readonly Tab[];
@@ -57,7 +65,8 @@ export interface TabStore {
   getState(): TabsState;
   subscribe(listener: () => void): () => void;
 
-  openDocument(path: string): Promise<void>;
+  /** With `select`, the range is selected and scrolled into view once the document shows. */
+  openDocument(path: string, select?: LineRange): Promise<void>;
   /**
    * Open a tab showing unsaved `text` for the document at `path` (e.g. work
    * recovered after a crash), without reading the file. If the document is
@@ -115,6 +124,8 @@ export function createTabStore({ platform, askUnsaved }: TabStoreOptions): TabSt
   let reloading: number | null = null;
   /** Paths being read, so a double open does not create two tabs. */
   const opening = new Map<string, Promise<void>>();
+  /** Ranges to select in tabs whose editor has not mounted yet. */
+  const pendingSelections = new Map<number, LineRange>();
   let nextId = 1;
 
   function set(next: Partial<TabsState>) {
@@ -249,18 +260,23 @@ export function createTabStore({ platform, askUnsaved }: TabStoreOptions): TabSt
       return () => listeners.delete(listener);
     },
 
-    openDocument(path) {
+    async openDocument(path, select) {
       const existing = state.tabs.find((t) => t.path === path);
       if (existing) {
         set({ activeId: existing.id });
-        return Promise.resolve();
+      } else {
+        let pending = opening.get(path);
+        if (!pending) {
+          pending = read(path).finally(() => opening.delete(path));
+          opening.set(path, pending);
+        }
+        await pending;
       }
-      let pending = opening.get(path);
-      if (!pending) {
-        pending = read(path).finally(() => opening.delete(path));
-        opening.set(path, pending);
-      }
-      return pending;
+      const tab = state.tabs.find((t) => t.path === path);
+      if (!select || !tab) return;
+      const editor = editors.get(tab.id);
+      if (editor) reveal(editor, select);
+      else pendingSelections.set(tab.id, select);
     },
 
     restoreDocument(path, text) {
@@ -314,6 +330,7 @@ export function createTabStore({ platform, askUnsaved }: TabStoreOptions): TabSt
       saveEpochs.delete(id);
       recheck.delete(id);
       unwatch(id);
+      pendingSelections.delete(id);
       set({ tabs, activeId });
       return true;
     },
@@ -385,8 +402,14 @@ export function createTabStore({ platform, askUnsaved }: TabStoreOptions): TabSt
     editor: (id) => editors.get(id) ?? null,
 
     attachEditor(id, editor) {
-      if (editor) editors.set(id, editor);
-      else editors.delete(id);
+      if (!editor) {
+        editors.delete(id);
+        return;
+      }
+      editors.set(id, editor);
+      const select = pendingSelections.get(id);
+      pendingSelections.delete(id);
+      if (select) reveal(editor, select);
     },
 
     markChanged(id) {
@@ -396,6 +419,22 @@ export function createTabStore({ platform, askUnsaved }: TabStoreOptions): TabSt
     },
   };
   return store;
+}
+
+/** Select `range` and bring it into view, after the tab's panel has been shown. */
+function reveal(editor: MintEditor, range: LineRange) {
+  setTimeout(() => {
+    const text = editor.getText();
+    let start = 0;
+    for (let line = 1; line < range.line; line++) {
+      const next = text.indexOf("\n", start);
+      if (next < 0) break;
+      start = next + 1;
+    }
+    const clamp = (offset: number) => Math.min(start + offset, text.length);
+    editor.setSelection({ anchor: clamp(range.from), head: clamp(range.to), scrollIntoView: true });
+    editor.focus();
+  });
 }
 
 function reasonOf(error: unknown): string {

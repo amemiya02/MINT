@@ -1,6 +1,8 @@
 import { createIgnoreRules } from "./gitignore.ts";
 import type {
   DirectoryEntry,
+  FolderSearchQuery,
+  LineMatch,
   MenuItemSpec,
   MenuSpec,
   Platform,
@@ -17,6 +19,9 @@ export const memorySettingsPath = "/config/MINT/settings.json";
  * Seeding `files` with snapshots here simulates work left behind by a crash.
  */
 export const memoryRecoveryDir = "/data/MINT/recovery";
+
+/** The in-memory theme folder (seed user themes through `files`). */
+export const memoryThemesPath = "/data/MINT/themes";
 
 export interface MemoryPlatformOptions {
   /** Initial files, keyed by absolute `/`-separated path. Their parent directories exist implicitly. */
@@ -77,6 +82,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
   // The config directory always exists, so settings.json can be created from outside.
   const directories = new Set([
     memorySettingsPath.slice(0, memorySettingsPath.lastIndexOf("/")),
+    memoryThemesPath,
     ...(options.directories ?? []),
   ]);
   const appData = new Map(Object.entries(options.appData ?? {}));
@@ -254,6 +260,27 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
         })
         .sort();
     },
+    async searchFolder(root, query, extensions, listener) {
+      const regexp = searchRegExp(query);
+      const paths = await this.listFolderFiles(root, extensions);
+      let cancelled = false;
+      // Like the backend, results arrive asynchronously, one file at a time.
+      const next = (index: number) => {
+        if (cancelled) return;
+        const path = paths[index];
+        if (path === undefined) {
+          listener.onDone({ truncated: false });
+          return;
+        }
+        const lines = searchText(files.get(path) ?? "", regexp);
+        if (lines.length > 0) listener.onFile({ path, lines });
+        setTimeout(() => next(index + 1));
+      };
+      setTimeout(() => next(0));
+      return () => {
+        cancelled = true;
+      };
+    },
     async createFile(path) {
       if (exists(path)) throw new Error(`${path} already exists`);
       requireParent(path);
@@ -297,6 +324,9 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     },
     async openExternal(url) {
       openedUrls.push(url);
+    },
+    async themesPath() {
+      return memoryThemesPath;
     },
     async showQuestionDialog({ message }) {
       questions.push(message);
@@ -395,6 +425,27 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       command.run();
     },
   };
+}
+
+/** The backend's matching rules (`search.rs`) in JavaScript regular expression syntax. */
+function searchRegExp(query: FolderSearchQuery): RegExp {
+  let source = query.regexp ? query.pattern : query.pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  if (query.wholeWord) source = `(?<![\\p{L}\\p{N}_])(?:${source})(?![\\p{L}\\p{N}_])`;
+  // Throws a SyntaxError for an invalid pattern, as the backend rejects it.
+  return new RegExp(source, query.caseSensitive ? "gu" : "giu");
+}
+
+function searchText(text: string, regexp: RegExp): LineMatch[] {
+  const lines: LineMatch[] = [];
+  text.split("\n").forEach((raw, index) => {
+    const line = raw.replace(/\r+$/, "");
+    const ranges: [number, number][] = [];
+    for (const match of line.matchAll(regexp)) {
+      if (match[0].length > 0) ranges.push([match.index, match.index + match[0].length]);
+    }
+    if (ranges.length > 0) lines.push({ line: index + 1, text: line, ranges });
+  });
+  return lines;
 }
 
 function parentOf(path: string): string {

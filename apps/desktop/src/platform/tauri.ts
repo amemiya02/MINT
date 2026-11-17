@@ -15,11 +15,17 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
 import type {
   DirectoryEntry,
+  FileMatches,
   MenuItemSpec,
   Platform,
   RecoverySnapshot,
   SettingsFile,
 } from "./platform.ts";
+
+/** What the backend's `search_folder` sends on its channel. */
+type SearchEvent =
+  | ({ readonly kind: "file" } & FileMatches)
+  | { readonly kind: "done"; readonly truncated: boolean };
 
 const nativeItems = {
   cut: "Cut",
@@ -56,6 +62,25 @@ export function createTauriPlatform(): Platform {
     readDirectory: (path) => invoke<DirectoryEntry[]>("read_directory", { path }),
     listFolderFiles: (path, extensions) =>
       invoke<string[]>("list_folder_files", { path, extensions }),
+    async searchFolder(path, query, extensions, listener) {
+      const channel = new Channel<SearchEvent>();
+      let cancelled = false;
+      channel.onmessage = (event) => {
+        if (cancelled) return;
+        if (event.kind === "file") listener.onFile({ path: event.path, lines: event.lines });
+        else listener.onDone({ truncated: event.truncated });
+      };
+      const id = await invoke<number>("search_folder", {
+        path,
+        query,
+        extensions,
+        onEvent: channel,
+      });
+      return () => {
+        cancelled = true;
+        void invoke<void>("cancel_search", { id });
+      };
+    },
     createFile: (path) => invoke<void>("create_file", { path }),
     createDirectory: (path) => invoke<void>("create_directory", { path }),
     rename: (from, to) => invoke<void>("rename_path", { from, to }),
@@ -69,6 +94,7 @@ export function createTauriPlatform(): Platform {
     readAppData: (name) => invoke<string | null>("read_app_data", { name }),
     writeAppData: (name, text) => invoke<void>("write_app_data", { name, text }),
     openExternal: (url) => openUrl(url),
+    themesPath: () => invoke<string>("themes_path"),
     async showQuestionDialog({ title, message: text, yes, no, cancel }) {
       const answer = await message(text, {
         title,

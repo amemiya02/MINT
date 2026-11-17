@@ -8,6 +8,7 @@ import { type Translate, useT } from "./i18n/index.ts";
 import type { Platform } from "./platform/platform.ts";
 import { QuickOpen } from "./quick-open/QuickOpen.tsx";
 import { createRecovery, type Recovery, type RecoveryChoice } from "./recovery/recovery.ts";
+import { FolderSearch } from "./search/FolderSearch.tsx";
 import { SettingsDialog } from "./settings/SettingsDialog.tsx";
 import { SettingsIssues } from "./settings/SettingsIssues.tsx";
 import { useSettingsStore } from "./settings/useSettings.ts";
@@ -16,6 +17,7 @@ import { ExternalChangeNotice } from "./tabs/ExternalChangeNotice.tsx";
 import { baseName, resolveFrom } from "./tabs/paths.ts";
 import { TabBar } from "./tabs/TabBar.tsx";
 import { createTabStore, type Tab, type TabError, type TabStore } from "./tabs/tab-store.ts";
+import { ThemeIssue } from "./theme/ThemeIssue.tsx";
 import { UpdateNotice, useUpdates } from "./updates/updates.tsx";
 import { documentExtensions } from "./workspace/paths.ts";
 import { type RecentList, useRecent } from "./workspace/recent.ts";
@@ -146,6 +148,8 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   }, [platform, store, t]);
 
   const [find, setFind] = useState<{ mode: FindMode; request: number } | null>(null);
+  /** While global search shows (in place of the file tree), how many times it was invoked. */
+  const [folderSearch, setFolderSearch] = useState<number | null>(null);
   const showFind = (mode: FindMode) => {
     if (activeId !== null) setFind((f) => ({ mode, request: (f?.request ?? 0) + 1 }));
   };
@@ -160,6 +164,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     },
     "edit.find": () => showFind("find"),
     "edit.replace": () => showFind("replace"),
+    "edit.searchFolder": () => setFolderSearch((request) => (request ?? 0) + 1),
     "tab.close": () => {
       if (activeId !== null) void store.close(activeId);
       else void platform.closeWindow();
@@ -203,6 +208,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     <div className="flex h-full flex-col bg-(--mint-bg) text-(--mint-fg)">
       <UpdateNotice updates={updates} />
       <SettingsIssues />
+      <ThemeIssue />
       {(folderError || error) && (
         <div
           role="alert"
@@ -212,7 +218,19 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
         </div>
       )}
       <div className="flex min-h-0 flex-1">
-        {folder && sidebarVisible && (
+        {folderSearch !== null && (
+          <FolderSearch
+            platform={platform}
+            folder={folder}
+            request={folderSearch}
+            onOpenDocument={(path, select) => void store.openDocument(path, select)}
+            onClose={() => {
+              setFolderSearch(null);
+              if (activeId !== null) store.editor(activeId)?.focus();
+            }}
+          />
+        )}
+        {folderSearch === null && folder && sidebarVisible && (
           <Sidebar
             platform={platform}
             root={folder}
