@@ -88,17 +88,18 @@ describe("extended syntax (ADR-0004)", () => {
       "# Guide\n\n[TOC]\n\n## Set *up*\n\n### Install\n\n## Set up\n\n# Notes\n",
       extended({ toc: true }),
     );
+    // Ids are prefixed so they cannot clobber globals in the app; the links follow them.
     expect(html).toBe(
       [
-        '<h1 id="guide">Guide</h1>',
-        '<nav class="toc"><ul><li><a href="#guide">Guide</a><ul>' +
-          '<li><a href="#set-up">Set up</a><ul><li><a href="#install">Install</a></li></ul></li>' +
-          '<li><a href="#set-up-1">Set up</a></li></ul></li>' +
-          '<li><a href="#notes">Notes</a></li></ul></nav>',
-        '<h2 id="set-up">Set <em>up</em></h2>',
-        '<h3 id="install">Install</h3>',
-        '<h2 id="set-up-1">Set up</h2>',
-        '<h1 id="notes">Notes</h1>',
+        '<h1 id="user-content-guide">Guide</h1>',
+        '<nav class="toc"><ul><li><a href="#user-content-guide">Guide</a><ul>' +
+          '<li><a href="#user-content-set-up">Set up</a><ul><li><a href="#user-content-install">Install</a></li></ul></li>' +
+          '<li><a href="#user-content-set-up-1">Set up</a></li></ul></li>' +
+          '<li><a href="#user-content-notes">Notes</a></li></ul></nav>',
+        '<h2 id="user-content-set-up">Set <em>up</em></h2>',
+        '<h3 id="user-content-install">Install</h3>',
+        '<h2 id="user-content-set-up-1">Set up</h2>',
+        '<h1 id="user-content-notes">Notes</h1>',
       ].join("\n"),
     );
   });
@@ -133,5 +134,52 @@ describe("front matter", () => {
     expect(renderHtml(post, { ...defaultDialect, frontMatter: false })).toBe(
       "<hr>\n<h2>title: Hello\ntags: [a, b]</h2>\n<h1>Body</h1>",
     );
+  });
+});
+
+describe("untrusted HTML (rendered into the app)", () => {
+  const render = (markdown: string) => renderHtml(markdown, defaultDialect);
+
+  it("keeps harmless inline HTML such as a line break in a table cell", () => {
+    expect(render("| a |\n| - |\n| one<br>two |\n")).toContain("one<br>two");
+  });
+
+  it("drops scripts, event handlers and javascript: URLs", () => {
+    const html = render(
+      [
+        "<script>alert(1)</script>",
+        '<img src=x onerror="alert(2)">',
+        "[link](javascript:alert(3))",
+        '<a href="javascript:alert(4)">raw</a>',
+        '<iframe src="https://example.com"></iframe>',
+        "<svg><script>alert(5)</script></svg>",
+        '<div style="position:fixed" onclick="alert(6)">x</div>',
+      ].join("\n\n"),
+    );
+    expect(html).not.toMatch(/<script|onerror|onclick|javascript:|<iframe|alert\(\d\)<\/script/i);
+    expect(html).toContain("link");
+  });
+
+  it("keeps what MINT renders itself: math, highlights, sub/superscript, code classes, task lists, footnotes", () => {
+    const html = renderHtml(
+      "$x^2$ ==hi== ^up^ ~down~\n\n- [x] done\n\n```js\nlet a\n```\n\nNote[^1]\n\n[^1]: Footnote.\n",
+      {
+        ...defaultDialect,
+        extended: { toc: false, highlight: true, superscript: true, subscript: true },
+      },
+    );
+    expect(html).toContain('class="katex"');
+    expect(html).toContain("<math");
+    expect(html).toContain('<annotation encoding="application/x-tex">x^2</annotation>');
+    expect(html).toMatch(/<span class="[^"]*mord[^"]*"/);
+    expect(html).toContain("<mark>hi</mark>");
+    expect(html).toContain("<sup>up</sup>");
+    expect(html).toContain("<sub>down</sub>");
+    expect(html).toMatch(
+      /<input type="checkbox" checked disabled>|<input checked disabled type="checkbox">|<input type="checkbox" disabled checked>/,
+    );
+    expect(html).toContain('class="language-js"');
+    expect(html).toMatch(/<a href="#user-content-fn-1" id="user-content-fnref-1"/);
+    expect(html).toMatch(/<li id="user-content-fn-1">/);
   });
 });

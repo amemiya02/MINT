@@ -162,3 +162,20 @@ test("renaming the document in the file tree is not reported, and the tab keeps 
   await externalWrite(page, "/notes/final.md", "# Final\n");
   await expect(page.getByRole("main").getByRole("textbox")).toContainText("# Final");
 });
+
+test("a document that cannot be watched says changes on disk will go unnoticed", async ({
+  page,
+}) => {
+  await launch(page, {
+    files: { [path]: "text\n" },
+    openDialogResults: [path],
+    unwatchablePaths: [path],
+    locale: "en-US",
+  });
+  await page.keyboard.press("ControlOrMeta+O");
+
+  await expect(page.getByRole("textbox")).toContainText("text");
+  await expect(page.getByRole("alert")).toContainText(
+    "Changes other programs make to /notes/draft.md will not be detected: too many open files",
+  );
+});

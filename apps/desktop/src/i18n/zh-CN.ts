@@ -18,6 +18,9 @@ export const zhCN: Messages = {
 
   "command.file.open": "打开…",
   "command.file.save": "保存",
+  "command.file.new": "新建",
+  "command.edit.selectNextOccurrence": "选择下一个相同项",
+  "command.file.saveAs": "另存为…",
   "command.file.exportHtml": "导出为 HTML…",
   "command.file.exportPdf": "导出为 PDF…",
   "command.file.openFolder": "打开文件夹…",
@@ -180,6 +183,8 @@ export const zhCN: Messages = {
   "dialog.open.title": "打开文档",
   "dialog.filter.markdown": "Markdown",
   "dialog.openFolder.title": "打开文件夹",
+  "dialog.saveAs.title": "另存为",
+  "dialog.saveAs.defaultName": "未命名.md",
 
   "welcome.title": "没有打开的文档",
   "welcome.body": "打开一个 Markdown 文档，开始写作。",
@@ -226,10 +231,15 @@ export const zhCN: Messages = {
   "error.rename": "无法重命名为 {name}：{reason}",
   "error.trash": "无法将 {name} 移到废纸篓：{reason}",
   "error.saveImage": "无法将图片 {name} 保存到 {folder}：{reason}",
+  "error.pastePlainText": "无法以纯文本粘贴：{reason}",
+  "error.watch": "将无法检测其他程序对 {path} 的修改：{reason}",
+  "error.untitledImage": "请先保存文档，再向其中添加图片",
   "error.dismiss": "关闭提示",
 
   "tabs.label": "已打开的文档",
   "tabs.close": "关闭 {name}",
+  "tabs.untitled": "未命名",
+  "tabs.untitledNumbered": "未命名 {number}",
 
   "unsaved.title": "未保存的改动",
   "unsaved.message": "是否保存对 {name} 的改动？如果不保存，改动将会丢失。",

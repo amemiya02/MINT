@@ -1,6 +1,6 @@
 import { useT } from "../i18n/index.ts";
 import { useTabStore, useTabsState } from "./context.ts";
-import { baseName } from "./paths.ts";
+import { tabName } from "./tab-name.ts";
 
 /** The row of tabs above the editor: one per open document in this window. */
 export function TabBar() {
@@ -15,7 +15,7 @@ export function TabBar() {
       className="flex min-h-9 overflow-x-auto border-b border-(--mint-border) text-sm"
     >
       {tabs.map((tab) => {
-        const name = baseName(tab.path);
+        const name = tabName(t, tab);
         const active = tab.id === activeId;
         return (
           <div
@@ -30,7 +30,7 @@ export function TabBar() {
               id={`tab-${tab.id}`}
               aria-selected={active}
               aria-controls={`tabpanel-${tab.id}`}
-              title={tab.path}
+              title={tab.path ?? undefined}
               onClick={() => store.activate(tab.id)}
               onAuxClick={(e) => {
                 if (e.button === 1) void store.close(tab.id);

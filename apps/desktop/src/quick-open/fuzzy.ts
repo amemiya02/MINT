@@ -1,3 +1,5 @@
+import { lastSeparator } from "../paths.ts";
+
 /**
  * Fuzzy matching of a quick open query against a path. The query's letters
  * must appear in order (case-insensitive, spaces ignored). Consecutive letters
@@ -19,7 +21,7 @@ const wordStartBonus = 4;
 export function fuzzyMatch(query: string, path: string): FuzzyMatch | null {
   const needle = query.replace(/\s+/g, "").toLowerCase();
   if (needle === "") return { score: 0, positions: [] };
-  const nameStart = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1;
+  const nameStart = lastSeparator(path) + 1;
   const inName = align(needle, path.slice(nameStart));
   if (inName) {
     return {

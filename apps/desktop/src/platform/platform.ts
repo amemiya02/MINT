@@ -123,7 +123,10 @@ export interface Platform {
   /** Ask a three-way question (e.g. save / don't save / cancel). Dismissing the dialog answers `cancel`. */
   showQuestionDialog(options: QuestionDialogOptions): Promise<"yes" | "no" | "cancel">;
 
-  /** The text on the system clipboard (empty if it holds no text), e.g. to paste it as plain text. */
+  /**
+   * The text on the system clipboard, e.g. to paste it as plain text. Rejects
+   * when the clipboard cannot be read or holds no text.
+   */
   readClipboardText(): Promise<string>;
 
   /** Open a URL (`https:`, `mailto:`, ...) in the user's default browser or handler. */
@@ -145,6 +148,15 @@ export interface Platform {
    * handler resolves to `true`. Returns an unsubscribe function.
    */
   onCloseRequested(handler: () => Promise<boolean>): () => void;
+
+  /**
+   * Call `listener` with documents and folders handed to MINT from outside the
+   * window: double-clicking a document (file association), the command line, or
+   * a second launch forwarding its paths. Paths that arrived before the listener
+   * was registered are delivered right away. Each path goes to one window only.
+   * Returns a function that stops listening.
+   */
+  onOpenPaths(listener: (paths: readonly OpenedPath[]) => void): () => void;
 
   /** Absolute path of settings.json in the system configuration directory. */
   settingsPath(): Promise<string>;
@@ -257,6 +269,12 @@ export type SettingsFile =
   | { readonly status: "ok"; readonly values: SettingsValues }
   /** Unreadable or not a JSON object; `message` says why (e.g. a syntax error and its line). */
   | { readonly status: "invalid"; readonly message: string };
+
+/** A document or folder to open, handed to MINT from outside the window. */
+export interface OpenedPath {
+  readonly path: string;
+  readonly kind: "file" | "directory";
+}
 
 export interface DirectoryEntry {
   readonly name: string;

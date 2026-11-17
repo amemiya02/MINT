@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useT } from "../i18n/index.ts";
 import { useTabStore } from "./context.ts";
 import { diffLines } from "./line-diff.ts";
-import { baseName } from "./paths.ts";
+import { tabName } from "./tab-name.ts";
 import type { Tab } from "./tab-store.ts";
 
 const buttonClass =
@@ -15,7 +15,7 @@ export function ExternalChangeNotice({ tab }: { readonly tab: Tab }) {
   const [comparing, setComparing] = useState(false);
   const { external } = tab;
   if (!external) return null;
-  const name = baseName(tab.path);
+  const name = tabName(t, tab);
 
   return (
     <>

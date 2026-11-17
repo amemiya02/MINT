@@ -204,3 +204,29 @@ describe("offline", () => {
     expect(loadedUrls(html, doc).filter((url) => !url.startsWith("data:"))).toEqual([]);
   });
 });
+
+describe("HTML written in the document", () => {
+  it("is kept as written", async () => {
+    const { doc } = await exported(
+      "<details><summary>More</summary>\n\nHidden <kbd>⌘</kbd>\n\n</details>\n",
+    );
+    expect(doc.querySelector("details summary")?.textContent).toBe("More");
+    expect(doc.querySelector("details kbd")?.textContent).toBe("⌘");
+  });
+
+  it("loses whatever would run code when the file is opened", async () => {
+    const { html, doc } = await exported(
+      [
+        "<script>alert(1)</script>",
+        '<img src="a.png" onerror="alert(2)" alt="pic">',
+        "[link](javascript:alert(3))",
+        '<a href=" java\tscript:alert(4)">raw</a>',
+        '<div onclick="alert(5)">box</div>',
+      ].join("\n\n"),
+    );
+    expect(html).not.toMatch(/<script|onerror|onclick|javascript:|java\tscript/i);
+    expect(doc.querySelector("img")?.getAttribute("alt")).toBe("pic");
+    expect(doc.querySelector("div")?.textContent).toBe("box");
+    expect([...doc.querySelectorAll("a")].map((a) => a.textContent)).toEqual(["link", "raw"]);
+  });
+});

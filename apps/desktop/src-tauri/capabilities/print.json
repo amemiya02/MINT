@@ -3,5 +3,5 @@
   "identifier": "print",
   "description": "Permissions for the print windows PDF export opens: receive the document, then print it.",
   "windows": ["print-*"],
-  "permissions": ["core:event:default", "core:webview:allow-print"]
+  "permissions": ["core:event:default", "core:webview:allow-print", "core:window:allow-close"]
 }

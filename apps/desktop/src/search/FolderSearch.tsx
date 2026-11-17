@@ -1,9 +1,9 @@
 import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { IconButton, Toggle } from "../find/FindBar.tsx";
 import { type Translate, useT } from "../i18n/index.ts";
+import { documentExtensions, lastSeparator } from "../paths.ts";
 import type { FileMatches, LineMatch, Platform } from "../platform/platform.ts";
 import type { LineRange } from "../tabs/tab-store.ts";
-import { documentExtensions } from "../workspace/paths.ts";
 
 export interface FolderSearchProps {
   readonly platform: Platform;
@@ -198,7 +198,7 @@ function FileResults(props: {
   readonly onChoose: (line: number, range: readonly [number, number]) => void;
 }) {
   const { file, label, onChoose } = props;
-  const slash = Math.max(label.lastIndexOf("/"), label.lastIndexOf("\\"));
+  const slash = lastSeparator(label);
   return (
     <li data-file={label.replaceAll("\\", "/")}>
       <div className="flex items-baseline gap-1.5 px-2 pt-1 text-xs" title={file.path}>

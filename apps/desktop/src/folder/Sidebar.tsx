@@ -9,8 +9,8 @@ import {
 } from "react";
 import { useT } from "../i18n/index.ts";
 import { Outline } from "../outline/Outline.tsx";
+import { baseName, isDocumentPath, isValidName, joinPath, parentPath } from "../paths.ts";
 import type { DirectoryEntry, Platform } from "../platform/platform.ts";
-import { baseName, isDocumentPath, isValidName, joinPath, parentPath } from "./paths.ts";
 import { type TreeRow, useFileTree } from "./useFileTree.ts";
 
 /** What the sidebar shows: the file tree of the open folder, or the outline of the active document. */

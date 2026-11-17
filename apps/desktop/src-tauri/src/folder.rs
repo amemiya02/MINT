@@ -137,10 +137,20 @@ impl FolderWatcher {
         let (tx, rx) = mpsc::channel::<DebounceEventResult>();
         let mut debouncer = new_debouncer(Duration::from_millis(200), None, tx)?;
         debouncer.watch(dir, mode)?;
+        let watched = dir.to_path_buf();
         std::thread::spawn(move || {
             // Ends when the debouncer (and with it the sender) is dropped.
             for result in rx {
-                let Ok(events) = result else { continue };
+                let events = match result {
+                    Ok(events) => events,
+                    Err(errors) => {
+                        // Changes may have been missed; say so instead of failing silently.
+                        for e in errors {
+                            eprintln!("MINT: watching {} failed: {e}", watched.display());
+                        }
+                        continue;
+                    }
+                };
                 let mut paths: Vec<PathBuf> = events
                     .into_iter()
                     .flat_map(|e| e.event.paths)

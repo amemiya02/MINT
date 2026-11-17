@@ -65,6 +65,18 @@ sudo apt install ./MINT_<version>_amd64.deb
 
 An `.rpm` for Fedora and openSUSE is also attached to each release.
 
+## Using MINT
+
+- Double-click a `.md` or `.markdown` file, or run `mint notes.md`, to open it
+  in MINT. If MINT is already running, the document opens there.
+- **New** (⌘N / Ctrl+N) starts an untitled document; the first save asks where
+  to put it. **Save As…** (⌘⇧S / Ctrl+Shift+S) saves a copy under a new name.
+- Links work like Typora's: a plain click places the cursor in the link so you
+  can edit it, and ⌘-click (Ctrl-click on Windows and Linux) follows it. Web
+  links open in your browser; links to local `.md` files open them in MINT.
+- MINT only reads and writes the documents and folders you opened (and their
+  folders), not the rest of your disk.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).

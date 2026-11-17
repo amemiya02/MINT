@@ -59,6 +59,7 @@ export const commands = [
     group: "settings",
   },
 
+  { id: "file.new", title: "command.file.new", accelerator: "CmdOrCtrl+N", menu: "file" },
   { id: "file.open", title: "command.file.open", accelerator: "CmdOrCtrl+O", menu: "file" },
   { id: "file.openFolder", title: "command.file.openFolder", menu: "file" },
   {
@@ -71,6 +72,13 @@ export const commands = [
     id: "file.save",
     title: "command.file.save",
     accelerator: "CmdOrCtrl+S",
+    menu: "file",
+    group: "save",
+  },
+  {
+    id: "file.saveAs",
+    title: "command.file.saveAs",
+    accelerator: "CmdOrCtrl+Shift+S",
     menu: "file",
     group: "save",
   },
@@ -105,6 +113,15 @@ export const commands = [
     title: "command.edit.searchFolder",
     accelerator: "CmdOrCtrl+Shift+F",
     menu: "edit",
+  },
+  // ⌘D as in VS Code and Sublime Text: add a cursor at the next occurrence.
+  {
+    id: "edit.selectNextOccurrence",
+    title: "command.edit.selectNextOccurrence",
+    accelerator: "CmdOrCtrl+D",
+    menu: "edit",
+    group: "selection",
+    editor: ["selectNextOccurrence"],
   },
   {
     id: "edit.toggleSpellcheck",

@@ -10,7 +10,7 @@ import {
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { readText } from "@tauri-apps/plugin-clipboard-manager";
-import { message, open, save } from "@tauri-apps/plugin-dialog";
+import { message } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
@@ -19,6 +19,7 @@ import type {
   DirectoryEntry,
   FileMatches,
   MenuItemSpec,
+  OpenedPath,
   Platform,
   RecoverySnapshot,
   SettingsFile,
@@ -49,23 +50,12 @@ export function createTauriPlatform(): Platform {
       const id = await invoke<number>("watch_file", { path, onChange: channel });
       return () => void invoke<void>("unwatch_folder", { id });
     },
-    async showOpenDialog({ title, filters }) {
-      const picked = await open({
-        title,
-        multiple: false,
-        directory: false,
-        filters: filters.map((f) => ({ name: f.name, extensions: [...f.extensions] })),
-      });
-      return picked ?? null;
-    },
-    async showSaveDialog({ title, defaultPath, filters }) {
-      const picked = await save({
-        title,
-        defaultPath,
-        filters: filters.map((f) => ({ name: f.name, extensions: [...f.extensions] })),
-      });
-      return picked ?? null;
-    },
+    // The backend shows the file dialogs itself: what the user picks becomes a granted root,
+    // and the file commands refuse paths outside the granted roots.
+    showOpenDialog: ({ title, filters }) =>
+      invoke<string | null>("show_open_dialog", { title, filters }),
+    showSaveDialog: ({ title, defaultPath, filters }) =>
+      invoke<string | null>("show_save_dialog", { title, defaultPath, filters }),
     async printDocument(html, { title }) {
       // A window of its own shows the document and opens the print dialog on it (src/print/main.ts).
       const label = `print-${crypto.randomUUID()}`;
@@ -96,9 +86,8 @@ export function createTauriPlatform(): Platform {
       }
       await delivered;
     },
-    async showOpenFolderDialog({ title }) {
-      return (await open({ title, multiple: false, directory: true })) ?? null;
-    },
+    showOpenFolderDialog: ({ title }) =>
+      invoke<string | null>("show_open_folder_dialog", { title }),
     readDirectory: (path) => invoke<DirectoryEntry[]>("read_directory", { path }),
     listFolderFiles: (path, extensions) =>
       invoke<string[]>("list_folder_files", { path, extensions }),
@@ -123,8 +112,8 @@ export function createTauriPlatform(): Platform {
     },
     saveAsset: (directory, fileName, data) =>
       invoke<string>("save_asset", { directory, fileName, data: toBase64(data) }),
-    // The asset protocol's scope is `**` (tauri.conf.json): documents may reference images
-    // anywhere, and the page can already read any file through `read_text_file`.
+    // The asset protocol only serves files under granted roots (the backend widens its scope
+    // as the user opens documents and folders); other local images fail to load.
     assetUrl: (path) => convertFileSrc(path),
     createFile: (path) => invoke<void>("create_file", { path }),
     createDirectory: (path) => invoke<void>("create_directory", { path }),
@@ -138,8 +127,8 @@ export function createTauriPlatform(): Platform {
     },
     readAppData: (name) => invoke<string | null>("read_app_data", { name }),
     writeAppData: (name, text) => invoke<void>("write_app_data", { name, text }),
-    // Rejects when the clipboard holds no text (an image, say).
-    readClipboardText: () => readText().catch(() => ""),
+    // Rejects when the clipboard cannot be read, or holds no text (an image, say).
+    readClipboardText: () => readText(),
     openExternal: (url) => openUrl(url),
     themesPath: () => invoke<string>("themes_path"),
     async showQuestionDialog({ title, message: text, yes, no, cancel }) {
@@ -196,6 +185,16 @@ export function createTauriPlatform(): Platform {
     settingsPath: () => invoke<string>("settings_path"),
     readSettings: () => invoke<SettingsFile>("read_settings"),
     writeSettings: (values) => invoke<void>("write_settings", { values }),
+    onOpenPaths(listener) {
+      // Paths wait in the backend until a window takes them, so none is lost before this runs.
+      const take = () =>
+        void invoke<OpenedPath[]>("take_opened_paths").then((paths) => {
+          if (paths.length > 0) listener(paths);
+        });
+      const unlisten = listen("paths-opened", take);
+      take();
+      return () => void unlisten.then((stop) => stop());
+    },
     onSettingsChanged(listener) {
       const unlisten = listen<SettingsFile>("settings-changed", (event) => listener(event.payload));
       return () => void unlisten.then((stop) => stop());

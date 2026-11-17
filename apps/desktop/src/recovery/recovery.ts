@@ -29,7 +29,9 @@ export interface Recovery {
    * Look for unsaved work left by an earlier run and, if there is any, ask what
    * to do with it. Restored documents open as tabs with unsaved changes.
    */
-  offerRestore(ask: (documents: readonly string[]) => Promise<RecoveryChoice>): Promise<void>;
+  offerRestore(
+    ask: (documents: readonly (string | null)[]) => Promise<RecoveryChoice>,
+  ): Promise<void>;
   /** Resolves once every snapshot write and removal so far has reached the platform. */
   settled(): Promise<void>;
 }
@@ -37,8 +39,8 @@ export interface Recovery {
 /** The contents of a snapshot file. */
 interface Snapshot {
   readonly version: 1;
-  /** Path of the document the text belongs to. */
-  readonly path: string;
+  /** Path of the document the text belongs to; `null` for an untitled document. */
+  readonly path: string | null;
   /** The document's full unsaved text. */
   readonly text: string;
   /** When the snapshot was taken (ms since the epoch). */
@@ -122,13 +124,15 @@ export function createRecovery({
       }
       if (found.length === 0) return;
 
-      // If several windows had the same document open, the newest text wins.
+      // If several windows had the same document open, the newest text wins. Untitled documents are all distinct.
       const latest = new Map<string, Snapshot>();
-      for (const { snapshot } of found.sort((a, b) => a.snapshot.takenAt - b.snapshot.takenAt)) {
-        latest.set(snapshot.path, snapshot);
+      for (const { id, snapshot } of found.sort(
+        (a, b) => a.snapshot.takenAt - b.snapshot.takenAt,
+      )) {
+        latest.set(snapshot.path ?? `untitled:${id}`, snapshot);
       }
 
-      const choice = await ask([...latest.keys()]);
+      const choice = await ask([...latest.values()].map((snapshot) => snapshot.path));
       if (choice === "later") return;
       if (choice === "restore") {
         for (const { path, text } of latest.values()) {
@@ -153,7 +157,7 @@ function parse(entry: RecoverySnapshot): Snapshot | null {
       "version" in value &&
       value.version === 1 &&
       "path" in value &&
-      typeof value.path === "string" &&
+      (typeof value.path === "string" || value.path === null) &&
       "text" in value &&
       typeof value.text === "string" &&
       "takenAt" in value &&

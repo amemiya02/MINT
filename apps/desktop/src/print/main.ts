@@ -11,9 +11,23 @@ import { type PrintJob, printEvents } from "./protocol.ts";
 const current = getCurrentWebviewWindow();
 const stop = await current.listen<PrintJob>(printEvents.document, (event) => {
   stop();
-  void show(event.payload).then(() => window.print());
+  void show(event.payload).then(() => {
+    closeAfterPrinting();
+    window.print();
+  });
 });
 await emit(printEvents.ready, current.label);
+
+/**
+ * Close this window once the print dialog is done with. WebView2 (Windows) and
+ * WebKitGTK (Linux) fire `afterprint` when the dialog closes. On macOS the
+ * webview may fire it while the dialog is still up, so the window stays open
+ * there and the user closes it.
+ */
+function closeAfterPrinting() {
+  if (/Mac/.test(navigator.userAgent)) return;
+  window.addEventListener("afterprint", () => void current.close(), { once: true });
+}
 
 /** Replace this page with the document, and wait until its fonts and images are in. */
 async function show({ html, title }: PrintJob): Promise<void> {

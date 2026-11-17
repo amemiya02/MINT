@@ -158,6 +158,17 @@ export function savedDialogs(page: Page): Promise<string[]> {
   ]);
 }
 
+/** Hand documents or folders to MINT from outside, as a double-click in the file manager would. */
+export async function openFromOutside(
+  page: Page,
+  paths: readonly { path: string; kind: "file" | "directory" }[],
+): Promise<void> {
+  await page.evaluate(
+    (p) => (window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.openFromOutside(p),
+    paths,
+  );
+}
+
 /** The documents sent to the printer so far, in order. */
 export function printedDocuments(page: Page): Promise<{ html: string; title: string }[]> {
   return page.evaluate(() => [

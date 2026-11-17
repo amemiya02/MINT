@@ -1,8 +1,14 @@
 import type { HostAdapter, ImageFile } from "@mint/editor";
+import {
+  baseName,
+  isAbsolutePath,
+  joinPath,
+  parentPath,
+  relativePath,
+  resolveFrom,
+} from "../paths.ts";
 import type { Platform } from "../platform/platform.ts";
 import type { Settings } from "../settings/schema.ts";
-import { baseName, resolveFrom } from "../tabs/paths.ts";
-import { joinPath, parentPath } from "../workspace/paths.ts";
 
 /** The part of the editor's host adapter that deals with images. */
 export type ImageHost = Required<Pick<HostAdapter, "resolveImageUrl" | "saveImage">>;
@@ -43,8 +49,8 @@ export function assetFolderFor(documentPath: string, policy: AssetFolderPolicy):
 export interface ImageSaveFailure {
   /** The image's file name as pasted or dropped. */
   readonly name: string;
-  /** The asset folder it was to be saved in. */
-  readonly folder: string;
+  /** The asset folder it was to be saved in; `null` when the document is untitled and has none yet. */
+  readonly folder: string | null;
   readonly reason: string;
 }
 
@@ -57,17 +63,24 @@ export interface ImageSaveFailure {
  */
 export function createImageHost(
   platform: Platform,
-  documentPath: () => string,
+  documentPath: () => string | null,
   policy: () => AssetFolderPolicy,
   onSaveFailed: (failure: ImageSaveFailure) => void,
 ): ImageHost {
   return {
     resolveImageUrl(path) {
       const local = fileUrlPath(path) ?? path;
-      return platform.assetUrl(resolveFrom(documentPath(), local));
+      const document = documentPath();
+      if (document === null) return isAbsolutePath(local) ? platform.assetUrl(local) : null;
+      return platform.assetUrl(resolveFrom(document, local));
     },
     async saveImage(file) {
       const document = documentPath();
+      if (document === null) {
+        const reason = "an untitled document has no asset folder yet";
+        onSaveFailed({ name: file.name, folder: null, reason });
+        throw new Error(reason);
+      }
       const folder = assetFolderFor(document, policy());
       try {
         const saved = await platform.saveAsset(folder, assetName(file), file.data);
@@ -122,22 +135,4 @@ function timestamp(date: Date): string {
     `${date.getFullYear()}${two(date.getMonth() + 1)}${two(date.getDate())}-` +
     `${two(date.getHours())}${two(date.getMinutes())}${two(date.getSeconds())}`
   );
-}
-
-/**
- * `to` relative to the directory `from`, `/`-separated (as Markdown wants,
- * on every platform). Falls back to `to` itself when they share no root,
- * such as two Windows drives.
- */
-export function relativePath(from: string, to: string): string {
-  const split = (p: string) => p.split(/[\\/]/).filter((s, i) => s !== "" || i === 0);
-  const base = split(from);
-  const target = split(to);
-  const sameRoot = (base[0] ?? "").toLowerCase() === (target[0] ?? "").toLowerCase();
-  if (!sameRoot) return to;
-  let common = 0;
-  while (common < base.length && common < target.length && base[common] === target[common]) {
-    common++;
-  }
-  return [...base.slice(common).map(() => ".."), ...target.slice(common)].join("/");
 }

@@ -66,6 +66,16 @@ test("Paste as Plain Text (⌘⇧V) inserts the clipboard text unchanged", async
   expect(await readFile(page, path)).toBe("<b>*not* converted</b>");
 });
 
+test("Paste as Plain Text reports a clipboard without text instead of doing nothing", async ({
+  page,
+}) => {
+  await openDocument(page, "", { clipboardText: null });
+  await page.keyboard.press("ControlOrMeta+Shift+V");
+  await expect(page.getByRole("alert")).toContainText(
+    "Could not paste as plain text: The clipboard holds no text",
+  );
+});
+
 test("Vim key bindings are switched on and off from the command palette and kept in settings.json", async ({
   page,
 }) => {

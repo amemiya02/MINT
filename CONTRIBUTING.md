@@ -32,14 +32,18 @@ apps/desktop/            Tauri app
   src/                   React shell
     platform/            Platform interface + Tauri and in-memory implementations
     i18n/                UI strings (en is the reference, zh-CN must match it)
-    workspace/           Folder sidebar: file tree, recent list; opens documents via the tab store
+    folder/              Folder sidebar: file tree, recent list; opens documents via the tab store
+    paths.ts             Every path helper of the shell (separators, names, resolving and relative paths)
     quick-open/          Quick open (⌘P): fuzzy file-name search over the folder's documents
     search/              Global search (⌘⇧F): text search over the folder's documents, streamed from the Rust backend
     tabs/                Tab store of one window; show a document with useTabStore().openDocument(path[, range]).
                          It also watches each open document and reloads it or reports conflicts
     commands.ts          Command registry (menus and shortcuts derive from it)
+    App.tsx              One window: wires the tab store, commands, sidebar and overlays together
+    window/              Parts of a window: tab panel, status bar, welcome screen, overlay state, dialogs it asks
     settings/            Settings schema, store synced with settings.json, settings window
     updates/             Update checks and the update notice (Platform.checkForUpdate)
+    print/               The print window PDF export opens (see the exception below)
   src-tauri/             Rust backend (kept thin, see ADR-0005)
   e2e/                   Playwright tests
 packages/editor/         Editor core: CodeMirror 6, no framework or platform imports
@@ -54,6 +58,11 @@ packaging/               Homebrew cask and winget manifest templates (see Distri
 - The shell reaches files, dialogs, windows and menus only through the
   `Platform` interface (`apps/desktop/src/platform/platform.ts`). Add new
   capabilities there and implement them in both `tauri.ts` and `memory.ts`.
+  One exception: `src/print/main.ts` is the entry point of the print window,
+  a separate page that only exists in the desktop app (`Platform.printDocument`
+  opens it). It talks to Tauri directly to receive its document, print and
+  close; it never runs with the in-memory platform, so a seam would only add
+  indirection.
 - Every user-visible string goes through `t()` from `src/i18n`. Add the key to
   `en.ts`; the type checker then requires the `zh-CN.ts` translation.
 - New user actions are added to the command registry (`commands.ts`), not wired
@@ -63,6 +72,28 @@ packaging/               Homebrew cask and winget manifest templates (see Distri
   control in the settings window are derived from that entry; read the value
   with `useSettings().settings.<key>`. The Rust side only reads, writes and
   watches the file and never needs to change.
+
+## Security and privacy
+
+- **Granted roots.** The Rust file commands only touch paths inside a root the
+  user granted: the folder of a document picked in an open or save dialog
+  (the dialogs run in Rust, `show_*_dialog`), a folder the user opened, a path
+  handed over by the file manager or the command line, settings.json and the
+  theme folder. Paths are compared after resolving symbolic links and `..`.
+  Grants are remembered in `access/granted-roots.json` in the app data
+  directory (outside every root), so the recent list and the recovery area
+  keep working after a restart. See `src-tauri/src/grants.rs`. The asset
+  protocol's scope starts empty and grows with the same roots. Consequence: an
+  image or asset folder outside the opened documents' folders does not load.
+- **HTML from documents.** Whatever goes into the app's DOM from a document
+  is sanitized (`renderHtml` in `packages/markdown`: GitHub's schema plus
+  MINT's own elements; ids get a `user-content-` prefix). An exported HTML file
+  keeps the HTML written in the document, minus `<script>`, `on…` handlers and
+  `javascript:` URLs (`renderExportHtml`).
+- **Remote images (privacy).** Documents may show images from `http(s)` URLs,
+  as ticket #5 requires, so opening a document can make requests to the servers
+  those images live on (revealing your IP address and when you read it). The
+  CSP keeps `img-src https: http:` for this; nothing else is loaded remotely.
 
 ## Tests
 
@@ -86,7 +117,12 @@ and settings.json via `files: { [settingsPath]: "…" }`, change files from outs
 `.github/workflows/ci.yml` runs on every pull request (and on pushes to `main`
 and `feat/**`): Biome, type check, rustfmt and the packaging templates once on Linux, then unit tests,
 Playwright E2E tests, clippy and `cargo test` on Linux, macOS and Windows.
-There are no performance gates.
+A smoke job builds the real app on Linux and drives it over WebDriver with
+`tauri-driver` (`apps/desktop/smoke/`): open a document from the command line,
+edit, save, check the file. It cannot run on macOS (tauri-driver has no macOS
+support); on Linux run `tauri-driver &` then
+`MINT_APP=src-tauri/target/debug/mint node --test smoke/*.smoke.ts` in
+`apps/desktop` under X. There are no performance gates.
 
 ## Releases and automatic updates
 
