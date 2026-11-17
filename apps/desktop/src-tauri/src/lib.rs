@@ -112,7 +112,7 @@ fn list_folder_files(path: PathBuf, extensions: Vec<String>) -> Vec<PathBuf> {
     walk::list_files(&path, &extensions)
 }
 
-/// Live folder watchers, by id. Dropping a watcher stops it.
+/// Live folder and document watchers, by id. Dropping a watcher stops it.
 #[derive(Default)]
 struct Watchers {
     next_id: AtomicU32,
@@ -128,6 +128,27 @@ fn watch_folder(
 ) -> Result<u32, String> {
     let watcher = folder::FolderWatcher::new(&path, move |paths| {
         let _ = on_change.send(paths);
+    })
+    .map_err(|e| e.to_string())?;
+    let id = watchers.next_id.fetch_add(1, Ordering::Relaxed);
+    watchers
+        .active
+        .lock()
+        .map_err(|e| e.to_string())?
+        .insert(id, watcher);
+    Ok(id)
+}
+
+/// Watch one document for changes on disk; `on_change` is signalled after each debounced batch.
+/// Stop with `unwatch_folder`, which ends any watcher by id.
+#[tauri::command]
+fn watch_file(
+    path: PathBuf,
+    on_change: Channel<()>,
+    watchers: State<'_, Watchers>,
+) -> Result<u32, String> {
+    let watcher = folder::FolderWatcher::document(&path, move || {
+        let _ = on_change.send(());
     })
     .map_err(|e| e.to_string())?;
     let id = watchers.next_id.fetch_add(1, Ordering::Relaxed);
@@ -198,6 +219,7 @@ pub fn run() {
             move_to_trash,
             list_folder_files,
             watch_folder,
+            watch_file,
             unwatch_folder,
             read_app_data,
             write_app_data,

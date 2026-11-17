@@ -51,6 +51,8 @@ export interface MemoryPlatform extends Platform {
   externalRemove(path: string): void;
   /** URLs passed to `openExternal`, in order. */
   readonly openedUrls: readonly string[];
+  /** Rename or move a file or directory as another program would (watchers are notified). */
+  externalRename(from: string, to: string): void;
   /** Messages of the question dialogs shown so far. */
   readonly questions: readonly string[];
   /** Whether this window has closed. */
@@ -90,6 +92,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       id: path.slice(memoryRecoveryDir.length + 1, -".json".length),
       contents,
     }));
+  const fileWatchers = new Set<{ readonly path: string; readonly onChange: () => void }>();
 
   // Same contract as the Rust backend's `settings::load`.
   function readSettings(): SettingsFile {
@@ -142,6 +145,26 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       // Like a real file watcher, events arrive asynchronously.
       if (touched.length > 0) setTimeout(() => watcher.onChange(touched), 0);
     }
+    for (const watcher of fileWatchers) {
+      // The file itself, or a directory around it that was removed or renamed.
+      if (paths.some((p) => within(watcher.path, p))) setTimeout(() => watcher.onChange(), 0);
+    }
+  }
+
+  function move(from: string, to: string): void {
+    const moved = (p: string) => to + p.slice(from.length);
+    for (const [p, text] of [...files]) {
+      if (within(p, from)) {
+        files.delete(p);
+        files.set(moved(p), text);
+      }
+    }
+    for (const d of [...directories]) {
+      if (within(d, from)) {
+        directories.delete(d);
+        directories.add(moved(d));
+      }
+    }
   }
 
   function remove(path: string): void {
@@ -166,7 +189,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     async writeTextFile(path, text) {
       requireParent(path);
       files.set(path, text);
-      // Mirrors the backend's file watcher: any write to settings.json is reported.
+      // Mirrors the backend's file watchers: every write is reported, MINT's own included.
       if (path === memorySettingsPath) notifySettings();
       notify(path);
     },
@@ -235,19 +258,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       if (!exists(from)) throw new Error(`No such file or directory: ${from}`);
       if (exists(to)) throw new Error(`${to} already exists`);
       requireParent(to);
-      const move = (p: string) => to + p.slice(from.length);
-      for (const [p, text] of [...files]) {
-        if (within(p, from)) {
-          files.delete(p);
-          files.set(move(p), text);
-        }
-      }
-      for (const d of [...directories]) {
-        if (within(d, from)) {
-          directories.delete(d);
-          directories.add(move(d));
-        }
-      }
+      move(from, to);
       notify(from, to);
     },
     async moveToTrash(path) {
@@ -260,6 +271,11 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       const watcher = { root, onChange };
       watchers.add(watcher);
       return () => watchers.delete(watcher);
+    },
+    async watchFile(path, onChange) {
+      const watcher = { path, onChange };
+      fileWatchers.add(watcher);
+      return () => fileWatchers.delete(watcher);
     },
     async readAppData(name) {
       return appData.get(name) ?? null;
@@ -335,6 +351,10 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     },
     async deleteRecoverySnapshot(id) {
       files.delete(recoveryPath(id));
+    },
+    externalRename(from, to) {
+      move(from, to);
+      notify(from, to);
     },
     runMenuItem(id) {
       const command = commands.find((c) => c.id === id);

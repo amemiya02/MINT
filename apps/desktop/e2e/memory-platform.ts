@@ -82,6 +82,14 @@ export function openedUrls(page: Page): Promise<readonly string[]> {
   ]);
 }
 
+/** Rename or move a file or directory the way another program would. */
+export function externalRename(page: Page, from: string, to: string): Promise<void> {
+  return page.evaluate(
+    ([f, t]) => (window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.externalRename(f, t),
+    [from, to] as const,
+  );
+}
+
 /**
  * Change a file as another program would. Watchers are notified, so this is how
  * tests edit settings.json behind MINT's back.

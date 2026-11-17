@@ -125,4 +125,17 @@ export const en = {
   "recovery.restore": "Restore",
   "recovery.discard": "Discard",
   "recovery.later": "Decide Later",
+
+  "external.conflict": "{name} was changed by another program, and you have unsaved changes here.",
+  "external.keepMine": "Keep My Changes",
+  "external.loadDisk": "Load from Disk",
+  "external.compare": "Compare",
+  "external.compare.title": "Compare with Disk",
+  "external.compare.legend":
+    "Lines marked − are only in this tab; lines marked + are only in {name} on disk.",
+  "external.compare.close": "Close",
+  "external.missing":
+    "{name} was deleted or moved by another program. Save to write it back to its old place.",
+  "external.save": "Save",
+  "external.dismiss": "Dismiss",
 } as const;
