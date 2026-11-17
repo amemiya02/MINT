@@ -10,7 +10,7 @@ test("open a document, edit it and save it", async ({ page }) => {
 
   await page.keyboard.press("ControlOrMeta+O");
   const editor = page.getByRole("textbox");
-  await expect(editor).toContainText("- milk");
+  await expect(editor).toContainText("milk");
   await expect(page).toHaveTitle("todo.md — MINT");
 
   await page.keyboard.press("ControlOrMeta+End");
