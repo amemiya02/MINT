@@ -5,6 +5,8 @@ export interface MemoryPlatformOptions {
   readonly files?: Readonly<Record<string, string>>;
   /** Paths the open dialog returns, in order; `null` simulates cancelling. */
   readonly openDialogResults?: readonly (string | null)[];
+  /** Answers the question dialog gives, in order; once used up it answers `cancel`. */
+  readonly questionDialogResults?: readonly ("yes" | "no" | "cancel")[];
   readonly locale?: string;
 }
 
@@ -13,6 +15,10 @@ export interface MemoryPlatform extends Platform {
   /** Current file contents, keyed by path. */
   readonly files: Map<string, string>;
   readonly windowTitle: string;
+  /** Messages of the question dialogs shown so far. */
+  readonly questions: readonly string[];
+  /** Whether this window has closed. */
+  readonly closed: boolean;
   /** Activate a menu item by id, as a click in a native menu would. */
   runMenuItem(id: string): void;
 }
@@ -20,8 +26,12 @@ export interface MemoryPlatform extends Platform {
 export function createMemoryPlatform(options: MemoryPlatformOptions = {}): MemoryPlatform {
   const files = new Map(Object.entries(options.files ?? {}));
   const dialogResults = [...(options.openDialogResults ?? [])];
+  const questionResults = [...(options.questionDialogResults ?? [])];
+  const questions: string[] = [];
   let commands: Extract<MenuItemSpec, { kind: "command" }>[] = [];
   let windowTitle = "";
+  let closeHandler: (() => Promise<boolean>) | null = null;
+  let closed = false;
 
   // Without a native menu, accelerators are handled in the page.
   window.addEventListener("keydown", (event) => {
@@ -45,8 +55,33 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     async writeTextFile(path, text) {
       files.set(path, text);
     },
+    get questions() {
+      return questions;
+    },
+    get closed() {
+      return closed;
+    },
     async showOpenDialog() {
       return dialogResults.shift() ?? null;
+    },
+    async showQuestionDialog({ message }) {
+      questions.push(message);
+      return questionResults.shift() ?? "cancel";
+    },
+    async openWindow() {
+      // A browser window running the same shell, with its own in-memory platform.
+      window.open(location.href, "_blank");
+    },
+    async closeWindow() {
+      if (closeHandler && !(await closeHandler())) return;
+      closed = true;
+      window.close();
+    },
+    onCloseRequested(handler) {
+      closeHandler = handler;
+      return () => {
+        if (closeHandler === handler) closeHandler = null;
+      };
     },
     async setWindowTitle(title) {
       windowTitle = title;

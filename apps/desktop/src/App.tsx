@@ -1,81 +1,85 @@
-import type { MintEditor } from "@mint/editor";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { buildMenu, type CommandId } from "./commands.ts";
 import { EditorPane } from "./EditorPane.tsx";
-import { useT } from "./i18n/index.ts";
+import { type Translate, useT } from "./i18n/index.ts";
 import type { Platform } from "./platform/platform.ts";
+import { TabStoreContext, useTabStore, useTabsState } from "./tabs/context.ts";
+import { baseName } from "./tabs/paths.ts";
+import { TabBar } from "./tabs/TabBar.tsx";
+import { createTabStore, type Tab, type TabError, type TabStore } from "./tabs/tab-store.ts";
 
-interface OpenDocument {
-  readonly path: string;
-  /** Text as read from disk; the editor owns the live text. */
-  readonly text: string;
-  /** Distinguishes reopening the same path, so the editor is recreated. */
-  readonly session: number;
-}
-
-let nextSession = 1;
-
+/** One window of the shell. Each window owns its own tabs; nothing is shared between windows. */
 export function App({ platform }: { readonly platform: Platform }) {
   const t = useT();
-  const [document, setDocument] = useState<OpenDocument | null>(null);
-  const [dirty, setDirty] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const editor = useRef<MintEditor | null>(null);
-  const version = useRef(0);
+  const translate = useRef(t);
+  translate.current = t;
+  const [store] = useState(() =>
+    createTabStore({
+      platform,
+      askUnsaved: (tab) => askUnsaved(platform, translate.current, tab),
+    }),
+  );
 
-  const openDocument = useCallback(async () => {
+  return (
+    <TabStoreContext value={store}>
+      <Window platform={platform} store={store} />
+    </TabStoreContext>
+  );
+}
+
+async function askUnsaved(platform: Platform, t: Translate, tab: Tab) {
+  const answer = await platform.showQuestionDialog({
+    title: t("unsaved.title"),
+    message: t("unsaved.message", { name: baseName(tab.path) }),
+    yes: t("unsaved.save"),
+    no: t("unsaved.discard"),
+    cancel: t("unsaved.cancel"),
+  });
+  return answer === "yes" ? "save" : answer === "no" ? "discard" : "cancel";
+}
+
+function Window({ platform, store }: { readonly platform: Platform; readonly store: TabStore }) {
+  const t = useT();
+  const { tabs, activeId, error } = useTabsState();
+  const active = tabs.find((tab) => tab.id === activeId) ?? null;
+
+  const open = useCallback(async () => {
     const path = await platform.showOpenDialog({
       title: t("dialog.open.title"),
       filters: [{ name: t("dialog.filter.markdown"), extensions: ["md", "markdown"] }],
     });
-    if (!path) return;
-    try {
-      const text = await platform.readTextFile(path);
-      setDocument({ path, text, session: nextSession++ });
-      setDirty(false);
-      setError(null);
-    } catch (e) {
-      setError(t("error.open", { path, reason: reasonOf(e) }));
-    }
-  }, [platform, t]);
-
-  const saveDocument = useCallback(async () => {
-    if (!document || !editor.current) return;
-    const savedVersion = version.current;
-    try {
-      await platform.writeTextFile(document.path, editor.current.getText());
-      setDirty(version.current !== savedVersion);
-      setError(null);
-    } catch (e) {
-      setError(t("error.save", { path: document.path, reason: reasonOf(e) }));
-    }
-  }, [document, platform, t]);
+    if (path) await store.openDocument(path);
+  }, [platform, store, t]);
 
   const handlers = useRef<Record<CommandId, () => void>>({} as Record<CommandId, () => void>);
   handlers.current = {
-    "file.open": () => void openDocument(),
-    "file.save": () => void saveDocument(),
+    "file.open": () => void open(),
+    "file.save": () => {
+      if (activeId !== null) void store.save(activeId);
+    },
+    "tab.close": () => {
+      if (activeId !== null) void store.close(activeId);
+      else void platform.closeWindow();
+    },
+    "tab.next": () => store.activateNext(),
+    "tab.previous": () => store.activatePrevious(),
+    "window.new": () => void platform.openWindow(),
   };
 
   useEffect(() => {
     void platform.setMenu(buildMenu(t, (id) => handlers.current[id]()));
   }, [platform, t]);
 
-  const name = document ? baseName(document.path) : null;
+  useEffect(() => platform.onCloseRequested(() => store.closeAll()), [platform, store]);
+
+  const name = active ? baseName(active.path) : null;
+  const dirty = active?.dirty ?? false;
   useEffect(() => {
     const title = name
       ? t(dirty ? "window.titleUnsaved" : "window.title", { name })
       : t("app.name");
     void platform.setWindowTitle(title);
   }, [name, dirty, platform, t]);
-
-  const onChange = useCallback(() => {
-    version.current++;
-    setDirty(true);
-  }, []);
-  const onReady = useCallback((instance: MintEditor | null) => {
-    editor.current = instance;
-  }, []);
 
   return (
     <div className="flex h-full flex-col bg-(--mint-bg) text-(--mint-fg)">
@@ -84,24 +88,21 @@ export function App({ platform }: { readonly platform: Platform }) {
           role="alert"
           className="border-b border-(--mint-border) bg-(--mint-error-bg) px-4 py-2 text-sm text-(--mint-error-fg)"
         >
-          {error}
+          {errorMessage(t, error)}
         </div>
       )}
+      {tabs.length > 0 && <TabBar />}
       <main className="min-h-0 flex-1">
-        {document ? (
-          <EditorPane
-            key={document.session}
-            text={document.text}
-            onReady={onReady}
-            onChange={onChange}
-          />
-        ) : (
+        {tabs.map((tab) => (
+          <TabPanel key={tab.id} tab={tab} active={tab.id === activeId} />
+        ))}
+        {tabs.length === 0 && (
           <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
             <h1 className="text-lg font-medium">{t("welcome.title")}</h1>
             <p className="text-sm text-(--mint-muted)">{t("welcome.body")}</p>
             <button
               type="button"
-              onClick={() => void openDocument()}
+              onClick={() => void open()}
               className="mt-2 rounded-md border border-(--mint-border) px-4 py-1.5 text-sm hover:bg-(--mint-hover) focus-visible:outline-2 focus-visible:outline-(--mint-accent)"
             >
               {t("welcome.open")}
@@ -109,9 +110,9 @@ export function App({ platform }: { readonly platform: Platform }) {
           </div>
         )}
       </main>
-      {document && (
+      {active && (
         <footer className="flex items-center justify-between border-t border-(--mint-border) px-4 py-1 text-xs text-(--mint-muted)">
-          <span title={document.path}>{name}</span>
+          <span title={active.path}>{name}</span>
           <span>{t(dirty ? "status.unsaved" : "status.saved")}</span>
         </footer>
       )}
@@ -119,10 +120,29 @@ export function App({ platform }: { readonly platform: Platform }) {
   );
 }
 
-function baseName(path: string): string {
-  return path.split(/[\\/]/).pop() || path;
+/** Every open tab keeps its editor mounted, so undo history and selection survive switching. */
+function TabPanel({ tab, active }: { readonly tab: Tab; readonly active: boolean }) {
+  const store = useTabStore();
+  const { id } = tab;
+  const onReady = useCallback(
+    (editor: Parameters<TabStore["attachEditor"]>[1]) => store.attachEditor(id, editor),
+    [store, id],
+  );
+  const onChange = useCallback(() => store.markChanged(id), [store, id]);
+  return (
+    <div
+      role="tabpanel"
+      id={`tabpanel-${id}`}
+      aria-labelledby={`tab-${id}`}
+      hidden={!active}
+      className="h-full"
+    >
+      <EditorPane text={tab.text} active={active} onReady={onReady} onChange={onChange} />
+    </div>
+  );
 }
 
-function reasonOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+function errorMessage(t: Translate, error: TabError): string {
+  const params = { path: error.path, reason: error.reason };
+  return error.kind === "open" ? t("error.open", params) : t("error.save", params);
 }
