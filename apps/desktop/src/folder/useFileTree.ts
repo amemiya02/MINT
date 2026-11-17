@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { isHiddenName, rebasePath } from "../paths.ts";
 import type { DirectoryEntry, Platform } from "../platform/platform.ts";
-import { isHiddenName, rebasePath } from "./paths.ts";
 
 /** One visible row of the file tree, in display order. */
 export interface TreeRow {

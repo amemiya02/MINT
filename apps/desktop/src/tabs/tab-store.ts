@@ -1,6 +1,6 @@
 import type { MintEditor } from "@mint/editor";
+import { isWithin, rebasePath } from "../paths.ts";
 import type { Platform } from "../platform/platform.ts";
-import { isWithin, rebasePath } from "./paths.ts";
 
 /** One open document in this window. */
 export interface Tab {

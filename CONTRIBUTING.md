@@ -32,7 +32,8 @@ apps/desktop/            Tauri app
   src/                   React shell
     platform/            Platform interface + Tauri and in-memory implementations
     i18n/                UI strings (en is the reference, zh-CN must match it)
-    workspace/           Folder sidebar: file tree, recent list; opens documents via the tab store
+    folder/              Folder sidebar: file tree, recent list; opens documents via the tab store
+    paths.ts             Every path helper of the shell (separators, names, resolving and relative paths)
     quick-open/          Quick open (⌘P): fuzzy file-name search over the folder's documents
     search/              Global search (⌘⇧F): text search over the folder's documents, streamed from the Rust backend
     tabs/                Tab store of one window; show a document with useTabStore().openDocument(path[, range]).
@@ -40,6 +41,7 @@ apps/desktop/            Tauri app
     commands.ts          Command registry (menus and shortcuts derive from it)
     settings/            Settings schema, store synced with settings.json, settings window
     updates/             Update checks and the update notice (Platform.checkForUpdate)
+    print/               The print window PDF export opens (see the exception below)
   src-tauri/             Rust backend (kept thin, see ADR-0005)
   e2e/                   Playwright tests
 packages/editor/         Editor core: CodeMirror 6, no framework or platform imports
@@ -54,6 +56,11 @@ packaging/               Homebrew cask and winget manifest templates (see Distri
 - The shell reaches files, dialogs, windows and menus only through the
   `Platform` interface (`apps/desktop/src/platform/platform.ts`). Add new
   capabilities there and implement them in both `tauri.ts` and `memory.ts`.
+  One exception: `src/print/main.ts` is the entry point of the print window,
+  a separate page that only exists in the desktop app (`Platform.printDocument`
+  opens it). It talks to Tauri directly to receive its document, print and
+  close; it never runs with the in-memory platform, so a seam would only add
+  indirection.
 - Every user-visible string goes through `t()` from `src/i18n`. Add the key to
   `en.ts`; the type checker then requires the `zh-CN.ts` translation.
 - New user actions are added to the command registry (`commands.ts`), not wired

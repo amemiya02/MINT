@@ -1,8 +1,8 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useT } from "../i18n/index.ts";
+import { baseName } from "../paths.ts";
 import type { Platform } from "../platform/platform.ts";
 import { useSettings } from "../settings/useSettings.ts";
-import { baseName } from "../tabs/paths.ts";
 import { useTheme } from "../theme/useTheme.ts";
 import { documentHtml, type HtmlExportChoice } from "./html-export.ts";
 

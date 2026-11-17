@@ -1,7 +1,7 @@
 import { type KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useT } from "../i18n/index.ts";
+import { baseName, documentExtensions, isWithin } from "../paths.ts";
 import type { Platform } from "../platform/platform.ts";
-import { baseName, documentExtensions, isWithin } from "../workspace/paths.ts";
 import { type FuzzyMatch, fuzzyMatch } from "./fuzzy.ts";
 
 export interface QuickOpenProps {

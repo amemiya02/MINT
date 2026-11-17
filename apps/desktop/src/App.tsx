@@ -13,7 +13,10 @@ import {
 import { EditorPane } from "./EditorPane.tsx";
 import { ExportDialog, type ExportFormat } from "./export/ExportDialog.tsx";
 import { FindBar, type FindMode } from "./find/FindBar.tsx";
+import { type RecentList, useRecent } from "./folder/recent.ts";
+import { Sidebar, type SidebarView } from "./folder/Sidebar.tsx";
 import { type Translate, useT } from "./i18n/index.ts";
+import { baseName, documentExtensions, isAbsolutePath, resolveFrom } from "./paths.ts";
 import type { Platform } from "./platform/platform.ts";
 import { QuickOpen } from "./quick-open/QuickOpen.tsx";
 import { createRecovery, type Recovery, type RecoveryChoice } from "./recovery/recovery.ts";
@@ -24,15 +27,11 @@ import { useDialect } from "./settings/useDialect.ts";
 import { useSettings, useSettingsStore } from "./settings/useSettings.ts";
 import { TabStoreContext, useTabStore, useTabsState } from "./tabs/context.ts";
 import { ExternalChangeNotice } from "./tabs/ExternalChangeNotice.tsx";
-import { baseName, isAbsolutePath, resolveFrom } from "./tabs/paths.ts";
 import { TabBar } from "./tabs/TabBar.tsx";
 import { tabName } from "./tabs/tab-name.ts";
 import { createTabStore, type Tab, type TabError, type TabStore } from "./tabs/tab-store.ts";
 import { ThemeIssue } from "./theme/ThemeIssue.tsx";
 import { UpdateNotice, useUpdates } from "./updates/updates.tsx";
-import { documentExtensions } from "./workspace/paths.ts";
-import { type RecentList, useRecent } from "./workspace/recent.ts";
-import { Sidebar, type SidebarView } from "./workspace/Sidebar.tsx";
 
 /** One window of the shell. Each window owns its own tabs; nothing is shared between windows. */
 export function App({ platform }: { readonly platform: Platform }) {

@@ -1,3 +1,4 @@
+import { parentPath } from "../paths.ts";
 import { createIgnoreRules } from "./gitignore.ts";
 import type {
   DirectoryEntry,
@@ -111,7 +112,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
   const assetUrls = new Map<Uint8Array, string>();
   // The config directory always exists, so settings.json can be created from outside.
   const directories = new Set([
-    memorySettingsPath.slice(0, memorySettingsPath.lastIndexOf("/")),
+    parentPath(memorySettingsPath),
     memoryThemesPath,
     ...(options.directories ?? []),
   ]);
@@ -573,8 +574,10 @@ function mimeType(path: string): string {
   );
 }
 
+/** Like `parentPath`, but the parent of a root-level path is `""` rather than `/`. */
 function parentOf(path: string): string {
-  return path.slice(0, path.lastIndexOf("/"));
+  const parent = parentPath(path);
+  return parent === "/" ? "" : parent;
 }
 
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
