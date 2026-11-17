@@ -22,6 +22,10 @@
   --mint-accent: #2f7d6d;
   --mint-error-bg: #fdecea;
   --mint-error-fg: #a1260d;
+  --mint-notice-bg: #fdf6e3;
+  --mint-notice-fg: #6f4e00;
+  --mint-diff-removed-bg: #fbe4e2;
+  --mint-diff-added-bg: #ddf4e4;
   --mint-find-match: #ffe58a99;
   --mint-find-current: #ffb84d;
 
@@ -40,6 +44,10 @@
     --mint-accent: #5fc2ac;
     --mint-error-bg: #3b1f1c;
     --mint-error-fg: #f2b8ad;
+    --mint-notice-bg: #352e1a;
+    --mint-notice-fg: #f0d58c;
+    --mint-diff-removed-bg: #4a2420;
+    --mint-diff-added-bg: #1f3d2a;
     --mint-find-match: #8a6d0066;
     --mint-find-current: #b8741a;
   }

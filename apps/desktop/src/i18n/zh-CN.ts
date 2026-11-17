@@ -122,4 +122,15 @@ export const zhCN: Messages = {
   "recovery.restore": "恢复",
   "recovery.discard": "丢弃",
   "recovery.later": "稍后再说",
+
+  "external.conflict": "{name} 已被其他程序修改，而这里还有未保存的改动。",
+  "external.keepMine": "保留我的改动",
+  "external.loadDisk": "载入磁盘内容",
+  "external.compare": "查看差异",
+  "external.compare.title": "与磁盘内容比较",
+  "external.compare.legend": "标 − 的行只在此标签页中，标 + 的行只在磁盘上的 {name} 中。",
+  "external.compare.close": "关闭",
+  "external.missing": "{name} 已被其他程序删除或移动。保存即可将它写回原位置。",
+  "external.save": "保存",
+  "external.dismiss": "忽略",
 };

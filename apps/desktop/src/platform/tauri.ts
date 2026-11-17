@@ -33,6 +33,12 @@ export function createTauriPlatform(): Platform {
     locale: navigator.language,
     readTextFile: (path) => invoke<string>("read_text_file", { path }),
     writeTextFile: (path, text) => invoke<void>("write_text_file", { path, text }),
+    async watchFile(path, onChange) {
+      const channel = new Channel<null>();
+      channel.onmessage = () => onChange();
+      const id = await invoke<number>("watch_file", { path, onChange: channel });
+      return () => void invoke<void>("unwatch_folder", { id });
+    },
     async showOpenDialog({ title, filters }) {
       const picked = await open({
         title,

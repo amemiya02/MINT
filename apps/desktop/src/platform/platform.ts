@@ -19,6 +19,14 @@ export interface Platform {
   /** Write text as UTF-8 atomically: either the whole new content lands or the old file stays intact. */
   writeTextFile(path: string, text: string): Promise<void>;
 
+  /**
+   * Watch one document for changes made on disk: modified, created, deleted or
+   * renamed away. `onChange` is called after each (debounced) batch of changes,
+   * MINT's own saves included; it is up to the caller to compare contents.
+   * Resolves to a function that stops watching.
+   */
+  watchFile(path: string, onChange: () => void): Promise<() => void>;
+
   /** Ask the user to pick a document. Resolves to its path, or `null` if cancelled. */
   showOpenDialog(options: OpenDialogOptions): Promise<string | null>;
 
