@@ -1,14 +1,17 @@
 import type { LinkTarget } from "@mint/editor";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { createImageHost } from "./assets/image-host.ts";
+import { createAutosave } from "./autosave/autosave.ts";
 import { buildMenu, type CommandId } from "./commands.ts";
 import { EditorPane } from "./EditorPane.tsx";
 import { FindBar, type FindMode } from "./find/FindBar.tsx";
 import { type Translate, useT } from "./i18n/index.ts";
 import type { Platform } from "./platform/platform.ts";
 import { QuickOpen } from "./quick-open/QuickOpen.tsx";
+import { createRecovery, type Recovery, type RecoveryChoice } from "./recovery/recovery.ts";
 import { SettingsDialog } from "./settings/SettingsDialog.tsx";
 import { SettingsIssues } from "./settings/SettingsIssues.tsx";
+import { useSettingsStore } from "./settings/useSettings.ts";
 import { TabStoreContext, useTabStore, useTabsState } from "./tabs/context.ts";
 import { baseName, resolveFrom } from "./tabs/paths.ts";
 import { TabBar } from "./tabs/TabBar.tsx";
@@ -22,18 +25,51 @@ export function App({ platform }: { readonly platform: Platform }) {
   const t = useT();
   const translate = useRef(t);
   translate.current = t;
+  const settings = useSettingsStore();
   const [store] = useState(() =>
     createTabStore({
       platform,
       askUnsaved: (tab) => askUnsaved(platform, translate.current, tab),
     }),
   );
+  const [autosave] = useState(() =>
+    createAutosave({ store, isEnabled: () => settings.getSnapshot().settings.autosave }),
+  );
+  useEffect(() => () => autosave.dispose(), [autosave]);
+  const [recovery] = useState(() => createRecovery({ platform, store }));
+  useEffect(() => recovery.start(), [recovery]);
+  useEffect(() => {
+    void recovery.offerRestore((paths) => askRestore(platform, translate.current, paths));
+  }, [platform, recovery]);
+
+  const onEdited = useCallback(
+    (id: number) => {
+      autosave.edited(id);
+      recovery.edited(id);
+    },
+    [autosave, recovery],
+  );
 
   return (
     <TabStoreContext value={store}>
-      <Window platform={platform} store={store} />
+      <Window platform={platform} store={store} recovery={recovery} onEdited={onEdited} />
     </TabStoreContext>
   );
+}
+
+async function askRestore(
+  platform: Platform,
+  t: Translate,
+  paths: readonly string[],
+): Promise<RecoveryChoice> {
+  const answer = await platform.showQuestionDialog({
+    title: t("recovery.title"),
+    message: t("recovery.message", { names: paths.map(baseName).join(t("recovery.separator")) }),
+    yes: t("recovery.restore"),
+    no: t("recovery.discard"),
+    cancel: t("recovery.later"),
+  });
+  return answer === "yes" ? "restore" : answer === "no" ? "discard" : "later";
 }
 
 async function askUnsaved(platform: Platform, t: Translate, tab: Tab) {
@@ -47,7 +83,15 @@ async function askUnsaved(platform: Platform, t: Translate, tab: Tab) {
   return answer === "yes" ? "save" : answer === "no" ? "discard" : "cancel";
 }
 
-function Window({ platform, store }: { readonly platform: Platform; readonly store: TabStore }) {
+interface WindowProps {
+  readonly platform: Platform;
+  readonly store: TabStore;
+  readonly recovery: Recovery;
+  /** Called after every edit the user makes in a tab. */
+  readonly onEdited: (id: number) => void;
+}
+
+function Window({ platform, store, recovery, onEdited }: WindowProps) {
   const t = useT();
   const { tabs, activeId, error } = useTabsState();
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -132,7 +176,16 @@ function Window({ platform, store }: { readonly platform: Platform; readonly sto
     void platform.setMenu(buildMenu(t, (id) => handlers.current[id]()));
   }, [platform, t]);
 
-  useEffect(() => platform.onCloseRequested(() => store.closeAll()), [platform, store]);
+  useEffect(
+    () =>
+      platform.onCloseRequested(async () => {
+        if (!(await store.closeAll())) return false;
+        // Closed tabs need no recovery: let their snapshots be removed before the window goes.
+        await recovery.settled();
+        return true;
+      }),
+    [platform, store, recovery],
+  );
 
   const name = active ? baseName(active.path) : null;
   const dirty = active?.dirty ?? false;
@@ -186,6 +239,7 @@ function Window({ platform, store }: { readonly platform: Platform; readonly sto
                 active={tab.id === activeId}
                 platform={platform}
                 onModeChange={modeChanged}
+                onEdited={onEdited}
               />
             ))}
             {tabs.length === 0 && (
@@ -236,11 +290,13 @@ function TabPanel({
   active,
   platform,
   onModeChange,
+  onEdited,
 }: {
   readonly tab: Tab;
   readonly active: boolean;
   readonly platform: Platform;
   readonly onModeChange: () => void;
+  readonly onEdited: (id: number) => void;
 }) {
   const store = useTabStore();
   const { id, path } = tab;
@@ -248,7 +304,10 @@ function TabPanel({
     (editor: Parameters<TabStore["attachEditor"]>[1]) => store.attachEditor(id, editor),
     [store, id],
   );
-  const onChange = useCallback(() => store.markChanged(id), [store, id]);
+  const onChange = useCallback(() => {
+    store.markChanged(id);
+    onEdited(id);
+  }, [store, id, onEdited]);
   const currentPath = useRef(path);
   currentPath.current = path;
   const [imageHost] = useState(() => createImageHost(platform, () => currentPath.current));

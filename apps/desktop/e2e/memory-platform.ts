@@ -1,7 +1,10 @@
 import type { Page } from "@playwright/test";
 import type { MemoryPlatform, MemoryPlatformOptions } from "../src/platform/memory.ts";
 
-export { memorySettingsPath as settingsPath } from "../src/platform/memory.ts";
+export {
+  memoryRecoveryDir as recoveryDir,
+  memorySettingsPath as settingsPath,
+} from "../src/platform/memory.ts";
 
 // Page functions are serialised into the browser, so they reach the platform through `window`.
 type MintWindow = {
@@ -96,4 +99,11 @@ export function readBinaryFile(page: Page, path: string): Promise<number[] | und
     const data = (window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.binaryFiles.get(p);
     return data && [...data];
   }, path);
+}
+
+/** Every file the in-memory platform holds, keyed by path (documents, settings, recovery area). */
+export function files(page: Page): Promise<Record<string, string>> {
+  return page.evaluate(() =>
+    Object.fromEntries((window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.files),
+  );
 }

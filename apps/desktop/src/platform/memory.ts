@@ -4,12 +4,19 @@ import type {
   MenuItemSpec,
   MenuSpec,
   Platform,
+  RecoverySnapshot,
   SettingsFile,
   SettingsValues,
 } from "./platform.ts";
 
 /** Where the in-memory platform keeps settings.json (seed it through `files`). */
 export const memorySettingsPath = "/config/MINT/settings.json";
+
+/**
+ * Where the in-memory platform keeps recovery snapshots, one `<id>.json` file each.
+ * Seeding `files` with snapshots here simulates work left behind by a crash.
+ */
+export const memoryRecoveryDir = "/data/MINT/recovery";
 
 export interface MemoryPlatformOptions {
   /** Initial files, keyed by absolute `/`-separated path. Their parent directories exist implicitly. */
@@ -83,6 +90,17 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
   let closeHandler: (() => Promise<boolean>) | null = null;
   let closed = false;
   const settingsListeners = new Set<(file: SettingsFile) => void>();
+  const recoveryPath = (id: string) => {
+    if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error(`Invalid recovery snapshot id: ${id}`);
+    return `${memoryRecoveryDir}/${id}.json`;
+  };
+  // Like the backend, the snapshots of the previous run are those present at start-up.
+  let leftOver: RecoverySnapshot[] | null = [...files]
+    .filter(([path]) => path.startsWith(`${memoryRecoveryDir}/`) && path.endsWith(".json"))
+    .map(([path, contents]) => ({
+      id: path.slice(memoryRecoveryDir.length + 1, -".json".length),
+      contents,
+    }));
 
   // Same contract as the Rust backend's `settings::load`.
   function readSettings(): SettingsFile {
@@ -343,6 +361,17 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     externalRemove(path) {
       remove(path);
       notify(path);
+    },
+    async takeRecoverySnapshots() {
+      const snapshots = leftOver ?? [];
+      leftOver = null;
+      return snapshots;
+    },
+    async writeRecoverySnapshot(id, contents) {
+      files.set(recoveryPath(id), contents);
+    },
+    async deleteRecoverySnapshot(id) {
+      files.delete(recoveryPath(id));
     },
     runMenuItem(id) {
       const command = commands.find((c) => c.id === id);
