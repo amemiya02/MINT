@@ -107,6 +107,8 @@ export const en = {
   "settings.expected.toggle": "true or false",
   "settings.expected.number": "a number from {min} to {max}",
   "settings.expected.text": "text of at most {max} characters",
+  "settings.expected.shortcuts":
+    'an object from command IDs to shortcuts such as "CmdOrCtrl+Shift+B" (null for none)',
 
   // One block per setting (see settings/schema.ts).
   "settings.language": "Interface language",
@@ -131,6 +133,24 @@ export const en = {
   "settings.contentWidth": "Content width (px)",
   "settings.vimMode": "Vim key bindings",
   "settings.spellcheck": "Check spelling",
+  "settings.assetFolder": "Asset folder",
+  "settings.assetFolder.document": "Same folder as the document",
+  "settings.assetFolder.assets": "assets/",
+  "settings.assetFolder.documentName": "<document name>.assets/",
+  "settings.assetFolder.custom": "Custom folder",
+  "settings.assetFolderPath": "Custom asset folder",
+  "settings.assetFolderPath.placeholder": "Relative to the document, or absolute",
+
+  "settings.shortcuts": "Keyboard shortcuts",
+  "settings.shortcuts.record": "Record",
+  "settings.shortcuts.recording": "Press the new shortcut (Esc to cancel)",
+  "settings.shortcuts.none": "None",
+  "settings.shortcuts.reset": "Reset",
+  "settings.shortcuts.remove": "Remove",
+  "settings.shortcuts.conflict": "{shortcut} is already used by {commands}.",
+  "settings.shortcuts.useAnyway": "Use Anyway",
+  "settings.shortcuts.cancel": "Cancel",
+  "settings.shortcuts.alsoUsedBy": "Also used by {commands}",
 
   "theme.issue.missing":
     "The theme “{name}” was not found in {path}. The built-in theme is in use.",
@@ -176,6 +196,8 @@ export const en = {
   "error.create": "Could not create {name}: {reason}",
   "error.rename": "Could not rename to {name}: {reason}",
   "error.trash": "Could not move {name} to the trash: {reason}",
+  "error.saveImage": "Could not save the image {name} in {folder}: {reason}",
+  "error.dismiss": "Dismiss",
 
   "tabs.label": "Open documents",
   "tabs.close": "Close {name}",
