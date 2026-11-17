@@ -10,7 +10,7 @@ import { SKIP, visit } from "unist-util-visit";
 import { codeTokenCss, codeTokens } from "./code-tokens.ts";
 import type { Dialect } from "./dialect.ts";
 import { documentCss } from "./document-styles.ts";
-import { renderHtml } from "./export.ts";
+import { renderExportHtml } from "./export.ts";
 
 /**
  * The standalone HTML document a Markdown document exports to: one file with
@@ -53,7 +53,7 @@ export interface ExportImage {
 export async function exportHtml(markdown: string, options: ExportOptions): Promise<string> {
   const tree = unified()
     .use(rehypeParse, { fragment: true })
-    .parse(renderHtml(markdown, options.dialect));
+    .parse(renderExportHtml(markdown, options.dialect));
 
   const work: Promise<void>[] = [];
   let math = false;
