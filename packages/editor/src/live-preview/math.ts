@@ -1,5 +1,5 @@
 import "katex/dist/katex.min.css";
-import type { Extension } from "@codemirror/state";
+import type { EditorState, Extension } from "@codemirror/state";
 import { Decoration, EditorView, WidgetType } from "@codemirror/view";
 import type { SyntaxNode } from "@lezer/common";
 import katex from "katex";
@@ -73,8 +73,8 @@ function renderInline(node: SyntaxNode, cx: PreviewContext) {
   cx.add(node.from, node.to, Decoration.replace({ widget }));
 }
 
-const isMultiLine = (node: SyntaxNode, cx: PreviewContext) =>
-  cx.state.doc.lineAt(node.from).number !== cx.state.doc.lineAt(node.to).number;
+const isMultiLine = (node: SyntaxNode, { state }: { state: EditorState }) =>
+  state.doc.lineAt(node.from).number !== state.doc.lineAt(node.to).number;
 
 /**
  * Inline math on a single line: a replace decoration within the line,
@@ -82,6 +82,8 @@ const isMultiLine = (node: SyntaxNode, cx: PreviewContext) =>
  */
 const inlineMath: PreviewRenderer = {
   nodes: ["InlineMath"],
+  // Both math renderers name InlineMath; the first one that matches draws it.
+  matches: (node, state) => !isMultiLine(node, { state }),
   render(node, cx) {
     if (!isMultiLine(node, cx)) renderInline(node, cx);
     return false;
@@ -97,6 +99,7 @@ const inlineMath: PreviewRenderer = {
 const blockMath: PreviewRenderer = {
   nodes: ["BlockMath", "InlineMath"],
   scope: "block",
+  matches: (node, state) => node.name !== "InlineMath" || isMultiLine(node, { state }),
   render(node, cx) {
     if (node.name === "InlineMath") {
       if (isMultiLine(node, cx)) renderInline(node, cx);
