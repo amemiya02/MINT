@@ -1,7 +1,10 @@
 import type { Page } from "@playwright/test";
 import type { MemoryPlatform, MemoryPlatformOptions } from "../src/platform/memory.ts";
 
-export { memorySettingsPath as settingsPath } from "../src/platform/memory.ts";
+export {
+  memorySettingsPath as settingsPath,
+  memoryThemesPath as themesPath,
+} from "../src/platform/memory.ts";
 
 // Page functions are serialised into the browser, so they reach the platform through `window`.
 type MintWindow = {

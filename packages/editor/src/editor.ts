@@ -1,6 +1,5 @@
 import { defaultKeymap, history, historyKeymap, redo, undo } from "@codemirror/commands";
 import { commonmarkLanguage, markdown } from "@codemirror/lang-markdown";
-import { defaultHighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { EditorSelection, EditorState } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { GFM } from "@lezer/markdown";
@@ -13,6 +12,7 @@ import {
   findReplace,
   findStatus,
 } from "./find.ts";
+import { themeable } from "./theme.ts";
 
 /**
  * Capabilities the editor core needs from whatever hosts it (desktop shell,
@@ -79,7 +79,7 @@ export function createEditor(options: EditorOptions): MintEditor {
         findReplace(),
         keymap.of([...defaultKeymap, ...historyKeymap]),
         markdown({ base: commonmarkLanguage, extensions: dialect.gfm ? [GFM] : [] }),
-        syntaxHighlighting(defaultHighlightStyle),
+        themeable(),
         EditorView.lineWrapping,
         EditorView.updateListener.of((update) => {
           if (update.docChanged) emit({ type: "change" });

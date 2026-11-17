@@ -7,6 +7,8 @@ import type { Platform } from "./platform/platform.ts";
 import { createTauriPlatform, isTauri } from "./platform/tauri.ts";
 import { createSettingsStore } from "./settings/settings.ts";
 import { SettingsContext, useSettings } from "./settings/useSettings.ts";
+import { createThemeStore } from "./theme/theme.ts";
+import { ThemeContext } from "./theme/useTheme.ts";
 import "./styles.css";
 
 declare global {
@@ -39,15 +41,19 @@ function Localized({ systemLocale, children }: { systemLocale: string; children:
 const platform = choosePlatform();
 // Loaded before the first render so the interface never flashes in the wrong language.
 const settings = await createSettingsStore(platform);
+// Likewise for the theme, so the first frame already has the right colors.
+const theme = await createThemeStore(platform, settings);
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing #root element");
 createRoot(root).render(
   <StrictMode>
     <SettingsContext value={settings}>
-      <Localized systemLocale={platform.locale}>
-        <App platform={platform} />
-      </Localized>
+      <ThemeContext value={theme}>
+        <Localized systemLocale={platform.locale}>
+          <App platform={platform} />
+        </Localized>
+      </ThemeContext>
     </SettingsContext>
   </StrictMode>,
 );

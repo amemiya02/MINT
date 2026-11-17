@@ -6,6 +6,7 @@ mod app_data;
 mod folder;
 mod fs;
 mod settings;
+mod themes;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -131,6 +132,12 @@ fn write_app_data(app: AppHandle, name: String, text: String) -> Result<(), Stri
     app_data::write(&app_data_dir(&app)?, &name, &text).map_err(|e| e.to_string())
 }
 
+/// The theme folder, created if missing.
+#[tauri::command]
+fn themes_path(app: AppHandle) -> Result<PathBuf, String> {
+    themes::ensure_dir(&app_data_dir(&app)?).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -165,6 +172,7 @@ pub fn run() {
             unwatch_folder,
             read_app_data,
             write_app_data,
+            themes_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running MINT");

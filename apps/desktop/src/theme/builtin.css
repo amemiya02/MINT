@@ -1,0 +1,81 @@
+/*
+ * MINT's built-in light and dark themes: a value for every theme variable.
+ * docs/themes.md documents each variable; keep the two in sync (a unit test
+ * checks that every variable here is documented and vice versa).
+ *
+ * `:where()` gives these rules zero specificity, so a user theme's plain
+ * `:root { … }` overrides them in both appearances. The shell sets
+ * `data-appearance="light" | "dark"` on <html> from the appearance setting.
+ */
+:where(:root) {
+  color-scheme: light;
+
+  /* Typography (the font, size, line height and width settings override these). */
+  --mint-font-ui:
+    system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --mint-font-editor: ui-monospace, "SF Mono", "Cascadia Code", "Noto Sans Mono CJK SC", monospace;
+  --mint-font-code: ui-monospace, "SF Mono", "Cascadia Code", "Noto Sans Mono CJK SC", monospace;
+  --mint-font-heading: inherit;
+  --mint-font-size: 15px;
+  --mint-line-height: 1.7;
+  --mint-content-width: 740px;
+
+  /* Interface */
+  --mint-bg: #fdfdfc;
+  --mint-fg: #1f2328;
+  --mint-muted: #6b717a;
+  --mint-border: #e3e5e8;
+  --mint-hover: #f1f2f4;
+  --mint-selected: #e3efec;
+  --mint-sidebar-bg: #f7f7f6;
+  --mint-accent: #2f7d6d;
+  --mint-error-bg: #fdecea;
+  --mint-error-fg: #a1260d;
+
+  /* Document */
+  --mint-caret: #1f2328;
+  --mint-selection: #cfe5df;
+  --mint-heading-fg: #14171a;
+  --mint-heading-weight: 650;
+  --mint-heading-1-size: 1.75em;
+  --mint-heading-2-size: 1.5em;
+  --mint-heading-3-size: 1.3em;
+  --mint-heading-4-size: 1.15em;
+  --mint-heading-5-size: 1em;
+  --mint-heading-6-size: 0.95em;
+  --mint-strong-fg: inherit;
+  --mint-emphasis-fg: inherit;
+  --mint-link: #2f7d6d;
+  --mint-code-fg: #3b4048;
+  --mint-code-bg: #eff1f3;
+  --mint-quote-fg: #5b616a;
+  --mint-marker: #8a9099;
+  --mint-find-match: #ffe58a99;
+  --mint-find-current: #ffb84d;
+}
+
+:where(:root[data-appearance="dark"]) {
+  color-scheme: dark;
+
+  --mint-bg: #1c1e21;
+  --mint-fg: #e4e6e9;
+  --mint-muted: #9aa0a8;
+  --mint-border: #33373c;
+  --mint-hover: #2a2d31;
+  --mint-selected: #24423c;
+  --mint-sidebar-bg: #191b1e;
+  --mint-accent: #5fc2ac;
+  --mint-error-bg: #3b1f1c;
+  --mint-error-fg: #f2b8ad;
+
+  --mint-caret: #e4e6e9;
+  --mint-selection: #2c4a44;
+  --mint-heading-fg: #f1f3f5;
+  --mint-link: #5fc2ac;
+  --mint-code-fg: #d5d9de;
+  --mint-code-bg: #2a2d31;
+  --mint-quote-fg: #a3a9b1;
+  --mint-marker: #6f757d;
+  --mint-find-match: #8a6d0066;
+  --mint-find-current: #b8741a;
+}

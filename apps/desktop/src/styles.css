@@ -1,49 +1,7 @@
 @import "tailwindcss";
 
-/*
- * MINT theme variables. Themes override these (see ADR-0003); keep the list
- * documented here as it grows.
- */
-:root {
-  --mint-font-ui:
-    system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-  --mint-font-editor: ui-monospace, "SF Mono", "Cascadia Code", "Noto Sans Mono CJK SC", monospace;
-  --mint-font-size: 15px;
-  --mint-line-height: 1.7;
-  --mint-content-width: 46rem;
-
-  --mint-bg: #fdfdfc;
-  --mint-fg: #1f2328;
-  --mint-muted: #6b717a;
-  --mint-border: #e3e5e8;
-  --mint-hover: #f1f2f4;
-  --mint-selected: #e3efec;
-  --mint-sidebar-bg: #f7f7f6;
-  --mint-accent: #2f7d6d;
-  --mint-error-bg: #fdecea;
-  --mint-error-fg: #a1260d;
-  --mint-find-match: #ffe58a99;
-  --mint-find-current: #ffb84d;
-
-  color-scheme: light dark;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --mint-bg: #1c1e21;
-    --mint-fg: #e4e6e9;
-    --mint-muted: #9aa0a8;
-    --mint-border: #33373c;
-    --mint-hover: #2a2d31;
-    --mint-selected: #24423c;
-    --mint-sidebar-bg: #191b1e;
-    --mint-accent: #5fc2ac;
-    --mint-error-bg: #3b1f1c;
-    --mint-error-fg: #f2b8ad;
-    --mint-find-match: #8a6d0066;
-    --mint-find-current: #b8741a;
-  }
-}
+/* Theme variables (built-in light and dark themes); documented in docs/themes.md. */
+@import "./theme/builtin.css";
 
 html,
 body,
@@ -61,6 +19,7 @@ body {
 .mint-editor .cm-editor {
   height: 100%;
   font-size: var(--mint-font-size);
+  color: var(--mint-fg);
 }
 
 .mint-editor .cm-editor.cm-focused {
@@ -76,5 +35,5 @@ body {
   max-width: var(--mint-content-width);
   margin: 0 auto;
   padding: 2rem 1.5rem 40vh;
-  caret-color: var(--mint-fg);
+  caret-color: var(--mint-caret);
 }

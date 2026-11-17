@@ -10,6 +10,7 @@ import { TabStoreContext, useTabStore, useTabsState } from "./tabs/context.ts";
 import { baseName } from "./tabs/paths.ts";
 import { TabBar } from "./tabs/TabBar.tsx";
 import { createTabStore, type Tab, type TabError, type TabStore } from "./tabs/tab-store.ts";
+import { ThemeIssue } from "./theme/ThemeIssue.tsx";
 import { documentExtensions } from "./workspace/paths.ts";
 import { type RecentList, useRecent } from "./workspace/recent.ts";
 import { Sidebar } from "./workspace/Sidebar.tsx";
@@ -135,6 +136,7 @@ function Window({ platform, store }: { readonly platform: Platform; readonly sto
   return (
     <div className="flex h-full flex-col bg-(--mint-bg) text-(--mint-fg)">
       <SettingsIssues />
+      <ThemeIssue />
       {(folderError || error) && (
         <div
           role="alert"

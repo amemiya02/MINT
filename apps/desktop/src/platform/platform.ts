@@ -54,6 +54,14 @@ export interface Platform {
 
   /** Write a small named file to MINT's app data directory, atomically. */
   writeAppData(name: string, text: string): Promise<void>;
+
+  /**
+   * Absolute path of the theme folder (`themes` in the app data directory),
+   * created if missing. User themes are the `.css` files in it; read, list and
+   * watch it like any folder.
+   */
+  themesPath(): Promise<string>;
+
   /** Ask a three-way question (e.g. save / don't save / cancel). Dismissing the dialog answers `cancel`. */
   showQuestionDialog(options: QuestionDialogOptions): Promise<"yes" | "no" | "cancel">;
 
