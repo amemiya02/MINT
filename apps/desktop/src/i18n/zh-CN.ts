@@ -18,6 +18,7 @@ export const zhCN: Messages = {
 
   "command.file.open": "打开…",
   "command.file.save": "保存",
+  "command.file.exportHtml": "导出为 HTML…",
   "command.file.openFolder": "打开文件夹…",
   "command.file.quickOpen": "快速打开…",
   "command.view.toggleSidebar": "显示/隐藏侧边栏",
@@ -123,6 +124,13 @@ export const zhCN: Messages = {
   "settings.fontSize": "字号（px）",
   "settings.lineHeight": "行高",
   "settings.contentWidth": "内容宽度（px）",
+  "export.html.title": "导出为 HTML",
+  "export.html.saveTitle": "导出为 HTML",
+  "export.html.embedImages": "内嵌图片",
+  "export.html.export": "导出",
+  "export.html.exporting": "正在导出…",
+  "export.html.cancel": "取消",
+  "export.html.failed": "导出失败：{reason}",
 
   "theme.issue.missing": "在 {path} 中找不到主题“{name}”，正在使用内置主题。",
   "theme.issue.unreadable": "无法读取主题“{name}”（{reason}），正在使用内置主题。",

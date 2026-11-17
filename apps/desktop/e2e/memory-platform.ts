@@ -150,3 +150,10 @@ export function updatesInstalled(page: Page): Promise<string[]> {
     ...(window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.updatesInstalled,
   ]);
 }
+
+/** The paths each save dialog suggested so far, in order. */
+export function savedDialogs(page: Page): Promise<string[]> {
+  return page.evaluate(() => [
+    ...(window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.saveDialogs,
+  ]);
+}

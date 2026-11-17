@@ -1,5 +1,6 @@
 import rehypeKatex from "rehype-katex";
 import rehypeStringify from "rehype-stringify";
+import remarkFrontmatter from "remark-frontmatter";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import remarkParse from "remark-parse";
@@ -11,6 +12,8 @@ import type { Dialect } from "./dialect.ts";
 export function renderHtml(markdown: string, dialect: Dialect): string {
   const syntax: PluggableList = [];
   const rendering: PluggableList = [];
+  // A YAML front matter block is metadata, not content: parsed so it is not rendered.
+  if (dialect.frontMatter) syntax.push([remarkFrontmatter, ["yaml"]]);
   if (dialect.gfm) syntax.push(remarkGfm);
   if (dialect.math) {
     syntax.push(remarkMath);
