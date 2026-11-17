@@ -17,6 +17,7 @@ import { ExternalChangeNotice } from "./tabs/ExternalChangeNotice.tsx";
 import { baseName, resolveFrom } from "./tabs/paths.ts";
 import { TabBar } from "./tabs/TabBar.tsx";
 import { createTabStore, type Tab, type TabError, type TabStore } from "./tabs/tab-store.ts";
+import { ThemeIssue } from "./theme/ThemeIssue.tsx";
 import { UpdateNotice, useUpdates } from "./updates/updates.tsx";
 import { documentExtensions } from "./workspace/paths.ts";
 import { type RecentList, useRecent } from "./workspace/recent.ts";
@@ -207,6 +208,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     <div className="flex h-full flex-col bg-(--mint-bg) text-(--mint-fg)">
       <UpdateNotice updates={updates} />
       <SettingsIssues />
+      <ThemeIssue />
       {(folderError || error) && (
         <div
           role="alert"

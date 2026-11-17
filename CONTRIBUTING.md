@@ -16,7 +16,7 @@ Architectural decisions live in `docs/adr/`.
 | Install | `pnpm install` |
 | Run the desktop app | `pnpm dev` |
 | Run the shell in a browser (in-memory platform, no Rust) | `pnpm dev:web` |
-| Unit tests (editor core, Markdown package) | `pnpm test` |
+| Unit tests (editor core, Markdown package, shell checks such as the theme variable list) | `pnpm test` |
 | E2E tests (Playwright) | `pnpm test:e2e` (first time: `pnpm --filter @mint/desktop exec playwright install chromium`) |
 | Rust tests | `pnpm test:rust` |
 | Type check | `pnpm typecheck` |

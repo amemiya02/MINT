@@ -1,5 +1,4 @@
 import { defaultKeymap, history, historyKeymap, redo, undo } from "@codemirror/commands";
-import { defaultHighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { Compartment, EditorSelection, EditorState } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { type Dialect, defaultDialect } from "@mint/markdown";
@@ -21,6 +20,7 @@ import {
 import { type LinkTarget, linkOpening } from "./links.ts";
 import { inlineSpans } from "./live-preview/inline-spans.ts";
 import { livePreview, previewRenderer } from "./live-preview/preview.ts";
+import { themeable } from "./theme.ts";
 
 /**
  * Capabilities the editor core needs from whatever hosts it (desktop shell,
@@ -114,7 +114,7 @@ export function createEditor(options: EditorOptions): MintEditor {
         // Mod-/ belongs to the host's command registry (toggle source mode), not to comments.
         keymap.of([...defaultKeymap.filter((b) => b.key !== "Mod-/"), ...historyKeymap]),
         markdownSupport(dialect),
-        syntaxHighlighting(defaultHighlightStyle),
+        themeable(),
         previewRenderer.of(inlineSpans),
         preview.of(modeExtension()),
         host.openLink ? linkOpening((link) => host.openLink?.(link)) : [],

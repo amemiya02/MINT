@@ -94,6 +94,7 @@ export function createTauriPlatform(): Platform {
     readAppData: (name) => invoke<string | null>("read_app_data", { name }),
     writeAppData: (name, text) => invoke<void>("write_app_data", { name, text }),
     openExternal: (url) => openUrl(url),
+    themesPath: () => invoke<string>("themes_path"),
     async showQuestionDialog({ title, message: text, yes, no, cancel }) {
       const answer = await message(text, {
         title,

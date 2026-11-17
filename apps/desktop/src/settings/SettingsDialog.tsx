@@ -1,6 +1,12 @@
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useT } from "../i18n/index.ts";
-import { type SettingDefinition, type SettingKey, settingsSchema } from "./schema.ts";
+import { useTheme } from "../theme/useTheme.ts";
+import {
+  type SettingDefinition,
+  type SettingKey,
+  settingsSchema,
+  type TextSetting,
+} from "./schema.ts";
 import { useSettings, useSettingsStore } from "./useSettings.ts";
 
 interface SettingsDialogProps {
@@ -124,14 +130,99 @@ function SettingControl({ settingKey }: { readonly settingKey: SettingKey }) {
         />
       );
       break;
+    case "text":
+      control =
+        definition.optionsFrom === "themes" ? (
+          <ThemeSelect id={id} value={String(value)} onChange={set} />
+        ) : (
+          <TextField id={id} definition={definition} value={String(value)} onChange={set} />
+        );
+      break;
   }
 
   return (
-    <div className="flex items-center justify-between gap-4">
-      <label htmlFor={id} className="text-sm">
-        {t(definition.label)}
-      </label>
-      {control}
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center justify-between gap-4">
+        <label htmlFor={id} className="text-sm">
+          {t(definition.label)}
+        </label>
+        {control}
+      </div>
+      {definition.kind === "text" && definition.optionsFrom === "themes" && <ThemeFolderHint />}
     </div>
+  );
+}
+
+/** A text field that applies its value when the user is done (Enter or leaving it), not on every keystroke. */
+function TextField({
+  id,
+  definition,
+  value,
+  onChange,
+}: {
+  readonly id: string;
+  readonly definition: TextSetting;
+  readonly value: string;
+  readonly onChange: (value: string) => void;
+}) {
+  const t = useT();
+  const [draft, setDraft] = useState(value);
+  // Follow changes made elsewhere (e.g. settings.json edited by hand).
+  useEffect(() => setDraft(value), [value]);
+  const commit = () => {
+    if (draft !== value) onChange(draft);
+  };
+  return (
+    <input
+      id={id}
+      type="text"
+      value={draft}
+      maxLength={definition.maxLength}
+      placeholder={definition.placeholder ? t(definition.placeholder) : undefined}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") commit();
+      }}
+      className={`${fieldClass} w-56`}
+    />
+  );
+}
+
+/** The built-in theme and every user theme in the theme folder. */
+function ThemeSelect({
+  id,
+  value,
+  onChange,
+}: {
+  readonly id: string;
+  readonly value: string;
+  readonly onChange: (value: string) => void;
+}) {
+  const t = useT();
+  const { themes } = useTheme();
+  return (
+    <select id={id} value={value} onChange={(e) => onChange(e.target.value)} className={fieldClass}>
+      <option value="">{t("settings.theme.builtin")}</option>
+      {themes.map((name) => (
+        <option key={name} value={name}>
+          {name}
+        </option>
+      ))}
+      {value !== "" && !themes.includes(value) && (
+        <option value={value}>{t("settings.theme.missing", { name: value })}</option>
+      )}
+    </select>
+  );
+}
+
+function ThemeFolderHint() {
+  const t = useT();
+  const { folder } = useTheme();
+  if (!folder) return null;
+  return (
+    <p className="truncate text-xs text-(--mint-muted)" title={folder}>
+      {t("settings.theme.folder", { path: folder })}
+    </p>
   );
 }

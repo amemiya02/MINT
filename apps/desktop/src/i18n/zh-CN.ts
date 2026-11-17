@@ -82,6 +82,7 @@ export const zhCN: Messages = {
   "settings.expected.oneOf": "以下之一：{values}",
   "settings.expected.toggle": " true 或 false ",
   "settings.expected.number": " {min} 到 {max} 之间的数字",
+  "settings.expected.text": "不超过 {max} 个字符的文本",
 
   "settings.language": "界面语言",
   "settings.language.system": "跟随系统",
@@ -89,6 +90,23 @@ export const zhCN: Messages = {
   "settings.language.en": "English",
   "settings.autosave": "自动保存",
   "settings.checkForUpdates": "启动时检查更新",
+
+  "settings.appearance": "亮暗模式",
+  "settings.appearance.system": "跟随系统",
+  "settings.appearance.light": "亮色",
+  "settings.appearance.dark": "暗色",
+  "settings.theme": "主题",
+  "settings.theme.builtin": "MINT（内置）",
+  "settings.theme.missing": "{name}（未找到）",
+  "settings.theme.folder": "主题是放在 {path} 中的 .css 文件",
+  "settings.fontFamily": "字体",
+  "settings.fontFamily.placeholder": "主题默认",
+  "settings.fontSize": "字号（px）",
+  "settings.lineHeight": "行高",
+  "settings.contentWidth": "内容宽度（px）",
+
+  "theme.issue.missing": "在 {path} 中找不到主题“{name}”，正在使用内置主题。",
+  "theme.issue.unreadable": "无法读取主题“{name}”（{reason}），正在使用内置主题。",
 
   "dialog.open.title": "打开文档",
   "dialog.filter.markdown": "Markdown",

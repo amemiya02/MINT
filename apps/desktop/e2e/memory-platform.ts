@@ -4,6 +4,7 @@ import type { MemoryPlatform, MemoryPlatformOptions } from "../src/platform/memo
 export {
   memoryRecoveryDir as recoveryDir,
   memorySettingsPath as settingsPath,
+  memoryThemesPath as themesPath,
 } from "../src/platform/memory.ts";
 
 // Page functions are serialised into the browser, so they reach the platform through `window`.

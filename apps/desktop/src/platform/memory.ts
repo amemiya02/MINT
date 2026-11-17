@@ -20,6 +20,9 @@ export const memorySettingsPath = "/config/MINT/settings.json";
  */
 export const memoryRecoveryDir = "/data/MINT/recovery";
 
+/** The in-memory theme folder (seed user themes through `files`). */
+export const memoryThemesPath = "/data/MINT/themes";
+
 export interface MemoryPlatformOptions {
   /** Initial files, keyed by absolute `/`-separated path. Their parent directories exist implicitly. */
   readonly files?: Readonly<Record<string, string>>;
@@ -79,6 +82,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
   // The config directory always exists, so settings.json can be created from outside.
   const directories = new Set([
     memorySettingsPath.slice(0, memorySettingsPath.lastIndexOf("/")),
+    memoryThemesPath,
     ...(options.directories ?? []),
   ]);
   const appData = new Map(Object.entries(options.appData ?? {}));
@@ -320,6 +324,9 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     },
     async openExternal(url) {
       openedUrls.push(url);
+    },
+    async themesPath() {
+      return memoryThemesPath;
     },
     async showQuestionDialog({ message }) {
       questions.push(message);

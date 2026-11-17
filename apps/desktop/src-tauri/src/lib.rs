@@ -9,6 +9,7 @@ mod recovery;
 mod search;
 mod settings;
 mod updates;
+mod themes;
 mod walk;
 
 use std::collections::HashMap;
@@ -254,6 +255,12 @@ fn write_app_data(app: AppHandle, name: String, text: String) -> Result<(), Stri
     app_data::write(&app_data_dir(&app)?, &name, &text).map_err(|e| e.to_string())
 }
 
+/// The theme folder, created if missing.
+#[tauri::command]
+fn themes_path(app: AppHandle) -> Result<PathBuf, String> {
+    themes::ensure_dir(&app_data_dir(&app)?).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -305,7 +312,8 @@ pub fn run() {
             write_app_data,
             take_recovery_snapshots,
             write_recovery_snapshot,
-            delete_recovery_snapshot
+            delete_recovery_snapshot,
+            themes_path
         ])
         .run(tauri::generate_context!())
         .expect("error while running MINT");
