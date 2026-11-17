@@ -50,3 +50,27 @@ test("⌘-click opens external links in the browser and local documents in MINT"
   await expect(page).toHaveTitle("next.md — MINT");
   await expect(page.getByRole("textbox")).toContainText("Next page");
 });
+
+test("a find match inside hidden markers reveals them while it is selected", async ({ page }) => {
+  const path = "/notes/find.md";
+  await launch(page, {
+    files: { [path]: "plain\n\nA **cat** here\n" },
+    openDialogResults: [path],
+    locale: "en-US",
+  });
+  await page.keyboard.press("ControlOrMeta+O");
+  const line = page.locator(".cm-line").nth(2);
+  await expect(line).toHaveText("A cat here");
+
+  await page.keyboard.press("ControlOrMeta+F");
+  const find = page.getByRole("textbox", { name: "Find" });
+  await find.fill("cat");
+  await find.press("Enter");
+  await expect(page.getByText("1 of 1")).toBeVisible();
+  await expect(line).toHaveText("A **cat** here");
+  await expect(line.locator(".mint-find-match-current")).toHaveText("cat");
+
+  await find.press("Escape");
+  await page.keyboard.press("ControlOrMeta+Home");
+  await expect(line).toHaveText("A cat here");
+});
