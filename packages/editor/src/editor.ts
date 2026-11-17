@@ -173,6 +173,8 @@ const hostKeys = new Set(["Mod-/", "Mod-i", "Shift-Mod-k"]);
 function dialectExtensions(dialect: Dialect): Extension {
   return [
     markdownSupport(dialect),
+    // Table cells are rendered like the export renders them.
+    previewRenderer.of(tableRenderer((markdown) => renderHtml(markdown, dialect))),
     // Mermaid takes over its fences from codeBlocks (it matches only ```mermaid; the rest stay code blocks).
     dialect.mermaid ? mermaidDiagrams() : [],
   ];
@@ -205,7 +207,6 @@ export function createEditor(options: EditorOptions): MintEditor {
         markupContinuation,
         themeable(),
         previewRenderer.of(inlineSpans),
-        previewRenderer.of(tableRenderer((markdown) => renderHtml(markdown, dialect))),
         tableTheme,
         mathPreview(),
         headings,

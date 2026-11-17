@@ -102,6 +102,16 @@ describe("switching extended syntax on and off", () => {
   });
 });
 
+describe("switching extended syntax in table cells", () => {
+  it("re-renders the cells of a table widget at once", async () => {
+    const { editor, parent, end } = open("| a |\n|---|\n| ==b== |\n\nend");
+    end();
+    await eventually(() => expect(parent.textContent).toContain("==b=="));
+    editor.setDialect(withExtended({ highlight: true }));
+    await eventually(() => expect(parent.querySelector("mark")?.textContent).toBe("b"));
+  });
+});
+
 describe("table of contents", () => {
   const text = "# Guide\n\n[TOC]\n\n## Set *up*\n\n### Install\n\nend";
   const entries = (parent: HTMLElement) =>
@@ -247,10 +257,12 @@ describe("editor and export agree on extended syntax", () => {
     return runs.filter((run) => run.kind).map((run) => `${run.kind}:${run.text}`);
   }
 
-  const editorKind = (el: Element) =>
-    Object.entries(kinds).find(([name]) => el.classList.contains(`cm-mint-${name}`))?.[1];
   const exportKind = (el: Element) =>
     Object.values(kinds).includes(el.tagName.toLowerCase()) ? el.tagName.toLowerCase() : undefined;
+  // Live preview styles spans with classes; block widgets (table cells) show rendered HTML.
+  const editorKind = (el: Element) =>
+    Object.entries(kinds).find(([name]) => el.classList.contains(`cm-mint-${name}`))?.[1] ??
+    exportKind(el);
 
   const exported = (text: string, dialect: Dialect) => {
     const html = new DOMParser().parseFromString(renderHtml(text, dialect), "text/html");
