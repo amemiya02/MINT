@@ -1,5 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 import {
+  directoriesRead,
   externalRemove,
   externalWrite,
   launch,
@@ -154,6 +155,41 @@ test("the file tree follows changes made outside MINT", async ({ page }) => {
   await expect(item(page, "from-git.md")).toBeVisible();
   await expect(item(page, "2027.md")).toBeVisible();
   await expect(item(page, "todo.md")).toHaveCount(0);
+});
+
+test("a change outside MINT re-reads only the directory it happened in", async ({ page }) => {
+  await launch(page, {
+    files: {
+      ...files,
+      "/notes/.gitignore": "build/\n",
+      "/notes/archive/old.md": "# Old\n",
+      "/notes/journal/deep/day.md": "# Day\n",
+    },
+    openFolderDialogResults: [folder],
+    locale: "en-US",
+  });
+  await page.getByRole("button", { name: "Open Folder…" }).click();
+  await item(page, "journal").click();
+  await item(page, "archive").click();
+  await item(page, "deep").click();
+  await expect(item(page, "day.md")).toBeVisible();
+  await expect(item(page, "old.md")).toBeVisible();
+  const before = (await directoriesRead(page)).length;
+
+  // git's own files and ignored build output never reach the tree.
+  await externalWrite(page, "/notes/.git/index", "x");
+  await externalWrite(page, "/notes/build/out.o", "x");
+  await externalWrite(page, "/notes/journal/2027.md", "# 2027\n");
+  await expect(item(page, "2027.md")).toBeVisible();
+  // Let any further re-read happen before counting.
+  await page.waitForTimeout(500);
+  expect((await directoriesRead(page)).slice(before)).toEqual(["/notes/journal"]);
+
+  // A new directory deep in a collapsed one shows up in its nearest listed ancestor.
+  await externalWrite(page, "/notes/drafts/idea.md", "# Idea\n");
+  await expect(item(page, "drafts")).toBeVisible();
+  await page.waitForTimeout(500);
+  expect((await directoriesRead(page)).slice(before + 1)).toEqual(["/notes"]);
 });
 
 test("the sidebar can be hidden and shown again", async ({ page }) => {

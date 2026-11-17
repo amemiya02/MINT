@@ -3,9 +3,11 @@
 //! (`.git`, `.DS_Store`) are skipped. Quick open lists documents with it, and
 //! global search walks the same files.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use ignore::{Walk, WalkBuilder};
+use ignore::gitignore::{Gitignore, GitignoreBuilder};
+use ignore::{Match, Walk, WalkBuilder};
 
 /// A recursive walk over `root` that skips ignored and hidden entries. Use it
 /// for anything that visits "the files of a folder" so every feature agrees on
@@ -17,6 +19,78 @@ pub fn walker(root: &Path) -> Walk {
         .require_git(false)
         .follow_links(false)
         .build()
+}
+
+/// Decides, path by path, whether a change under a folder concerns git's own
+/// files (`.git`) or an entry its `.gitignore` / `.ignore` files exclude, the
+/// same files [`walker`] skips. Ignore files are read lazily, only for the
+/// directories that changed paths lie in, so nothing walks the folder.
+pub struct IgnoredPaths {
+    root: PathBuf,
+    /// The ignore rules of each directory read so far.
+    rules: HashMap<PathBuf, Gitignore>,
+}
+
+impl IgnoredPaths {
+    pub fn new(root: &Path) -> Self {
+        Self {
+            root: root.to_path_buf(),
+            rules: HashMap::new(),
+        }
+    }
+
+    /// Whether `path` (under the root) is inside `.git` or ignored. A path
+    /// outside the root is never ignored.
+    pub fn contains(&mut self, path: &Path) -> bool {
+        let Ok(relative) = path.strip_prefix(&self.root) else {
+            return false;
+        };
+        if relative.components().any(|c| c.as_os_str() == ".git") {
+            return true;
+        }
+        if path
+            .file_name()
+            .is_some_and(|n| n == ".gitignore" || n == ".ignore")
+        {
+            // The rules of that directory changed: read them again next time.
+            if let Some(dir) = path.parent() {
+                self.rules.remove(dir);
+            }
+            return false;
+        }
+        let is_dir = path.is_dir();
+        // The deepest ignore file that has a say wins.
+        let mut dir = path.parent();
+        while let Some(current) = dir.filter(|d| d.starts_with(&self.root)) {
+            match self
+                .rules_of(current)
+                .matched_path_or_any_parents(path, is_dir)
+            {
+                Match::Ignore(_) => return true,
+                Match::Whitelist(_) => return false,
+                Match::None => dir = current.parent(),
+            }
+        }
+        false
+    }
+
+    fn rules_of(&mut self, dir: &Path) -> &Gitignore {
+        self.rules.entry(dir.to_path_buf()).or_insert_with(|| {
+            let mut builder = GitignoreBuilder::new(dir);
+            // `.ignore` comes last so it takes precedence, as in `walker`. A
+            // missing file is fine; a malformed line is skipped.
+            for name in [".gitignore", ".ignore"] {
+                let _ = builder.add(dir.join(name));
+            }
+            builder.build().unwrap_or_else(|e| {
+                eprintln!(
+                    "MINT: cannot read the ignore files of {}: {e}",
+                    dir.display()
+                );
+                Gitignore::empty()
+            })
+        })
+    }
 }
 
 /// Every file under `root` (see [`walker`]) whose extension is one of

@@ -27,6 +27,17 @@ use tauri_plugin_dialog::DialogExt;
 
 use grants::{Grant, Grants};
 
+/// Run blocking work (disk IO, starting a watcher) on a worker thread. Sync
+/// commands run on the main thread, so any IO there freezes the window; every
+/// command that touches the disk is `async` and goes through this.
+async fn blocking<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(work)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 /// Fail with a readable message unless `path` lies within a root the user granted.
 fn granted(grants: &Grants, path: &std::path::Path) -> Result<(), String> {
     grants.check(path).map(|_| ()).map_err(|e| e.to_string())
@@ -186,33 +197,42 @@ fn take_opened_paths(pending: State<'_, opened::Pending>) -> Vec<opened::OpenedP
 
 /// Read a document as UTF-8 text, keeping a BOM and line endings as they are.
 #[tauri::command]
-fn read_text_file(grants: State<'_, Grants>, path: PathBuf) -> Result<String, String> {
-    granted(&grants, &path)?;
-    fs::read_text(&path).map_err(|e| e.to_string())
+async fn read_text_file(app: AppHandle, path: PathBuf) -> Result<String, String> {
+    blocking(move || {
+        granted(&app.state::<Grants>(), &path)?;
+        fs::read_text(&path).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 /// Write a document atomically (temporary file + rename).
 #[tauri::command]
-fn write_text_file(grants: State<'_, Grants>, path: PathBuf, text: String) -> Result<(), String> {
-    granted(&grants, &path)?;
-    fs::write_atomic(&path, text.as_bytes()).map_err(|e| e.to_string())
+async fn write_text_file(app: AppHandle, path: PathBuf, text: String) -> Result<(), String> {
+    blocking(move || {
+        granted(&app.state::<Grants>(), &path)?;
+        fs::write_atomic(&path, text.as_bytes()).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 /// Save a pasted or dropped asset (base64 `data`) under a name that is not
 /// taken yet in `directory`; returns the new file's path.
 #[tauri::command]
-fn save_asset(
-    grants: State<'_, Grants>,
+async fn save_asset(
+    app: AppHandle,
     directory: PathBuf,
     file_name: String,
     data: String,
 ) -> Result<PathBuf, String> {
     use base64::Engine as _;
-    granted(&grants, &directory)?;
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(data)
-        .map_err(|e| e.to_string())?;
-    assets::save(&directory, &file_name, &bytes).map_err(|e| e.to_string())
+    blocking(move || {
+        granted(&app.state::<Grants>(), &directory)?;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(data)
+            .map_err(|e| e.to_string())?;
+        assets::save(&directory, &file_name, &bytes).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 /// Where the settings file lives, plus the watcher that keeps it alive.
@@ -227,16 +247,18 @@ fn settings_path(state: State<'_, SettingsState>) -> PathBuf {
 }
 
 #[tauri::command]
-fn read_settings(state: State<'_, SettingsState>) -> settings::SettingsFile {
-    settings::load(&state.path)
+async fn read_settings(state: State<'_, SettingsState>) -> Result<settings::SettingsFile, String> {
+    let path = state.path.clone();
+    blocking(move || Ok(settings::load(&path))).await
 }
 
 #[tauri::command]
-fn write_settings(
+async fn write_settings(
     state: State<'_, SettingsState>,
     values: Map<String, Value>,
 ) -> Result<(), String> {
-    settings::save(&state.path, &values).map_err(|e| e.to_string())
+    let path = state.path.clone();
+    blocking(move || settings::save(&path, &values).map_err(|e| e.to_string())).await
 }
 
 /// Snapshots of unsaved work left by an earlier run; only the first caller gets them.
@@ -246,20 +268,27 @@ fn take_recovery_snapshots(area: State<'_, recovery::RecoveryArea>) -> Vec<recov
 }
 
 #[tauri::command]
-fn write_recovery_snapshot(
-    area: State<'_, recovery::RecoveryArea>,
+async fn write_recovery_snapshot(
+    app: AppHandle,
     id: String,
     contents: String,
 ) -> Result<(), String> {
-    area.write(&id, &contents).map_err(|e| e.to_string())
+    blocking(move || {
+        app.state::<recovery::RecoveryArea>()
+            .write(&id, &contents)
+            .map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-fn delete_recovery_snapshot(
-    area: State<'_, recovery::RecoveryArea>,
-    id: String,
-) -> Result<(), String> {
-    area.remove(&id).map_err(|e| e.to_string())
+async fn delete_recovery_snapshot(app: AppHandle, id: String) -> Result<(), String> {
+    blocking(move || {
+        app.state::<recovery::RecoveryArea>()
+            .remove(&id)
+            .map_err(|e| e.to_string())
+    })
+    .await
 }
 
 /// Whether this copy of MINT can check for and install new versions itself.
@@ -275,46 +304,65 @@ fn updates_supported(app: tauri::AppHandle) -> bool {
 const SETTINGS_CHANGED: &str = "settings-changed";
 
 #[tauri::command]
-fn read_directory(grants: State<'_, Grants>, path: PathBuf) -> Result<Vec<folder::Entry>, String> {
-    granted(&grants, &path)?;
-    folder::list_dir(&path).map_err(|e| e.to_string())
+async fn read_directory(app: AppHandle, path: PathBuf) -> Result<Vec<folder::Entry>, String> {
+    blocking(move || {
+        granted(&app.state::<Grants>(), &path)?;
+        folder::list_dir(&path).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-fn create_file(grants: State<'_, Grants>, path: PathBuf) -> Result<(), String> {
-    granted(&grants, &path)?;
-    folder::create_file(&path).map_err(|e| e.to_string())
+async fn create_file(app: AppHandle, path: PathBuf) -> Result<(), String> {
+    blocking(move || {
+        granted(&app.state::<Grants>(), &path)?;
+        folder::create_file(&path).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-fn create_directory(grants: State<'_, Grants>, path: PathBuf) -> Result<(), String> {
-    granted(&grants, &path)?;
-    folder::create_dir(&path).map_err(|e| e.to_string())
+async fn create_directory(app: AppHandle, path: PathBuf) -> Result<(), String> {
+    blocking(move || {
+        granted(&app.state::<Grants>(), &path)?;
+        folder::create_dir(&path).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-fn rename_path(grants: State<'_, Grants>, from: PathBuf, to: PathBuf) -> Result<(), String> {
-    granted(&grants, &from)?;
-    granted(&grants, &to)?;
-    folder::rename(&from, &to).map_err(|e| e.to_string())
+async fn rename_path(app: AppHandle, from: PathBuf, to: PathBuf) -> Result<(), String> {
+    blocking(move || {
+        let grants = app.state::<Grants>();
+        granted(&grants, &from)?;
+        granted(&grants, &to)?;
+        folder::rename(&from, &to).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-fn move_to_trash(grants: State<'_, Grants>, path: PathBuf) -> Result<(), String> {
-    granted(&grants, &path)?;
-    folder::move_to_trash(&path).map_err(|e| e.to_string())
+async fn move_to_trash(app: AppHandle, path: PathBuf) -> Result<(), String> {
+    blocking(move || {
+        granted(&app.state::<Grants>(), &path)?;
+        folder::move_to_trash(&path).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 /// Every file of a folder, recursively, except entries ignored by `.gitignore`
 /// and hidden ones; only those with one of `extensions` unless it is empty.
 #[tauri::command]
-fn list_folder_files(
-    grants: State<'_, Grants>,
+async fn list_folder_files(
+    app: AppHandle,
     path: PathBuf,
     extensions: Vec<String>,
 ) -> Result<Vec<PathBuf>, String> {
-    granted(&grants, &path)?;
-    Ok(walk::list_files(&path, &extensions))
+    blocking(move || {
+        granted(&app.state::<Grants>(), &path)?;
+        Ok(walk::list_files(&path, &extensions))
+    })
+    .await
 }
 
 /// Running global searches, by id, each with its cancel flag.
@@ -336,7 +384,7 @@ enum SearchEvent {
 /// on `on_event`; resolves to an id for `cancel_search`. Rejects at once if the
 /// regular expression is invalid.
 #[tauri::command]
-fn search_folder(
+async fn search_folder(
     path: PathBuf,
     query: search::SearchQuery,
     extensions: Vec<String>,
@@ -366,7 +414,7 @@ fn search_folder(
 
 /// Stop a running search; nothing more is sent for it except `done`.
 #[tauri::command]
-fn cancel_search(id: u32, searches: State<'_, Searches>) -> Result<(), String> {
+async fn cancel_search(id: u32, searches: State<'_, Searches>) -> Result<(), String> {
     if let Some(cancelled) = searches
         .running
         .lock()
@@ -385,59 +433,65 @@ struct Watchers {
     active: Mutex<HashMap<u32, folder::FolderWatcher>>,
 }
 
+impl Watchers {
+    /// Keep `watcher` running; returns its id for `unwatch_folder`.
+    fn add(&self, watcher: folder::FolderWatcher) -> Result<u32, String> {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        self.active
+            .lock()
+            .map_err(|e| e.to_string())?
+            .insert(id, watcher);
+        Ok(id)
+    }
+}
+
 /// Watch a folder recursively; each debounced batch of changed paths is sent on `on_change`.
 #[tauri::command]
-fn watch_folder(
+async fn watch_folder(
+    app: AppHandle,
     path: PathBuf,
     on_change: Channel<Vec<PathBuf>>,
-    watchers: State<'_, Watchers>,
-    grants: State<'_, Grants>,
 ) -> Result<u32, String> {
-    granted(&grants, &path)?;
-    let watcher = folder::FolderWatcher::new(&path, move |paths| {
-        let _ = on_change.send(paths);
+    blocking(move || {
+        granted(&app.state::<Grants>(), &path)?;
+        let watcher = folder::FolderWatcher::new(&path, move |paths| {
+            let _ = on_change.send(paths);
+        })
+        .map_err(|e| e.to_string())?;
+        app.state::<Watchers>().add(watcher)
     })
-    .map_err(|e| e.to_string())?;
-    let id = watchers.next_id.fetch_add(1, Ordering::Relaxed);
-    watchers
-        .active
-        .lock()
-        .map_err(|e| e.to_string())?
-        .insert(id, watcher);
-    Ok(id)
+    .await
 }
 
 /// Watch one document for changes on disk; `on_change` is signalled after each debounced batch.
 /// Stop with `unwatch_folder`, which ends any watcher by id.
 #[tauri::command]
-fn watch_file(
-    path: PathBuf,
-    on_change: Channel<()>,
-    watchers: State<'_, Watchers>,
-    grants: State<'_, Grants>,
-) -> Result<u32, String> {
-    granted(&grants, &path)?;
-    let watcher = folder::FolderWatcher::document(&path, move || {
-        let _ = on_change.send(());
+async fn watch_file(app: AppHandle, path: PathBuf, on_change: Channel<()>) -> Result<u32, String> {
+    blocking(move || {
+        granted(&app.state::<Grants>(), &path)?;
+        let watcher = folder::FolderWatcher::document(&path, move || {
+            let _ = on_change.send(());
+        })
+        .map_err(|e| e.to_string())?;
+        app.state::<Watchers>().add(watcher)
     })
-    .map_err(|e| e.to_string())?;
-    let id = watchers.next_id.fetch_add(1, Ordering::Relaxed);
-    watchers
-        .active
-        .lock()
-        .map_err(|e| e.to_string())?
-        .insert(id, watcher);
-    Ok(id)
+    .await
 }
 
 #[tauri::command]
-fn unwatch_folder(id: u32, watchers: State<'_, Watchers>) -> Result<(), String> {
-    watchers
-        .active
-        .lock()
-        .map_err(|e| e.to_string())?
-        .remove(&id);
-    Ok(())
+async fn unwatch_folder(app: AppHandle, id: u32) -> Result<(), String> {
+    // Stopping a platform watcher waits for its thread, so not on the main thread either.
+    blocking(move || {
+        let watcher = app
+            .state::<Watchers>()
+            .active
+            .lock()
+            .map_err(|e| e.to_string())?
+            .remove(&id);
+        drop(watcher);
+        Ok(())
+    })
+    .await
 }
 
 fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -445,25 +499,29 @@ fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 #[tauri::command]
-fn read_app_data(app: AppHandle, name: String) -> Result<Option<String>, String> {
-    app_data::read(&app_data_dir(&app)?, &name).map_err(|e| e.to_string())
+async fn read_app_data(app: AppHandle, name: String) -> Result<Option<String>, String> {
+    blocking(move || app_data::read(&app_data_dir(&app)?, &name).map_err(|e| e.to_string())).await
 }
 
 #[tauri::command]
-fn write_app_data(app: AppHandle, name: String, text: String) -> Result<(), String> {
-    app_data::write(&app_data_dir(&app)?, &name, &text).map_err(|e| e.to_string())
+async fn write_app_data(app: AppHandle, name: String, text: String) -> Result<(), String> {
+    blocking(move || app_data::write(&app_data_dir(&app)?, &name, &text).map_err(|e| e.to_string()))
+        .await
 }
 
 /// The theme folder, created if missing.
 #[tauri::command]
-fn themes_path(app: AppHandle) -> Result<PathBuf, String> {
-    let dir = themes::ensure_dir(&app_data_dir(&app)?).map_err(|e| e.to_string())?;
-    let grant = app
-        .state::<Grants>()
-        .grant_own(&dir, true)
-        .map_err(|e| e.to_string())?;
-    allow_assets(&app, &grant);
-    Ok(dir)
+async fn themes_path(app: AppHandle) -> Result<PathBuf, String> {
+    blocking(move || {
+        let dir = themes::ensure_dir(&app_data_dir(&app)?).map_err(|e| e.to_string())?;
+        let grant = app
+            .state::<Grants>()
+            .grant_own(&dir, true)
+            .map_err(|e| e.to_string())?;
+        allow_assets(&app, &grant);
+        Ok(dir)
+    })
+    .await
 }
 
 /// Where the user's grants are remembered: a folder of its own in the app data

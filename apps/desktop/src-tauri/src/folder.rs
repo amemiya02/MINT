@@ -9,8 +9,10 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use notify_debouncer_full::notify::{RecommendedWatcher, RecursiveMode};
-use notify_debouncer_full::{new_debouncer, DebounceEventResult, Debouncer, RecommendedCache};
+use notify_debouncer_full::{new_debouncer_opt, DebounceEventResult, Debouncer, NoCache};
 use serde::Serialize;
+
+use crate::walk;
 
 /// One child of a directory, as shown in the file tree.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -97,16 +99,25 @@ fn is_own_temp_file(path: &Path) -> bool {
 /// Watches a folder recursively, or a single document. Bursts of changes are
 /// debounced and reported together. Dropping the watcher stops it.
 pub struct FolderWatcher {
-    _debouncer: Debouncer<RecommendedWatcher, RecommendedCache>,
+    _debouncer: Debouncer<RecommendedWatcher, NoCache>,
 }
 
 impl FolderWatcher {
-    /// Watch `dir` recursively; `on_change` gets the changed paths of each batch.
+    /// Watch `dir` recursively; `on_change` gets the changed paths of each
+    /// batch, always under `dir` as given. Changes inside `.git` and to entries
+    /// the folder's ignore files exclude (see [`walk::IgnoredPaths`]) are not
+    /// reported: build output and git's own churn would otherwise flood it.
     pub fn new(
         dir: &Path,
         on_change: impl Fn(Vec<PathBuf>) + Send + 'static,
     ) -> notify_debouncer_full::notify::Result<Self> {
-        Self::start(dir, RecursiveMode::Recursive, on_change)
+        let mut ignored = walk::IgnoredPaths::new(dir);
+        Self::start(dir, RecursiveMode::Recursive, move |paths| {
+            let paths: Vec<PathBuf> = paths.into_iter().filter(|p| !ignored.contains(p)).collect();
+            if !paths.is_empty() {
+                on_change(paths);
+            }
+        })
     }
 
     /// Watch one document: `on_change` is called when it is written, replaced
@@ -132,12 +143,24 @@ impl FolderWatcher {
     fn start(
         dir: &Path,
         mode: RecursiveMode,
-        on_change: impl Fn(Vec<PathBuf>) + Send + 'static,
+        mut on_change: impl FnMut(Vec<PathBuf>) + Send + 'static,
     ) -> notify_debouncer_full::notify::Result<Self> {
         let (tx, rx) = mpsc::channel::<DebounceEventResult>();
-        let mut debouncer = new_debouncer(Duration::from_millis(200), None, tx)?;
+        // No file-id cache: building one walks the whole folder before the
+        // first event, which takes seconds on a large repository. Without it
+        // a rename is reported as its old and new path, which is all MINT needs.
+        let mut debouncer = new_debouncer_opt::<_, RecommendedWatcher, NoCache>(
+            Duration::from_millis(200),
+            None,
+            tx,
+            NoCache,
+            notify_debouncer_full::notify::Config::default(),
+        )?;
         debouncer.watch(dir, mode)?;
         let watched = dir.to_path_buf();
+        // The platform reports resolved paths (e.g. /private/var for /var on
+        // macOS); report them under the folder as the caller named it.
+        let resolved = fs::canonicalize(dir).ok().filter(|r| r != dir);
         std::thread::spawn(move || {
             // Ends when the debouncer (and with it the sender) is dropped.
             for result in rx {
@@ -155,6 +178,10 @@ impl FolderWatcher {
                     .into_iter()
                     .flat_map(|e| e.event.paths)
                     .filter(|p| !is_own_temp_file(p))
+                    .map(|p| match resolved.as_deref().map(|r| p.strip_prefix(r)) {
+                        Some(Ok(rest)) => watched.join(rest),
+                        _ => p,
+                    })
                     .collect();
                 paths.sort();
                 paths.dedup();
@@ -337,6 +364,160 @@ mod tests {
         let names = changed_names(&rx);
         assert!(names.contains(&"doc.md".to_string()));
         assert!(names.iter().all(|n| !n.starts_with(".mint-")), "{names:?}");
+    }
+
+    #[test]
+    fn watcher_reports_both_paths_of_a_rename() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = fs::canonicalize(dir.path()).unwrap();
+        fs::create_dir(dir.join("a")).unwrap();
+        fs::create_dir(dir.join("b")).unwrap();
+        fs::write(dir.join("a").join("old.md"), "x").unwrap();
+        let (_watcher, rx) = watch(&dir);
+
+        fs::rename(dir.join("a").join("old.md"), dir.join("b").join("new.md")).unwrap();
+
+        let names = changed_names(&rx);
+        assert!(names.contains(&"old.md".to_string()), "{names:?}");
+        assert!(names.contains(&"new.md".to_string()), "{names:?}");
+    }
+
+    #[test]
+    fn watcher_skips_git_internals_and_ignored_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = fs::canonicalize(dir.path()).unwrap();
+        fs::write(dir.join(".gitignore"), "build/\n*.log\n").unwrap();
+        fs::create_dir_all(dir.join(".git").join("objects")).unwrap();
+        fs::create_dir_all(dir.join("build").join("deep")).unwrap();
+        fs::create_dir_all(dir.join("sub")).unwrap();
+        fs::write(dir.join("sub").join(".gitignore"), "local.md\n").unwrap();
+        let (_watcher, rx) = watch(&dir);
+
+        fs::write(dir.join(".git").join("index"), "x").unwrap();
+        fs::write(dir.join(".git").join("objects").join("ab12"), "x").unwrap();
+        fs::write(dir.join("build").join("deep").join("out.o"), "x").unwrap();
+        fs::write(dir.join("debug.log"), "x").unwrap();
+        fs::write(dir.join("sub").join("local.md"), "x").unwrap();
+        fs::write(dir.join("sub").join("shared.md"), "x").unwrap();
+        fs::write(dir.join("notes.md"), "x").unwrap();
+
+        let names = changed_names(&rx);
+        assert!(names.contains(&"notes.md".to_string()), "{names:?}");
+        assert!(names.contains(&"shared.md".to_string()), "{names:?}");
+        for hidden in [
+            "index",
+            "ab12",
+            "objects",
+            "out.o",
+            "deep",
+            "debug.log",
+            "local.md",
+        ] {
+            assert!(
+                !names.contains(&hidden.to_string()),
+                "{hidden} in {names:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn watcher_reports_paths_under_the_folder_as_it_was_given() {
+        // On macOS the temporary directory is reached through a symbolic link
+        // (/var -> /private/var); the reported paths must still start with it.
+        let dir = tempfile::tempdir().unwrap();
+        let link_parent = tempfile::tempdir().unwrap();
+        let link = link_parent.path().join("link");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(dir.path(), &link).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(dir.path(), &link).unwrap();
+        let (_watcher, rx) = watch(&link);
+
+        fs::write(link.join("added.md"), "x").unwrap();
+
+        let paths = rx.recv_timeout(Duration::from_secs(3)).unwrap();
+        assert!(paths.contains(&link.join("added.md")), "{paths:?}");
+    }
+
+    /// Write `count` empty files spread over directories of 20 files each.
+    fn generate_tree(root: &Path, count: usize) {
+        for i in 0..count {
+            let dir = root
+                .join(format!("d{}", i / 20 / 20))
+                .join(format!("e{}", i / 20));
+            if i % 20 == 0 {
+                fs::create_dir_all(&dir).unwrap();
+            }
+            fs::write(dir.join(format!("f{i}.md")), "").unwrap();
+        }
+    }
+
+    /// How long starting a folder watcher on `dir` takes.
+    fn start_time(dir: &Path) -> Duration {
+        let started = std::time::Instant::now();
+        let _watcher = FolderWatcher::new(dir, |_| {}).unwrap();
+        started.elapsed()
+    }
+
+    #[test]
+    fn watcher_starts_without_walking_a_large_folder() {
+        let empty = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let dir = fs::canonicalize(dir.path()).unwrap();
+        generate_tree(&dir, 20_000);
+
+        // What visiting every entry once costs on this machine (cache warm).
+        let started = std::time::Instant::now();
+        let entries = walkdir_all(&dir)
+            .iter()
+            .filter(|p| fs::metadata(p).is_ok())
+            .count();
+        let walk = started.elapsed();
+        assert!(entries > 20_000);
+
+        // The platform watcher has a fixed start-up cost (FSEvents: ~0.2 s);
+        // what must not happen is a cost that grows with the folder.
+        let baseline = start_time(empty.path());
+        let large = start_time(&dir);
+
+        assert!(
+            large < baseline + walk / 2,
+            "starting on 20k files took {large:?}, on an empty folder {baseline:?}, a walk takes {walk:?}"
+        );
+    }
+
+    /// Every path under `root`, depth first.
+    fn walkdir_all(root: &Path) -> Vec<PathBuf> {
+        let mut out = Vec::new();
+        let mut stack = vec![root.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            for item in fs::read_dir(&dir).unwrap() {
+                let path = item.unwrap().path();
+                if path.is_dir() {
+                    stack.push(path.clone());
+                }
+                out.push(path);
+            }
+        }
+        out
+    }
+
+    /// How long starting a folder watcher takes on a real folder:
+    /// `MINT_WATCH_BENCH=~/some/big/folder cargo test -- --ignored --nocapture watcher_start_time`.
+    #[test]
+    #[ignore]
+    fn watcher_start_time_on_a_real_folder() {
+        let dir = PathBuf::from(std::env::var("MINT_WATCH_BENCH").expect("MINT_WATCH_BENCH"));
+        let started = std::time::Instant::now();
+        let watcher = FolderWatcher::new(&dir, |_| {}).unwrap();
+        let start = started.elapsed();
+        let started = std::time::Instant::now();
+        drop(watcher);
+        println!(
+            "FolderWatcher::new({}) took {start:?}; dropping it took {:?}",
+            dir.display(),
+            started.elapsed()
+        );
     }
 
     fn watch_document(path: &Path) -> (FolderWatcher, mpsc::Receiver<()>) {
