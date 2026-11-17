@@ -32,7 +32,8 @@ apps/desktop/            Tauri app
     platform/            Platform interface + Tauri and in-memory implementations
     i18n/                UI strings (en is the reference, zh-CN must match it)
     workspace/           Folder sidebar: file tree, recent list; opens documents via the tab store
-    tabs/                Tab store of one window; show a document with useTabStore().openDocument(path)
+    tabs/                Tab store of one window; show a document with useTabStore().openDocument(path).
+                         It also watches each open document and reloads it or reports conflicts
     commands.ts          Command registry (menus and shortcuts derive from it)
     settings/            Settings schema, store synced with settings.json, settings window
   src-tauri/             Rust backend (kept thin, see ADR-0005)
@@ -72,8 +73,8 @@ never internals (CodeMirror state fields, decorations, React structure).
 
 E2E tests seed the in-memory platform with `launch(page, { files, openDialogResults, locale })`
 and settings.json via `files: { [settingsPath]: "…" }`, change files from outside with
-`writeFile(page, path, text)`,
-and read files back with `readFile(page, path)` (see `e2e/memory-platform.ts`).
+`writeFile(page, path, text)` (settings.json) or `externalWrite` / `externalRemove` /
+`externalRename` (documents; see `external-changes.spec.ts`), and read files back with `readFile(page, path)` (see `e2e/memory-platform.ts`).
 
 ## Commits
 

@@ -30,7 +30,7 @@ export function createTauriPlatform(): Platform {
       const channel = new Channel<null>();
       channel.onmessage = () => onChange();
       const id = await invoke<number>("watch_file", { path, onChange: channel });
-      return () => void invoke<void>("unwatch_file", { id });
+      return () => void invoke<void>("unwatch_folder", { id });
     },
     async showOpenDialog({ title, filters }) {
       const picked = await open({
