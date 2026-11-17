@@ -11,6 +11,7 @@ import {
   type ShellCommandId,
 } from "./commands.ts";
 import { EditorPane } from "./EditorPane.tsx";
+import { ExportDialog } from "./export/ExportDialog.tsx";
 import { FindBar, type FindMode } from "./find/FindBar.tsx";
 import { type Translate, useT } from "./i18n/index.ts";
 import type { Platform } from "./platform/platform.ts";
@@ -111,6 +112,8 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   /** True while the settings window records a shortcut: no shortcut may run meanwhile. */
   const [recordingShortcut, setRecordingShortcut] = useState(false);
   const { shortcuts } = useSettings().settings;
+  /** The tab being exported while the export dialog shows. */
+  const [exporting, setExporting] = useState<number | null>(null);
   const active = tabs.find((tab) => tab.id === activeId) ?? null;
   const updates = useUpdates(platform);
   const [folder, setFolder] = useState<string | null>(null);
@@ -181,6 +184,9 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     "file.save": () => {
       if (activeId !== null) void store.save(activeId);
     },
+    "file.exportHtml": () => {
+      if (activeId !== null) setExporting(activeId);
+    },
     "edit.find": () => showFind("find"),
     "edit.replace": () => showFind("replace"),
     "edit.searchFolder": () => setFolderSearch((request) => (request ?? 0) + 1),
@@ -239,6 +245,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     [platform, store, recovery],
   );
 
+  const exportedTab = tabs.find((tab) => tab.id === exporting) ?? null;
   const name = active ? baseName(active.path) : null;
   const dirty = active?.dirty ?? false;
   useEffect(() => {
@@ -345,6 +352,17 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
           recentDocuments={recent.documents}
           onOpenDocument={(path) => void store.openDocument(path)}
           onClose={() => setQuickOpenVisible(false)}
+        />
+      )}
+      {exportedTab && (
+        <ExportDialog
+          platform={platform}
+          path={exportedTab.path}
+          getText={() => store.editor(exportedTab.id)?.getText() ?? exportedTab.text}
+          onClose={() => {
+            setExporting(null);
+            store.editor(exportedTab.id)?.focus();
+          }}
         />
       )}
       {settingsOpen && (

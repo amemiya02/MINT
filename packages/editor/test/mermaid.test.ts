@@ -4,7 +4,7 @@
 // sources containing "error"; real diagrams are covered by the E2E tests.
 import { defaultDialect } from "@mint/markdown";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createEditor, type EditorOptions, type MintEditor } from "../src/index.ts";
+import { createEditor, type EditorOptions, type MintEditor, renderMermaid } from "../src/index.ts";
 import { finishParsing } from "./parsed.ts";
 
 const mermaid = vi.hoisted(() => ({
@@ -118,6 +118,18 @@ describe("mermaid block widget", () => {
     const text = `intro\r\n\r\n\u0060\u0060\u0060mermaid\r\nsequenceDiagram\r\n  A->>B: hi\r\n\u0060\u0060\u0060\r\n`;
     const { editor } = open(text);
     expect(editor.getText()).toBe(text);
+  });
+});
+
+describe("renderMermaid (for export)", () => {
+  it("renders a diagram's source to the SVG the block widget shows", async () => {
+    await expect(renderMermaid("graph TD\n  X --> Y")).resolves.toBe(
+      '<svg data-source="graph TD\n  X --> Y"></svg>',
+    );
+  });
+
+  it("rejects with the syntax error", async () => {
+    await expect(renderMermaid("an error")).rejects.toThrow("Parse error on line 2: an error");
   });
 });
 

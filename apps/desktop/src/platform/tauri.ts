@@ -9,7 +9,7 @@ import {
 } from "@tauri-apps/api/menu";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { message, open } from "@tauri-apps/plugin-dialog";
+import { message, open, save } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
@@ -52,6 +52,14 @@ export function createTauriPlatform(): Platform {
         title,
         multiple: false,
         directory: false,
+        filters: filters.map((f) => ({ name: f.name, extensions: [...f.extensions] })),
+      });
+      return picked ?? null;
+    },
+    async showSaveDialog({ title, defaultPath, filters }) {
+      const picked = await save({
+        title,
+        defaultPath,
         filters: filters.map((f) => ({ name: f.name, extensions: [...f.extensions] })),
       });
       return picked ?? null;

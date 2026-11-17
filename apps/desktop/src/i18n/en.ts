@@ -17,6 +17,7 @@ export const en = {
 
   "command.file.open": "Open…",
   "command.file.save": "Save",
+  "command.file.exportHtml": "Export as HTML…",
   "command.file.openFolder": "Open Folder…",
   "command.file.quickOpen": "Quick Open…",
   "command.view.toggleSidebar": "Toggle Sidebar",
@@ -149,6 +150,14 @@ export const en = {
   "settings.shortcuts.useAnyway": "Use Anyway",
   "settings.shortcuts.cancel": "Cancel",
   "settings.shortcuts.alsoUsedBy": "Also used by {commands}",
+
+  "export.html.title": "Export as HTML",
+  "export.html.saveTitle": "Export as HTML",
+  "export.html.embedImages": "Embed images",
+  "export.html.export": "Export",
+  "export.html.exporting": "Exporting…",
+  "export.html.cancel": "Cancel",
+  "export.html.failed": "Could not export: {reason}",
 
   "theme.issue.missing":
     "The theme “{name}” was not found in {path}. The built-in theme is in use.",

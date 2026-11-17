@@ -141,6 +141,32 @@ export async function createThemeStore(
   };
 }
 
+/**
+ * The stylesheet of the user theme `name` in the theme folder. Rejects if it
+ * is missing or unreadable.
+ */
+export async function readUserTheme(
+  platform: Platform,
+  folder: string,
+  name: string,
+): Promise<string> {
+  const file = (await listThemes(platform, folder)).find((theme) => theme.name === name);
+  if (!file) throw new Error(`The theme "${name}" is not in ${folder}`);
+  return platform.readTextFile(file.path);
+}
+
+/** The typography settings as theme variables; like on screen, they override the theme's. */
+export function typographyCss(s: Settings): string {
+  const variables = [
+    `--mint-font-size: ${s.fontSize}px;`,
+    `--mint-line-height: ${s.lineHeight};`,
+    `--mint-content-width: ${s.contentWidth}px;`,
+    ...(s.fontFamily.trim() === "" ? [] : [`--mint-font-editor: ${s.fontFamily};`]),
+  ];
+  // More specific than a theme's `:root[data-appearance="dark"]`.
+  return `html:root[data-appearance] { ${variables.join(" ")} }`;
+}
+
 interface ThemeFile {
   readonly name: string;
   readonly path: string;

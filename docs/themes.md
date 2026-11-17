@@ -107,3 +107,9 @@ MINT 会在 `<html>` 上设置 `data-appearance="light"` 或 `data-appearance="d
 | `.mint-editor .cm-content` | 文档正文区域 |
 
 编辑区是 CodeMirror 6 的 DOM。除上表外的 `.cm-*` 类名属于实现细节，可能随版本变化。
+
+## 导出的文档
+
+导出 HTML（以及以它为基础的 PDF）时，MINT 把内置主题、所选主题和字体设置一起内联到导出文件中，并在 `<html>` 上设置所选的 `data-appearance`。导出文件中的正文是普通的 HTML 元素（`h1`、`p`、`pre`、`table` 等），包在 `.mint-document` 中，样式同样由上面的变量决定，所以只覆盖变量的主题在编辑器和导出文件中效果一致。主题中针对编辑器 DOM（`.cm-*`）的选择器不会作用于导出文件；如果想单独调整导出效果，可以为 `.mint-document` 及其中的元素写样式。
+
+代码块中的语法高亮在两处使用相同的类名：`.cm-mint-code-keyword`、`.cm-mint-code-string`、`.cm-mint-code-number`、`.cm-mint-code-comment`、`.cm-mint-code-name`。Mermaid 图表以 SVG 形式放在 `figure.mint-mermaid` 中。
