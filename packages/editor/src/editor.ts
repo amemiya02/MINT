@@ -82,7 +82,8 @@ export interface MintEditor {
   replaceText(text: string): void;
   getSelection(): TextSelection;
   getMode(): EditorMode;
-  setSelection(selection: { anchor: number; head?: number }): void;
+  /** Select a range; with `scrollIntoView`, also scroll it into view (e.g. when jumping to a search result). */
+  setSelection(selection: { anchor: number; head?: number; scrollIntoView?: boolean }): void;
   /** Matches of the find query set with the `setFindQuery` command. */
   getFindStatus(): FindStatus;
   /** Run a named command. Returns whether it did anything. */
@@ -159,12 +160,13 @@ export function createEditor(options: EditorOptions): MintEditor {
       return { anchor: toFileOffset(view.state, anchor), head: toFileOffset(view.state, head) };
     },
     getMode: () => mode,
-    setSelection({ anchor, head = anchor }) {
+    setSelection({ anchor, head = anchor, scrollIntoView = false }) {
       view.dispatch({
         selection: EditorSelection.single(
           fromFileOffset(view.state, anchor),
           fromFileOffset(view.state, head),
         ),
+        scrollIntoView,
       });
     },
     getFindStatus: () => findStatus(view.state),

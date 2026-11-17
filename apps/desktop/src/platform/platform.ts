@@ -44,6 +44,20 @@ export interface Platform {
    */
   listFolderFiles(path: string, extensions: readonly string[]): Promise<string[]>;
 
+  /**
+   * Search the text of the files of a folder (the same files `listFolderFiles`
+   * lists) in the background. Each file with matches is passed to `onFile` as
+   * soon as it is searched, in path order; `onDone` is called last, unless the
+   * search is cancelled. Rejects at once if `query.regexp` is set and the pattern
+   * is not a valid regular expression. Resolves to a function that cancels it.
+   */
+  searchFolder(
+    path: string,
+    query: FolderSearchQuery,
+    extensions: readonly string[],
+    listener: FolderSearchListener,
+  ): Promise<() => void>;
+
   /** Create an empty file. Rejects if anything already exists at `path`. */
   createFile(path: string): Promise<void>;
 
@@ -155,6 +169,36 @@ export interface AvailableUpdate {
   readonly version: string;
   /** Download and install the new version, then restart MINT into it. Rejects if any step fails. */
   install(): Promise<void>;
+}
+
+export interface FolderSearchQuery {
+  readonly pattern: string;
+  readonly caseSensitive: boolean;
+  /** Only matches not preceded or followed by a letter, digit or underscore. */
+  readonly wholeWord: boolean;
+  /** `pattern` is a regular expression; otherwise it is literal text. */
+  readonly regexp: boolean;
+}
+
+export interface FolderSearchListener {
+  onFile(file: FileMatches): void;
+  /** `truncated`: the search stopped after too many matching lines. */
+  onDone(summary: { readonly truncated: boolean }): void;
+}
+
+/** The matching lines of one file. */
+export interface FileMatches {
+  readonly path: string;
+  readonly lines: readonly LineMatch[];
+}
+
+export interface LineMatch {
+  /** 1-based line number (lines end at a line feed). */
+  readonly line: number;
+  /** The line without its line ending; a byte order mark on line 1 is kept. */
+  readonly text: string;
+  /** The matches in `text` as `[start, end)` UTF-16 offsets. */
+  readonly ranges: readonly (readonly [number, number])[];
 }
 
 export interface QuestionDialogOptions {
