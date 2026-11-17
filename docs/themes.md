@@ -96,6 +96,9 @@ MINT 会在 `<html>` 上设置 `data-appearance="light"` 或 `data-appearance="d
 | `.cm-mint-md-link`，`.cm-mint-md-url` | 链接文字、链接地址 |
 | `.cm-mint-md-code` | 行内代码 |
 | `.cm-mint-md-mark`，`.cm-mint-md-rule` | Markdown 标记、分隔线 |
+| `.cm-mint-strong`，`.cm-mint-emphasis`，`.cm-mint-strikethrough`，`.cm-mint-superscript`，`.cm-mint-subscript` | 实时预览中渲染后的粗体、斜体、删除线、上标、下标 |
+| `.cm-mint-code`，`.cm-mint-link` | 实时预览中渲染后的行内代码、链接文字 |
+| `.cm-mint-marker` | 实时预览中因片段显露而可见的 Markdown 标记 |
 | `.mint-find-match`，`.mint-find-match-current` | 查找匹配项、当前匹配项 |
 | `.mint-editor .cm-content` | 文档正文区域 |
 

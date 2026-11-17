@@ -9,6 +9,7 @@ import type { MenuSpec } from "./platform/platform.ts";
 export type CommandId =
   | "file.open"
   | "file.openFolder"
+  | "file.quickOpen"
   | "file.save"
   | "edit.find"
   | "edit.replace"
@@ -17,7 +18,8 @@ export type CommandId =
   | "tab.previous"
   | "view.toggleSidebar"
   | "window.new"
-  | "app.settings";
+  | "app.settings"
+  | "view.toggleSourceMode";
 
 export interface Command {
   readonly id: CommandId;
@@ -31,6 +33,7 @@ const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigat
 export const commands: readonly Command[] = [
   { id: "file.open", title: "command.file.open", accelerator: "CmdOrCtrl+O" },
   { id: "file.openFolder", title: "command.file.openFolder" },
+  { id: "file.quickOpen", title: "command.file.quickOpen", accelerator: "CmdOrCtrl+P" },
   { id: "file.save", title: "command.file.save", accelerator: "CmdOrCtrl+S" },
   {
     id: "view.toggleSidebar",
@@ -49,6 +52,11 @@ export const commands: readonly Command[] = [
   { id: "tab.previous", title: "command.tab.previous", accelerator: "Ctrl+Shift+Tab" },
   { id: "window.new", title: "command.window.new", accelerator: "CmdOrCtrl+Shift+N" },
   { id: "app.settings", title: "command.app.settings", accelerator: "CmdOrCtrl+," },
+  {
+    id: "view.toggleSourceMode",
+    title: "command.view.toggleSourceMode",
+    accelerator: "CmdOrCtrl+/",
+  },
 ];
 
 export function buildMenu(t: Translate, run: (id: CommandId) => void): MenuSpec[] {
@@ -77,6 +85,7 @@ export function buildMenu(t: Translate, run: (id: CommandId) => void): MenuSpec[
       items: [
         item("file.open"),
         item("file.openFolder"),
+        item("file.quickOpen"),
         { kind: "separator" },
         item("file.save"),
         item("tab.close"),
@@ -95,7 +104,7 @@ export function buildMenu(t: Translate, run: (id: CommandId) => void): MenuSpec[
         item("edit.replace"),
       ],
     },
-    { label: t("menu.view"), items: [item("view.toggleSidebar")] },
+    { label: t("menu.view"), items: [item("view.toggleSidebar"), item("view.toggleSourceMode")] },
     {
       label: t("menu.window"),
       items: [item("window.new"), { kind: "separator" }, item("tab.next"), item("tab.previous")],

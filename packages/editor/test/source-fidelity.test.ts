@@ -1,18 +1,22 @@
 // Source fidelity properties, checked through the editor core's public interface:
 // text the user did not edit must survive byte for byte.
 import fc from "fast-check";
-import { afterEach, describe, expect, it } from "vitest";
-import { createEditor, type MintEditor } from "../src/index.ts";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createEditor, type EditorMode, type MintEditor } from "../src/index.ts";
 
 const editors: MintEditor[] = [];
+let mode: EditorMode = "livePreview";
+function closeAll() {
+  for (const editor of editors.splice(0)) editor.destroy();
+}
+/** Open a file in a fresh editor; each property run needs only one, so earlier ones are closed. */
 function open(text: string): MintEditor {
-  const editor = createEditor({ parent: document.body, text });
+  closeAll();
+  const editor = createEditor({ parent: document.body, text, mode });
   editors.push(editor);
   return editor;
 }
-afterEach(() => {
-  for (const editor of editors.splice(0)) editor.destroy();
-});
+afterEach(closeAll);
 
 const lineEnding = fc.constantFrom("\n", "\r\n", "\r");
 const markdownLine = fc.oneof(
@@ -25,11 +29,16 @@ const markdownLine = fc.oneof(
     "> quote",
     "```",
     "| a | b |",
+    "**bold** and *it*",
+    "~~del~~ `code` [link](x.md)",
+    "<https://a.example> https://b.example",
+    "[ref][r] ***x*** _y_",
+    "[r]: https://r.example",
     "  ",
     "",
   ),
   fc.string({
-    unit: fc.constantFrom("*", "_", "`", "#", "-", "|", " ", "a", "中", "\t", "😀"),
+    unit: fc.constantFrom(..."*_`#-| a中\t😀[]()~<>"),
     maxLength: 12,
   }),
 );
@@ -66,7 +75,11 @@ const edit = fc.record({
   text: insertion,
 });
 
-describe("source fidelity", () => {
+describe.each<EditorMode>(["livePreview", "source"])("source fidelity in %s mode", (m) => {
+  beforeEach(() => {
+    mode = m;
+  });
+
   it("opening and saving without edits returns the file unchanged", () => {
     fc.assert(
       fc.property(fileText, (text) => {
@@ -116,6 +129,32 @@ describe("source fidelity", () => {
           // keep undoing
         }
         expect(editor.getText()).toBe(text);
+      }),
+    );
+  });
+
+  it("rendering never changes the text, wherever the selection goes and whatever the mode", () => {
+    const moves = fc.array(
+      fc.record({
+        a: fc.double({ min: 0, max: 1, noNaN: true }),
+        b: fc.double({ min: 0, max: 1, noNaN: true }),
+        toggle: fc.boolean(),
+      }),
+      { maxLength: 8 },
+    );
+    fc.assert(
+      fc.property(fileText, moves, (text, steps) => {
+        const editor = open(text);
+        for (const { a, b, toggle } of steps) {
+          editor.setSelection({
+            anchor: Math.round(a * text.length),
+            head: Math.round(b * text.length),
+          });
+          const selection = editor.getSelection();
+          if (toggle) editor.execute("toggleSourceMode");
+          expect(editor.getSelection()).toEqual(selection);
+          expect(editor.getText()).toBe(text);
+        }
       }),
     );
   });

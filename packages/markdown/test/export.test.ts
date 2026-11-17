@@ -3,6 +3,18 @@
 import { describe, expect, it } from "vitest";
 import { defaultDialect, renderHtml } from "../src/index.ts";
 
+describe("defaultDialect", () => {
+  it("enables CommonMark/GFM, math, Mermaid and front matter, and no extended syntax (ADR-0004)", () => {
+    expect(defaultDialect).toEqual({
+      gfm: true,
+      math: true,
+      mermaid: true,
+      frontMatter: true,
+      extended: { toc: false, highlight: false, superscript: false, subscript: false },
+    });
+  });
+});
+
 describe("renderHtml", () => {
   it("renders CommonMark headings and emphasis", () => {
     expect(renderHtml("# Title\n\nSome **bold** text.\n", defaultDialect)).toBe(

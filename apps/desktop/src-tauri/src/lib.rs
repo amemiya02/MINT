@@ -5,8 +5,10 @@
 mod app_data;
 mod folder;
 mod fs;
+mod recovery;
 mod settings;
 mod themes;
+mod walk;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -53,6 +55,29 @@ fn write_settings(
     settings::save(&state.path, &values).map_err(|e| e.to_string())
 }
 
+/// Snapshots of unsaved work left by an earlier run; only the first caller gets them.
+#[tauri::command]
+fn take_recovery_snapshots(area: State<'_, recovery::RecoveryArea>) -> Vec<recovery::Snapshot> {
+    area.take_left_over()
+}
+
+#[tauri::command]
+fn write_recovery_snapshot(
+    area: State<'_, recovery::RecoveryArea>,
+    id: String,
+    contents: String,
+) -> Result<(), String> {
+    area.write(&id, &contents).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_recovery_snapshot(
+    area: State<'_, recovery::RecoveryArea>,
+    id: String,
+) -> Result<(), String> {
+    area.remove(&id).map_err(|e| e.to_string())
+}
+
 /// Event sent to every window with the reloaded `SettingsFile` whenever the file changes on disk.
 const SETTINGS_CHANGED: &str = "settings-changed";
 
@@ -79,6 +104,13 @@ fn rename_path(from: PathBuf, to: PathBuf) -> Result<(), String> {
 #[tauri::command]
 fn move_to_trash(path: PathBuf) -> Result<(), String> {
     folder::move_to_trash(&path).map_err(|e| e.to_string())
+}
+
+/// Every file of a folder, recursively, except entries ignored by `.gitignore`
+/// and hidden ones; only those with one of `extensions` unless it is empty.
+#[tauri::command]
+fn list_folder_files(path: PathBuf, extensions: Vec<String>) -> Vec<PathBuf> {
+    walk::list_files(&path, &extensions)
 }
 
 /// Live folder watchers, by id. Dropping a watcher stops it.
@@ -143,6 +175,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(Watchers::default())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let path = app.path().app_config_dir()?.join(settings::FILE_NAME);
             let handle = app.handle().clone();
@@ -155,6 +188,8 @@ pub fn run() {
                 path,
                 _watcher: watcher,
             });
+            let recovery_dir = app.path().app_data_dir()?.join(recovery::DIR_NAME);
+            app.manage(recovery::RecoveryArea::open(recovery_dir));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -168,11 +203,15 @@ pub fn run() {
             create_directory,
             rename_path,
             move_to_trash,
+            list_folder_files,
             watch_folder,
             unwatch_folder,
             read_app_data,
             write_app_data,
-            themes_path,
+            take_recovery_snapshots,
+            write_recovery_snapshot,
+            delete_recovery_snapshot,
+            themes_path
         ])
         .run(tauri::generate_context!())
         .expect("error while running MINT");

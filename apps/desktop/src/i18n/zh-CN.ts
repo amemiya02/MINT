@@ -19,7 +19,10 @@ export const zhCN: Messages = {
   "command.file.open": "打开…",
   "command.file.save": "保存",
   "command.file.openFolder": "打开文件夹…",
+  "command.file.quickOpen": "快速打开…",
   "command.view.toggleSidebar": "显示/隐藏侧边栏",
+  "command.view.toggleSourceMode": "切换源码模式",
+
   "command.tab.close": "关闭标签页",
   "command.tab.next": "显示下一个标签页",
   "command.tab.previous": "显示上一个标签页",
@@ -63,6 +66,7 @@ export const zhCN: Messages = {
   "settings.language.system": "跟随系统",
   "settings.language.zh-CN": "简体中文",
   "settings.language.en": "English",
+  "settings.autosave": "自动保存",
 
   "settings.appearance": "亮暗模式",
   "settings.appearance.system": "跟随系统",
@@ -91,6 +95,13 @@ export const zhCN: Messages = {
   "welcome.openFolder": "打开文件夹…",
   "welcome.recent": "最近打开",
 
+  "quickOpen.title": "快速打开",
+  "quickOpen.placeholder": "按文件名搜索文档",
+  "quickOpen.placeholderRecent": "搜索最近打开的文档",
+  "quickOpen.recent": "最近打开",
+  "quickOpen.noMatches": "没有匹配的文档",
+  "quickOpen.empty": "没有可打开的文档",
+
   "sidebar.label": "侧边栏",
   "sidebar.hide": "隐藏侧边栏",
   "tree.newDocument": "新建文档",
@@ -103,6 +114,8 @@ export const zhCN: Messages = {
 
   "status.saved": "已保存",
   "status.unsaved": "有未保存的改动",
+  "status.mode.livePreview": "实时预览",
+  "status.mode.source": "源码模式",
 
   "error.open": "无法打开 {path}：{reason}",
   "error.save": "无法保存 {path}：{reason}",
@@ -120,4 +133,11 @@ export const zhCN: Messages = {
   "unsaved.save": "保存",
   "unsaved.discard": "不保存",
   "unsaved.cancel": "取消",
+
+  "recovery.title": "恢复未保存的改动",
+  "recovery.message": "MINT 上次没有正常退出。是否恢复对 {names} 的未保存改动？",
+  "recovery.separator": "、",
+  "recovery.restore": "恢复",
+  "recovery.discard": "丢弃",
+  "recovery.later": "稍后再说",
 };

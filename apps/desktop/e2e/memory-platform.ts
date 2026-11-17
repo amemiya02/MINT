@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 import type { MemoryPlatform, MemoryPlatformOptions } from "../src/platform/memory.ts";
 
 export {
+  memoryRecoveryDir as recoveryDir,
   memorySettingsPath as settingsPath,
   memoryThemesPath as themesPath,
 } from "../src/platform/memory.ts";
@@ -74,6 +75,14 @@ export function externalRemove(page: Page, path: string): Promise<void> {
   );
 }
 
+/** URLs the shell asked the in-memory platform to open externally. */
+export function openedUrls(page: Page): Promise<readonly string[]> {
+  return page.evaluate(() => [
+    ...(window as unknown as { __MINT_MEMORY_PLATFORM__: { openedUrls: readonly string[] } })
+      .__MINT_MEMORY_PLATFORM__.openedUrls,
+  ]);
+}
+
 /**
  * Change a file as another program would. Watchers are notified, so this is how
  * tests edit settings.json behind MINT's back.
@@ -82,5 +91,12 @@ export async function writeFile(page: Page, path: string, text: string): Promise
   await page.evaluate(
     ([p, t]) => (window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.writeTextFile(p, t),
     [path, text] as const,
+  );
+}
+
+/** Every file the in-memory platform holds, keyed by path (documents, settings, recovery area). */
+export function files(page: Page): Promise<Record<string, string>> {
+  return page.evaluate(() =>
+    Object.fromEntries((window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.files),
   );
 }

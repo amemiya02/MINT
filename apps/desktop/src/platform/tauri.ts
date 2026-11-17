@@ -10,7 +10,14 @@ import {
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { message, open } from "@tauri-apps/plugin-dialog";
-import type { DirectoryEntry, MenuItemSpec, Platform, SettingsFile } from "./platform.ts";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import type {
+  DirectoryEntry,
+  MenuItemSpec,
+  Platform,
+  RecoverySnapshot,
+  SettingsFile,
+} from "./platform.ts";
 
 const nativeItems = {
   cut: "Cut",
@@ -39,6 +46,8 @@ export function createTauriPlatform(): Platform {
       return (await open({ title, multiple: false, directory: true })) ?? null;
     },
     readDirectory: (path) => invoke<DirectoryEntry[]>("read_directory", { path }),
+    listFolderFiles: (path, extensions) =>
+      invoke<string[]>("list_folder_files", { path, extensions }),
     createFile: (path) => invoke<void>("create_file", { path }),
     createDirectory: (path) => invoke<void>("create_directory", { path }),
     rename: (from, to) => invoke<void>("rename_path", { from, to }),
@@ -51,6 +60,7 @@ export function createTauriPlatform(): Platform {
     },
     readAppData: (name) => invoke<string | null>("read_app_data", { name }),
     writeAppData: (name, text) => invoke<void>("write_app_data", { name, text }),
+    openExternal: (url) => openUrl(url),
     themesPath: () => invoke<string>("themes_path"),
     async showQuestionDialog({ title, message: text, yes, no, cancel }) {
       const answer = await message(text, {
@@ -108,6 +118,10 @@ export function createTauriPlatform(): Platform {
       const unlisten = listen<SettingsFile>("settings-changed", (event) => listener(event.payload));
       return () => void unlisten.then((stop) => stop());
     },
+    takeRecoverySnapshots: () => invoke<RecoverySnapshot[]>("take_recovery_snapshots"),
+    writeRecoverySnapshot: (id, contents) =>
+      invoke<void>("write_recovery_snapshot", { id, contents }),
+    deleteRecoverySnapshot: (id) => invoke<void>("delete_recovery_snapshot", { id }),
   };
 }
 

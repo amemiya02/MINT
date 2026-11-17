@@ -22,6 +22,10 @@ export const settingsSchema = {
       { value: "en", label: "settings.language.en" },
     ],
   }),
+  autosave: toggle({
+    label: "settings.autosave",
+    default: true,
+  }),
   appearance: choice({
     label: "settings.appearance",
     default: "system",
@@ -110,8 +114,7 @@ function choice<const T extends string>(
   return { kind: "choice", ...definition };
 }
 
-// Not used by any setting yet; kept so boolean settings are one table entry away.
-export function toggle(definition: Omit<ToggleSetting, "kind">): ToggleSetting {
+function toggle(definition: Omit<ToggleSetting, "kind">): ToggleSetting {
   return { kind: "toggle", ...definition };
 }
 
