@@ -79,6 +79,25 @@ export function openedUrls(page: Page): Promise<readonly string[]> {
   ]);
 }
 
+export interface MenuSnapshot {
+  readonly label: string;
+  readonly items: readonly { id: string; label: string; accelerator: string | null }[];
+}
+
+/** The application menu the shell installed: its command items, per submenu. */
+export function menu(page: Page): Promise<MenuSnapshot[]> {
+  return page.evaluate(() =>
+    (window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.menu.map((m) => ({
+      label: m.label,
+      items: m.items.flatMap((i) =>
+        i.kind === "command"
+          ? [{ id: i.id, label: i.label, accelerator: i.accelerator ?? null }]
+          : [],
+      ),
+    })),
+  );
+}
+
 /**
  * Change a file as another program would. Watchers are notified, so this is how
  * tests edit settings.json behind MINT's back.

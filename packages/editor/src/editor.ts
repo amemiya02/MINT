@@ -12,6 +12,7 @@ import {
   findReplace,
   findStatus,
 } from "./find.ts";
+import { type FormattingCommands, formattingCommands } from "./formatting.ts";
 import { type LinkTarget, linkOpening } from "./links.ts";
 import { inlineSpans } from "./live-preview/inline-spans.ts";
 import { livePreview, previewRenderer } from "./live-preview/preview.ts";
@@ -51,7 +52,7 @@ export interface TextSelection {
 }
 
 /** Named commands and their arguments. */
-export interface EditorCommands extends FindCommands {
+export interface EditorCommands extends FindCommands, FormattingCommands {
   undo: [];
   redo: [];
   /** Replace the selection with text, as if typed. Line breaks take the document's line ending. */
@@ -82,6 +83,14 @@ export interface MintEditor {
   destroy(): void;
 }
 
+/**
+ * Keys of CodeMirror's default keymap that MINT's default shortcuts take over
+ * (they belong to the host's command registry): Mod-/ toggles source mode rather
+ * than comments, Mod-i is italic rather than "select parent syntax", and
+ * Shift-Mod-k inserts a code block rather than deleting the line.
+ */
+const hostKeys = new Set(["Mod-/", "Mod-i", "Shift-Mod-k"]);
+
 export function createEditor(options: EditorOptions): MintEditor {
   const listeners = new Set<(event: EditorEvent) => void>();
   const parsed = parseFileText(options.text);
@@ -99,8 +108,10 @@ export function createEditor(options: EditorOptions): MintEditor {
         parsed.extension,
         history(),
         findReplace(),
-        // Mod-/ belongs to the host's command registry (toggle source mode), not to comments.
-        keymap.of([...defaultKeymap.filter((b) => b.key !== "Mod-/"), ...historyKeymap]),
+        keymap.of([
+          ...defaultKeymap.filter((b) => !b.key || !hostKeys.has(b.key)),
+          ...historyKeymap,
+        ]),
         markdownSupport(dialect),
         syntaxHighlighting(defaultHighlightStyle),
         previewRenderer.of(inlineSpans),
@@ -121,6 +132,7 @@ export function createEditor(options: EditorOptions): MintEditor {
 
   const commands: { [C in EditorCommand]: (...args: EditorCommands[C]) => boolean } = {
     ...findCommands(view),
+    ...formattingCommands(view),
     undo: () => undo(view),
     redo: () => redo(view),
     insertText: (text) => {
