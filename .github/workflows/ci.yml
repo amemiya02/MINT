@@ -94,3 +94,40 @@ jobs:
         run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets -- -D warnings
       - name: Rust tests
         run: pnpm test:rust
+
+  # The real app (Tauri, WebKitGTK, Rust backend) driven over WebDriver by tauri-driver:
+  # open a document from the command line, edit it, save it. Linux only, since
+  # tauri-driver has no macOS support and WebKitWebDriver is the Linux driver.
+  smoke:
+    name: Desktop smoke test (Linux, tauri-driver)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+      - name: Install Tauri system dependencies, WebKitWebDriver and Xvfb
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf webkit2gtk-driver xvfb
+      - name: Install tauri-driver
+        run: cargo install tauri-driver --locked
+      - run: pnpm install --frozen-lockfile
+      - name: Build the app (debug, no installers)
+        run: pnpm --filter @mint/desktop tauri build --debug --no-bundle
+      - name: Smoke test
+        working-directory: apps/desktop
+        env:
+          MINT_APP: ${{ github.workspace }}/apps/desktop/src-tauri/target/debug/mint
+          DISPLAY: ":99"
+        run: |
+          Xvfb :99 -screen 0 1280x1024x24 &
+          tauri-driver &
+          sleep 3
+          node --test smoke/open-edit-save.smoke.ts

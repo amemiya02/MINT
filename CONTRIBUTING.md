@@ -115,7 +115,12 @@ and settings.json via `files: { [settingsPath]: "…" }`, change files from outs
 `.github/workflows/ci.yml` runs on every pull request (and on pushes to `main`
 and `feat/**`): Biome, type check, rustfmt and the packaging templates once on Linux, then unit tests,
 Playwright E2E tests, clippy and `cargo test` on Linux, macOS and Windows.
-There are no performance gates.
+A smoke job builds the real app on Linux and drives it over WebDriver with
+`tauri-driver` (`apps/desktop/smoke/`): open a document from the command line,
+edit, save, check the file. It cannot run on macOS (tauri-driver has no macOS
+support); on Linux run `tauri-driver &` then
+`MINT_APP=src-tauri/target/debug/mint node --test smoke/*.smoke.ts` in
+`apps/desktop` under X. There are no performance gates.
 
 ## Releases and automatic updates
 
