@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useT } from "../i18n/index.ts";
 import { useTheme } from "../theme/useTheme.ts";
+import { ShortcutsSettings } from "./ShortcutsSettings.tsx";
 import {
   type SettingDefinition,
   type SettingKey,
@@ -13,10 +14,12 @@ interface SettingsDialogProps {
   readonly onClose: () => void;
   /** Open settings.json as a document. */
   readonly onOpenFile: (path: string) => void;
+  /** Told when a shortcut starts and stops being recorded: no shortcut may run meanwhile. */
+  readonly onRecordingShortcut: (recording: boolean) => void;
 }
 
 /** The settings window: one control per entry of `settingsSchema`. */
-export function SettingsDialog({ onClose, onOpenFile }: SettingsDialogProps) {
+export function SettingsDialog({ onClose, onOpenFile, onRecordingShortcut }: SettingsDialogProps) {
   const t = useT();
   const { path } = useSettings();
   const dialog = useRef<HTMLDialogElement>(null);
@@ -45,10 +48,14 @@ export function SettingsDialog({ onClose, onOpenFile }: SettingsDialogProps) {
           {t("settings.close")}
         </button>
       </div>
-      <div className="flex flex-col gap-4 px-5 py-4">
-        {(Object.keys(settingsSchema) as SettingKey[]).map((key) => (
-          <SettingControl key={key} settingKey={key} />
-        ))}
+      <div className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto px-5 py-4">
+        {(Object.keys(settingsSchema) as SettingKey[]).map((key) =>
+          settingsSchema[key].kind === "shortcuts" ? (
+            <ShortcutsSettings key={key} onRecording={onRecordingShortcut} />
+          ) : (
+            <SettingControl key={key} settingKey={key} />
+          ),
+        )}
       </div>
       <div className="flex items-center justify-between gap-3 border-t border-(--mint-border) px-5 py-3 text-xs text-(--mint-muted)">
         <span className="truncate" title={path}>
@@ -138,6 +145,9 @@ function SettingControl({ settingKey }: { readonly settingKey: SettingKey }) {
           <TextField id={id} definition={definition} value={String(value)} onChange={set} />
         );
       break;
+    case "shortcuts":
+      // A list of its own (see ShortcutsSettings), not a single control.
+      return null;
   }
 
   return (
