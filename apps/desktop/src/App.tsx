@@ -17,6 +17,7 @@ import type { Platform } from "./platform/platform.ts";
 import { QuickOpen } from "./quick-open/QuickOpen.tsx";
 import { createRecovery, type Recovery, type RecoveryChoice } from "./recovery/recovery.ts";
 import { FolderSearch } from "./search/FolderSearch.tsx";
+import { useDialect } from "./settings/dialect.ts";
 import { SettingsDialog } from "./settings/SettingsDialog.tsx";
 import { SettingsIssues } from "./settings/SettingsIssues.tsx";
 import { useSettingsStore } from "./settings/useSettings.ts";
@@ -360,6 +361,7 @@ function TabPanel({
   const currentPath = useRef(path);
   currentPath.current = path;
   const [imageHost] = useState(() => createImageHost(platform, () => currentPath.current));
+  const dialect = useDialect();
   const onOpenLink = useCallback(
     (link: LinkTarget) => {
       if (link.kind === "external") void platform.openExternal(link.url);
@@ -385,6 +387,7 @@ function TabPanel({
           onModeChange={onModeChange}
           onOpenLink={onOpenLink}
           imageHost={imageHost}
+          dialect={dialect}
         />
       </div>
     </div>

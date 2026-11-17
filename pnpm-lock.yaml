@@ -178,6 +178,9 @@ importers:
       '@mint/editor':
         specifier: workspace:*
         version: link:../../packages/editor
+      '@mint/markdown':
+        specifier: workspace:*
+        version: link:../../packages/markdown
       '@tauri-apps/api':
         specifier: 2.12.4
         version: 2.12.4
@@ -285,9 +288,36 @@ importers:
 
   packages/markdown:
     dependencies:
+      '@types/hast':
+        specifier: 3.0.5
+        version: 3.0.5
+      '@types/mdast':
+        specifier: 4.0.4
+        version: 4.0.4
       katex:
         specifier: 0.16.25
         version: 0.16.25
+      mdast-util-from-markdown:
+        specifier: 2.1.0
+        version: 2.1.0
+      mdast-util-to-string:
+        specifier: 4.0.0
+        version: 4.0.0
+      micromark-util-character:
+        specifier: 2.1.1
+        version: 2.1.1
+      micromark-util-chunked:
+        specifier: 2.0.1
+        version: 2.0.1
+      micromark-util-classify-character:
+        specifier: 2.0.1
+        version: 2.0.1
+      micromark-util-resolve-all:
+        specifier: 2.0.1
+        version: 2.0.1
+      micromark-util-types:
+        specifier: 2.0.3
+        version: 2.0.3
       rehype-katex:
         specifier: 7.0.1
         version: 7.0.1

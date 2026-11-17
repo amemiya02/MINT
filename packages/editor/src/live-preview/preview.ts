@@ -195,6 +195,10 @@ const previewTheme = EditorView.baseTheme({
   },
   ".cm-mint-superscript": { verticalAlign: "super", fontSize: "0.8em" },
   ".cm-mint-subscript": { verticalAlign: "sub", fontSize: "0.8em" },
+  ".cm-mint-highlight": {
+    backgroundColor: "var(--mint-highlight-bg, rgba(255, 213, 0, 0.35))",
+    borderRadius: "2px",
+  },
   ".cm-mint-marker": { color: "var(--mint-marker, #8a9099)" },
 });
 

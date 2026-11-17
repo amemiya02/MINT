@@ -123,6 +123,10 @@ export const zhCN: Messages = {
   "settings.fontSize": "字号（px）",
   "settings.lineHeight": "行高",
   "settings.contentWidth": "内容宽度（px）",
+  "settings.extendedToc": "扩展语法：[TOC] 目录标记",
+  "settings.extendedHighlight": "扩展语法：==高亮==",
+  "settings.extendedSuperscript": "扩展语法：^上标^",
+  "settings.extendedSubscript": "扩展语法：~下标~",
 
   "theme.issue.missing": "在 {path} 中找不到主题“{name}”，正在使用内置主题。",
   "theme.issue.unreadable": "无法读取主题“{name}”（{reason}），正在使用内置主题。",

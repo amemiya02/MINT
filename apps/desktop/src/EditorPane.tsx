@@ -1,4 +1,5 @@
 import { createEditor, type LinkTarget, type MintEditor } from "@mint/editor";
+import type { Dialect } from "@mint/markdown";
 import { useEffect, useRef } from "react";
 import type { ImageHost } from "./assets/image-host.ts";
 
@@ -14,6 +15,8 @@ interface EditorPaneProps {
   readonly onOpenLink: (link: LinkTarget) => void;
   /** Resolves and saves the document's images. */
   readonly imageHost: ImageHost;
+  /** The syntax to recognise; a change applies to the open editor at once. */
+  readonly dialect: Dialect;
 }
 
 /** Mounts the framework-agnostic editor core into React. */
@@ -25,17 +28,19 @@ export function EditorPane({
   onModeChange,
   onOpenLink,
   imageHost,
+  dialect,
 }: EditorPaneProps) {
   const parent = useRef<HTMLDivElement>(null);
   const editor = useRef<MintEditor | null>(null);
-  const callbacks = useRef({ onReady, onChange, onModeChange, onOpenLink, imageHost });
-  callbacks.current = { onReady, onChange, onModeChange, onOpenLink, imageHost };
+  const callbacks = useRef({ onReady, onChange, onModeChange, onOpenLink, imageHost, dialect });
+  callbacks.current = { onReady, onChange, onModeChange, onOpenLink, imageHost, dialect };
 
   useEffect(() => {
     if (!parent.current) return;
     const instance = createEditor({
       parent: parent.current,
       text,
+      dialect: callbacks.current.dialect,
       host: {
         openLink: (link) => callbacks.current.onOpenLink(link),
         resolveImageUrl: (path) => callbacks.current.imageHost.resolveImageUrl(path),
@@ -55,6 +60,10 @@ export function EditorPane({
       instance.destroy();
     };
   }, [text]);
+
+  useEffect(() => {
+    editor.current?.setDialect(dialect);
+  }, [dialect]);
 
   useEffect(() => {
     if (active) editor.current?.focus();

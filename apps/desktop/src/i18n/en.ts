@@ -126,6 +126,10 @@ export const en = {
   "settings.fontSize": "Font size (px)",
   "settings.lineHeight": "Line height",
   "settings.contentWidth": "Content width (px)",
+  "settings.extendedToc": "Extended syntax: [TOC] table of contents",
+  "settings.extendedHighlight": "Extended syntax: ==highlight==",
+  "settings.extendedSuperscript": "Extended syntax: ^superscript^",
+  "settings.extendedSubscript": "Extended syntax: ~subscript~",
 
   "theme.issue.missing":
     "The theme “{name}” was not found in {path}. The built-in theme is in use.",

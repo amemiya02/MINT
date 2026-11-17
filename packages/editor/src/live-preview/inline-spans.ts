@@ -22,6 +22,7 @@ const delimited: Record<string, { readonly style: Decoration; readonly mark: str
     mark: "SuperscriptMark",
   },
   Subscript: { style: Decoration.mark({ class: "cm-mint-subscript" }), mark: "SubscriptMark" },
+  Highlight: { style: Decoration.mark({ class: "cm-mint-highlight" }), mark: "HighlightMark" },
 };
 
 /** Show or hide a marker depending on whether its span is revealed. */
