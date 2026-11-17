@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import {
   Menu,
   MenuItem,
@@ -8,7 +8,7 @@ import {
 } from "@tauri-apps/api/menu";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { MenuItemSpec, Platform } from "./platform.ts";
+import type { DirectoryEntry, MenuItemSpec, Platform } from "./platform.ts";
 
 const nativeItems = {
   cut: "Cut",
@@ -33,6 +33,22 @@ export function createTauriPlatform(): Platform {
       });
       return picked ?? null;
     },
+    async showOpenFolderDialog({ title }) {
+      return (await open({ title, multiple: false, directory: true })) ?? null;
+    },
+    readDirectory: (path) => invoke<DirectoryEntry[]>("read_directory", { path }),
+    createFile: (path) => invoke<void>("create_file", { path }),
+    createDirectory: (path) => invoke<void>("create_directory", { path }),
+    rename: (from, to) => invoke<void>("rename_path", { from, to }),
+    moveToTrash: (path) => invoke<void>("move_to_trash", { path }),
+    async watchFolder(path, onChange) {
+      const channel = new Channel<string[]>();
+      channel.onmessage = onChange;
+      const id = await invoke<number>("watch_folder", { path, onChange: channel });
+      return () => void invoke<void>("unwatch_folder", { id });
+    },
+    readAppData: (name) => invoke<string | null>("read_app_data", { name }),
+    writeAppData: (name, text) => invoke<void>("write_app_data", { name, text }),
     setWindowTitle: (title) => getCurrentWindow().setTitle(title),
     async setMenu(menu) {
       const submenus = await Promise.all(
