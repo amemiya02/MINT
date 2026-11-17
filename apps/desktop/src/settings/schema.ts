@@ -56,6 +56,10 @@ export const settingsSchema = {
     max: 2400,
     step: 20,
   }),
+  /** Vim key bindings in the editor. */
+  vimMode: toggle({ label: "settings.vimMode", default: false }),
+  /** The system spellchecker underlines misspelled words (not in code, math or URLs). */
+  spellcheck: toggle({ label: "settings.spellcheck", default: true }),
 } as const satisfies Record<string, SettingDefinition>;
 
 export type SettingKey = keyof typeof settingsSchema;

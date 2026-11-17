@@ -1,6 +1,7 @@
 import { createEditor, type LinkTarget, type MintEditor } from "@mint/editor";
 import { useEffect, useRef } from "react";
 import type { ImageHost } from "./assets/image-host.ts";
+import { useSettings } from "./settings/useSettings.ts";
 
 interface EditorPaneProps {
   /** Initial file text. The editor is recreated only when the pane is remounted (use a `key`). */
@@ -27,6 +28,11 @@ export function EditorPane({
   imageHost,
 }: EditorPaneProps) {
   const parent = useRef<HTMLDivElement>(null);
+  const { settings } = useSettings();
+  const { vimMode: vim, spellcheck } = settings;
+  // Taken when the editor is created; later changes are applied by the effect below.
+  const preferences = useRef({ vim, spellcheck });
+  preferences.current = { vim, spellcheck };
   const editor = useRef<MintEditor | null>(null);
   const callbacks = useRef({ onReady, onChange, onModeChange, onOpenLink, imageHost });
   callbacks.current = { onReady, onChange, onModeChange, onOpenLink, imageHost };
@@ -36,6 +42,7 @@ export function EditorPane({
     const instance = createEditor({
       parent: parent.current,
       text,
+      ...preferences.current,
       host: {
         openLink: (link) => callbacks.current.onOpenLink(link),
         resolveImageUrl: (path) => callbacks.current.imageHost.resolveImageUrl(path),
@@ -55,6 +62,10 @@ export function EditorPane({
       instance.destroy();
     };
   }, [text]);
+
+  useEffect(() => {
+    editor.current?.configure({ vim, spellcheck });
+  }, [vim, spellcheck]);
 
   useEffect(() => {
     if (active) editor.current?.focus();

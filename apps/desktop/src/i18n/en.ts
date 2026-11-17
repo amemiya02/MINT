@@ -64,6 +64,9 @@ export const en = {
   "find.invalid": "Invalid regular expression",
 
   "command.edit.searchFolder": "Search in Folder…",
+  "command.edit.pastePlainText": "Paste as Plain Text",
+  "command.edit.toggleSpellcheck": "Toggle Spellcheck",
+  "command.view.toggleVimMode": "Toggle Vim Mode",
   "search.label": "Search in Folder",
   "search.close": "Close Search",
   "search.searching": "Searching…",
@@ -126,6 +129,8 @@ export const en = {
   "settings.fontSize": "Font size (px)",
   "settings.lineHeight": "Line height",
   "settings.contentWidth": "Content width (px)",
+  "settings.vimMode": "Vim key bindings",
+  "settings.spellcheck": "Check spelling",
 
   "theme.issue.missing":
     "The theme “{name}” was not found in {path}. The built-in theme is in use.",

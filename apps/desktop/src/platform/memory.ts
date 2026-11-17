@@ -39,6 +39,8 @@ export interface MemoryPlatformOptions {
   /** Answers the question dialog gives, in order; once used up it answers `cancel`. */
   readonly questionDialogResults?: readonly ("yes" | "no" | "cancel")[];
   readonly locale?: string;
+  /** Text on the system clipboard. */
+  readonly clipboardText?: string;
   /**
    * What the release server answers: a newer version (optionally failing to
    * install), a failing check, or `"unavailable"` for builds that cannot update.
@@ -69,6 +71,8 @@ export interface MemoryPlatform extends Platform {
   externalRemove(path: string): void;
   /** URLs passed to `openExternal`, in order. */
   readonly openedUrls: readonly string[];
+  /** Put text on the system clipboard, as another program would. */
+  setClipboardText(text: string): void;
   /** Rename or move a file or directory as another program would (watchers are notified). */
   externalRename(from: string, to: string): void;
   /** Messages of the question dialogs shown so far. */
@@ -112,6 +116,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
   const openedUrls: string[] = [];
   let closeHandler: (() => Promise<boolean>) | null = null;
   let closed = false;
+  let clipboardText = options.clipboardText ?? "";
   const settingsListeners = new Set<(file: SettingsFile) => void>();
   const recoveryPath = (id: string) => {
     if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error(`Invalid recovery snapshot id: ${id}`);
@@ -361,6 +366,12 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     },
     async writeAppData(name, text) {
       appData.set(name, text);
+    },
+    async readClipboardText() {
+      return clipboardText;
+    },
+    setClipboardText(text) {
+      clipboardText = text;
     },
     async openExternal(url) {
       openedUrls.push(url);

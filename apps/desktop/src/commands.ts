@@ -81,6 +81,14 @@ export const commands = [
     group: "save",
   },
 
+  // Typora's shortcut. A plain paste turns rich text from the clipboard into Markdown.
+  {
+    id: "edit.pastePlainText",
+    title: "command.edit.pastePlainText",
+    accelerator: "CmdOrCtrl+Shift+V",
+    menu: "edit",
+    group: "paste",
+  },
   { id: "edit.find", title: "command.edit.find", accelerator: "CmdOrCtrl+F", menu: "edit" },
   // Typora's replace shortcut: ⌘⌥F on macOS, Ctrl+H elsewhere (Ctrl+Alt is AltGr on Windows).
   {
@@ -94,6 +102,12 @@ export const commands = [
     title: "command.edit.searchFolder",
     accelerator: "CmdOrCtrl+Shift+F",
     menu: "edit",
+  },
+  {
+    id: "edit.toggleSpellcheck",
+    title: "command.edit.toggleSpellcheck",
+    menu: "edit",
+    group: "spelling",
   },
 
   heading(1),
@@ -166,6 +180,7 @@ export const commands = [
     group: "layout",
     editor: ["toggleSourceMode"],
   },
+  { id: "view.toggleVimMode", title: "command.view.toggleVimMode", menu: "view", group: "layout" },
 
   {
     id: "window.new",

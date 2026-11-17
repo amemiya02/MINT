@@ -280,6 +280,7 @@ pub fn run() {
         .manage(Watchers::default())
         .manage(Searches::default())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             #[cfg(desktop)]
             {

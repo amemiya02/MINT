@@ -23,6 +23,7 @@
     "@lezer/highlight": "1.2.5",
     "@lezer/markdown": "1.8.1",
     "@mint/markdown": "workspace:*",
+    "@replit/codemirror-vim": "6.4.0",
     "katex": "0.16.25",
     "mermaid": "12.3.0"
   },

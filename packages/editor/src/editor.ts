@@ -34,6 +34,8 @@ import { livePreview, previewRenderer } from "./live-preview/preview.ts";
 import { quotesAndRules } from "./live-preview/quotes-and-rules.ts";
 import { markupContinuation } from "./markup-continuation.ts";
 import { type OutlineHeading, outline, sameOutline } from "./outline.ts";
+import { type EditorPreferences, editorPreferences } from "./preferences.ts";
+import { pasteText, richPaste } from "./rich-paste.ts";
 import { themeable } from "./theme.ts";
 
 /**
@@ -76,6 +78,10 @@ export interface EditorOptions {
   readonly host?: HostAdapter;
   /** Initial mode; defaults to `livePreview`. */
   readonly mode?: EditorMode;
+  /** Vim key bindings; off by default. Switch later with {@link MintEditor.configure}. */
+  readonly vim?: boolean;
+  /** System spellchecking; off by default. Switch later with {@link MintEditor.configure}. */
+  readonly spellcheck?: boolean;
 }
 
 /** A selection range in {@link MintEditor.getText} offsets (UTF-16 code units). */
@@ -90,6 +96,11 @@ export interface EditorCommands extends FindCommands, FormattingCommands {
   redo: [];
   /** Replace the selection with text, as if typed. Line breaks take the document's line ending. */
   insertText: [text: string];
+  /**
+   * Paste text exactly as given, never read as rich text (the host reads it
+   * from the clipboard). One undo step; line breaks take the document's line ending.
+   */
+  pastePlainText: [text: string];
   /** Switch between live preview and source mode. Text and selection are unchanged. */
   toggleSourceMode: [];
   /** Set the language of the fenced code block at the cursor; only its info string changes. */
@@ -114,6 +125,9 @@ export interface MintEditor {
   replaceText(text: string): void;
   getSelection(): TextSelection;
   getMode(): EditorMode;
+  getPreferences(): EditorPreferences;
+  /** Switch preferences (Vim key bindings, spellchecking) on or off; text and selection are kept. */
+  configure(preferences: Partial<EditorPreferences>): void;
   /** The outline: every heading in document order, with its level, text and position. */
   getOutline(): readonly OutlineHeading[];
   /** Select a range; with `scrollIntoView`, also scroll it into view (e.g. when jumping to a search result). */
@@ -144,6 +158,10 @@ export function createEditor(options: EditorOptions): MintEditor {
   const preview = new Compartment();
   let mode: EditorMode = options.mode ?? "livePreview";
   let lastOutline: readonly OutlineHeading[] = [];
+  const preferences = editorPreferences({
+    vim: options.vim ?? false,
+    spellcheck: options.spellcheck ?? false,
+  });
   const modeExtension = () => (mode === "livePreview" ? livePreview() : []);
 
   const view = new EditorView({
@@ -152,6 +170,7 @@ export function createEditor(options: EditorOptions): MintEditor {
       doc: parsed.doc,
       extensions: [
         parsed.extension,
+        preferences.extension,
         history(),
         findReplace(),
         keymap.of([
@@ -175,6 +194,7 @@ export function createEditor(options: EditorOptions): MintEditor {
           ? imageUrlResolver.of((path) => host.resolveImageUrl?.(path) ?? null)
           : [],
         host.saveImage ? imageFileInsertion(host.saveImage.bind(host)) : [],
+        richPaste(dialect),
         frontMatterPreview,
         preview.of(modeExtension()),
         host.openLink ? linkOpening((link) => host.openLink?.(link)) : [],
@@ -212,6 +232,10 @@ export function createEditor(options: EditorOptions): MintEditor {
       });
       return true;
     },
+    pastePlainText: (text) => {
+      pasteText(view, text);
+      return true;
+    },
     setCodeBlockLanguage: (language) => setCodeBlockLanguage(view, language),
     toggleSourceMode: () => {
       mode = mode === "livePreview" ? "source" : "livePreview";
@@ -231,6 +255,8 @@ export function createEditor(options: EditorOptions): MintEditor {
       return { anchor: toFileOffset(view.state, anchor), head: toFileOffset(view.state, head) };
     },
     getMode: () => mode,
+    getPreferences: () => preferences.get(),
+    configure: (next) => preferences.configure(view, next),
     getOutline: () =>
       outline(view.state, true).map((heading) => ({
         ...heading,
