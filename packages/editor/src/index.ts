@@ -4,6 +4,7 @@ export type {
   EditorEvent,
   EditorMode,
   EditorOptions,
+  EditorSettings,
   HostAdapter,
   MintEditor,
   TextSelection,
@@ -19,3 +20,4 @@ export { previewRenderer } from "./live-preview/preview.ts";
 export type { OutlineHeading } from "./outline.ts";
 export type { TableAlignment } from "./table/commands.ts";
 export { tablePhrases } from "./table/table-widget.ts";
+export type { WordCount } from "./word-count.ts";

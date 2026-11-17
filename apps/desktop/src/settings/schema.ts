@@ -56,6 +56,10 @@ export const settingsSchema = {
     max: 2400,
     step: 20,
   }),
+  /** Focus mode: only the paragraph with the cursor stays in full contrast. */
+  focusMode: toggle({ label: "settings.focusMode", default: false }),
+  /** Typewriter mode: the line with the cursor stays at the vertical middle of the window. */
+  typewriterMode: toggle({ label: "settings.typewriterMode", default: false }),
   /** Where pasted and dropped images are saved (the asset folder). */
   assetFolder: choice({
     label: "settings.assetFolder",

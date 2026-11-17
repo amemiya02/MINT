@@ -1,4 +1,4 @@
-import type { LinkTarget } from "@mint/editor";
+import type { LinkTarget, WordCount } from "@mint/editor";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { createImageHost, type ImageSaveFailure } from "./assets/image-host.ts";
 import { createAutosave } from "./autosave/autosave.ts";
@@ -105,6 +105,7 @@ interface WindowProps {
 
 function Window({ platform, store, recovery, onEdited }: WindowProps) {
   const t = useT();
+  const settings = useSettingsStore();
   const { tabs, activeId, error } = useTabsState();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [quickOpenVisible, setQuickOpenVisible] = useState(false);
@@ -158,6 +159,8 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   // The editor owns its mode; re-render when it reports a change.
   const [, modeChanged] = useReducer((n: number) => n + 1, 0);
   const mode = (activeId !== null && store.editor(activeId)?.getMode()) || "livePreview";
+  /** Word count of the active document, as its editor last reported it. */
+  const [wordCount, setWordCount] = useState<WordCount | null>(null);
 
   const open = useCallback(async () => {
     const path = await platform.showOpenDialog({
@@ -209,6 +212,10 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
         setSidebarVisible(true);
       }
     },
+    "view.toggleFocusMode": () =>
+      void settings.set("focusMode", !settings.getSnapshot().settings.focusMode),
+    "view.toggleTypewriterMode": () =>
+      void settings.set("typewriterMode", !settings.getSnapshot().settings.typewriterMode),
     "window.new": () => void platform.openWindow(),
     "app.settings": () => setSettingsOpen(true),
     "app.checkForUpdates": () => updates.check(),
@@ -317,6 +324,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
                 onModeChange={modeChanged}
                 onEditorChange={editorsChanged}
                 onEdited={onEdited}
+                onWordCount={setWordCount}
               />
             ))}
             {tabs.length === 0 && (
@@ -333,6 +341,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
             <footer className="flex items-center justify-between border-t border-(--mint-border) px-4 py-1 text-xs text-(--mint-muted)">
               <span title={active.path}>{name}</span>
               <span className="flex gap-4">
+                {wordCount && <WordCountStatus count={wordCount} />}
                 <span>
                   {t(mode === "source" ? "status.mode.source" : "status.mode.livePreview")}
                 </span>
@@ -387,6 +396,7 @@ function TabPanel({
   onModeChange,
   onEditorChange,
   onEdited,
+  onWordCount,
 }: {
   readonly tab: Tab;
   readonly active: boolean;
@@ -395,6 +405,7 @@ function TabPanel({
   /** The tab's editor was created or destroyed. */
   readonly onEditorChange: () => void;
   readonly onEdited: (id: number) => void;
+  readonly onWordCount: (count: WordCount) => void;
 }) {
   const store = useTabStore();
   const { id, path } = tab;
@@ -449,9 +460,24 @@ function TabPanel({
           onModeChange={onModeChange}
           onOpenLink={onOpenLink}
           imageHost={imageHost}
+          onWordCount={onWordCount}
         />
       </div>
     </div>
+  );
+}
+
+/** Words, characters and reading time of the active document; Chinese counts per character. */
+function WordCountStatus({ count }: { readonly count: WordCount }) {
+  const t = useT();
+  const plural = (key: "status.words" | "status.characters", n: number) =>
+    n === 1 ? t(`${key}.one`) : t(`${key}.other`, { count: String(n) });
+  return (
+    <>
+      <span>{plural("status.words", count.words)}</span>
+      <span>{plural("status.characters", count.characters)}</span>
+      <span>{t("status.readingTime", { minutes: String(count.readingMinutes) })}</span>
+    </>
   );
 }
 

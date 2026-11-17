@@ -18,6 +18,7 @@ import {
   findReplace,
   findStatus,
 } from "./find.ts";
+import { focusMode } from "./focus-mode.ts";
 import { type FormattingCommands, formattingCommands } from "./formatting.ts";
 import { type ImageFile, imageFileInsertion } from "./image-files.ts";
 import { type LinkTarget, linkOpening } from "./links.ts";
@@ -42,6 +43,8 @@ import {
   tableTheme,
 } from "./table/table-widget.ts";
 import { themeable } from "./theme.ts";
+import { centerCursor, typewriterMode } from "./typewriter-mode.ts";
+import { countWords, type WordCount } from "./word-count.ts";
 
 /**
  * Capabilities the editor core needs from whatever hosts it (desktop shell,
@@ -74,6 +77,16 @@ export interface HostAdapter {
  */
 export type EditorMode = "livePreview" | "source";
 
+/** Display settings of the editor; none of them changes the text. */
+export interface EditorSettings {
+  /** Focus mode: only the paragraph with the cursor stays in full contrast, the rest is dimmed. */
+  readonly focusMode: boolean;
+  /** Typewriter mode: the line with the cursor stays at the vertical middle of the editor. */
+  readonly typewriterMode: boolean;
+}
+
+const defaultSettings: EditorSettings = { focusMode: false, typewriterMode: false };
+
 export interface EditorOptions {
   /** Element the editor mounts into. */
   readonly parent: HTMLElement;
@@ -88,6 +101,8 @@ export interface EditorOptions {
    * (the exported `tablePhrases`). Untranslated text stays English.
    */
   readonly phrases?: Readonly<Record<string, string>>;
+  /** Initial settings; each one left out is off. */
+  readonly settings?: Partial<EditorSettings>;
 }
 
 /** A selection range in {@link MintEditor.getText} offsets (UTF-16 code units). */
@@ -128,8 +143,13 @@ export interface MintEditor {
   replaceText(text: string): void;
   getSelection(): TextSelection;
   getMode(): EditorMode;
+  getSettings(): EditorSettings;
+  /** Change some settings; the others keep their value. Takes effect at once. */
+  updateSettings(settings: Partial<EditorSettings>): void;
   /** The outline: every heading in document order, with its level, text and position. */
   getOutline(): readonly OutlineHeading[];
+  /** Words, characters and reading time of the document as rendered. Counts the whole text on every call. */
+  getWordCount(): WordCount;
   /**
    * Select a range; with `scrollIntoView`, also scroll it into view (e.g. when
    * jumping to a search result). `"start"` scrolls its line to the top of the
@@ -171,6 +191,11 @@ export function createEditor(options: EditorOptions): MintEditor {
   const preview = new Compartment();
   let mode: EditorMode = options.mode ?? "livePreview";
   let lastOutline: readonly OutlineHeading[] = [];
+  let settings: EditorSettings = { ...defaultSettings, ...options.settings };
+  const focus = new Compartment();
+  const typewriter = new Compartment();
+  const focusExtension = () => (settings.focusMode ? focusMode() : []);
+  const typewriterExtension = () => (settings.typewriterMode ? typewriterMode() : []);
   const modeExtension = () => (mode === "livePreview" ? livePreview() : []);
 
   const view = new EditorView({
@@ -207,6 +232,8 @@ export function createEditor(options: EditorOptions): MintEditor {
         host.saveImage ? imageFileInsertion(host.saveImage.bind(host)) : [],
         frontMatterPreview,
         preview.of(modeExtension()),
+        focus.of(focusExtension()),
+        typewriter.of(typewriterExtension()),
         host.openLink ? linkOpening((link) => host.openLink?.(link)) : [],
         EditorView.lineWrapping,
         EditorView.domEventObservers({ scroll: () => emit({ type: "scroll" }) }),
@@ -226,6 +253,7 @@ export function createEditor(options: EditorOptions): MintEditor {
   });
 
   lastOutline = outline(view.state, false);
+  if (settings.typewriterMode) view.dispatch({ effects: centerCursor(view.state) });
 
   function emit(event: EditorEvent) {
     for (const listener of listeners) listener(event);
@@ -263,11 +291,26 @@ export function createEditor(options: EditorOptions): MintEditor {
       return { anchor: toFileOffset(view.state, anchor), head: toFileOffset(view.state, head) };
     },
     getMode: () => mode,
+    getSettings: () => settings,
+    updateSettings(changes) {
+      const previous = settings;
+      settings = { ...settings, ...changes };
+      const effects = [];
+      if (settings.focusMode !== previous.focusMode) {
+        effects.push(focus.reconfigure(focusExtension()));
+      }
+      if (settings.typewriterMode !== previous.typewriterMode) {
+        effects.push(typewriter.reconfigure(typewriterExtension()));
+        if (settings.typewriterMode) effects.push(centerCursor(view.state));
+      }
+      if (effects.length > 0) view.dispatch({ effects });
+    },
     getOutline: () =>
       outline(view.state, true).map((heading) => ({
         ...heading,
         from: toFileOffset(view.state, heading.from),
       })),
+    getWordCount: () => countWords(view.state),
     setSelection({ anchor, head = anchor, scrollIntoView = false }) {
       const selection = EditorSelection.single(
         fromFileOffset(view.state, anchor),
