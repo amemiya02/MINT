@@ -9,6 +9,7 @@ import type { MenuSpec } from "./platform/platform.ts";
 export type CommandId =
   | "file.open"
   | "file.openFolder"
+  | "file.quickOpen"
   | "file.save"
   | "edit.find"
   | "edit.replace"
@@ -32,6 +33,7 @@ const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigat
 export const commands: readonly Command[] = [
   { id: "file.open", title: "command.file.open", accelerator: "CmdOrCtrl+O" },
   { id: "file.openFolder", title: "command.file.openFolder" },
+  { id: "file.quickOpen", title: "command.file.quickOpen", accelerator: "CmdOrCtrl+P" },
   { id: "file.save", title: "command.file.save", accelerator: "CmdOrCtrl+S" },
   {
     id: "view.toggleSidebar",
@@ -83,6 +85,7 @@ export function buildMenu(t: Translate, run: (id: CommandId) => void): MenuSpec[
       items: [
         item("file.open"),
         item("file.openFolder"),
+        item("file.quickOpen"),
         { kind: "separator" },
         item("file.save"),
         item("tab.close"),

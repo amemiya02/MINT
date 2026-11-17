@@ -28,6 +28,14 @@ export interface Platform {
   /** List the direct children of a directory, in no particular order. */
   readDirectory(path: string): Promise<DirectoryEntry[]>;
 
+  /**
+   * Every file of a folder, recursively, as absolute paths. Entries ignored by a
+   * `.gitignore` in the folder (whether or not it is a git repository) and hidden
+   * entries (names starting with a dot) are left out. When `extensions` is not
+   * empty, only files with one of them (case-insensitive, without the dot) are listed.
+   */
+  listFolderFiles(path: string, extensions: readonly string[]): Promise<string[]>;
+
   /** Create an empty file. Rejects if anything already exists at `path`. */
   createFile(path: string): Promise<void>;
 

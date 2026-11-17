@@ -1,3 +1,4 @@
+import { createIgnoreRules } from "./gitignore.ts";
 import type {
   DirectoryEntry,
   MenuItemSpec,
@@ -180,6 +181,25 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
         }
       }
       return [...children.values()];
+    },
+    async listFolderFiles(root, extensions) {
+      if (!isDirectory(root)) return [];
+      const prefix = `${root}/`;
+      const inFolder = [...files.keys()].filter((p) => p.startsWith(prefix));
+      const ignores = createIgnoreRules(
+        inFolder
+          .filter((p) => p.endsWith("/.gitignore"))
+          .map((p) => ({ dir: parentOf(p).slice(root.length + 1), text: files.get(p) ?? "" })),
+      );
+      const wanted = extensions.map((e) => `.${e.toLowerCase()}`);
+      return inFolder
+        .filter((p) => {
+          const relative = p.slice(prefix.length);
+          if (relative.split("/").some((segment) => segment.startsWith("."))) return false;
+          if (wanted.length > 0 && !wanted.some((e) => p.toLowerCase().endsWith(e))) return false;
+          return !ignores.isIgnored(relative);
+        })
+        .sort();
     },
     async createFile(path) {
       if (exists(path)) throw new Error(`${path} already exists`);

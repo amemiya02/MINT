@@ -5,6 +5,7 @@ import { EditorPane } from "./EditorPane.tsx";
 import { FindBar, type FindMode } from "./find/FindBar.tsx";
 import { type Translate, useT } from "./i18n/index.ts";
 import type { Platform } from "./platform/platform.ts";
+import { QuickOpen } from "./quick-open/QuickOpen.tsx";
 import { SettingsDialog } from "./settings/SettingsDialog.tsx";
 import { SettingsIssues } from "./settings/SettingsIssues.tsx";
 import { TabStoreContext, useTabStore, useTabsState } from "./tabs/context.ts";
@@ -49,6 +50,7 @@ function Window({ platform, store }: { readonly platform: Platform; readonly sto
   const t = useT();
   const { tabs, activeId, error } = useTabsState();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [quickOpenVisible, setQuickOpenVisible] = useState(false);
   const active = tabs.find((tab) => tab.id === activeId) ?? null;
   const [folder, setFolder] = useState<string | null>(null);
   const [sidebarVisible, setSidebarVisible] = useState(true);
@@ -105,6 +107,7 @@ function Window({ platform, store }: { readonly platform: Platform; readonly sto
   handlers.current = {
     "file.open": () => void open(),
     "file.openFolder": () => void pickFolder(),
+    "file.quickOpen": () => setQuickOpenVisible(true),
     "file.save": () => {
       if (activeId !== null) void store.save(activeId);
     },
@@ -207,6 +210,15 @@ function Window({ platform, store }: { readonly platform: Platform; readonly sto
           )}
         </div>
       </div>
+      {quickOpenVisible && (
+        <QuickOpen
+          platform={platform}
+          folder={folder}
+          recentDocuments={recent.documents}
+          onOpenDocument={(path) => void store.openDocument(path)}
+          onClose={() => setQuickOpenVisible(false)}
+        />
+      )}
       {settingsOpen && (
         <SettingsDialog
           onClose={() => setSettingsOpen(false)}

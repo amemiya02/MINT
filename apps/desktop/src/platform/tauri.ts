@@ -40,6 +40,8 @@ export function createTauriPlatform(): Platform {
       return (await open({ title, multiple: false, directory: true })) ?? null;
     },
     readDirectory: (path) => invoke<DirectoryEntry[]>("read_directory", { path }),
+    listFolderFiles: (path, extensions) =>
+      invoke<string[]>("list_folder_files", { path, extensions }),
     createFile: (path) => invoke<void>("create_file", { path }),
     createDirectory: (path) => invoke<void>("create_directory", { path }),
     rename: (from, to) => invoke<void>("rename_path", { from, to }),

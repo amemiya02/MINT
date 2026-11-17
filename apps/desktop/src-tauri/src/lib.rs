@@ -6,6 +6,7 @@ mod app_data;
 mod folder;
 mod fs;
 mod settings;
+mod walk;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -78,6 +79,13 @@ fn rename_path(from: PathBuf, to: PathBuf) -> Result<(), String> {
 #[tauri::command]
 fn move_to_trash(path: PathBuf) -> Result<(), String> {
     folder::move_to_trash(&path).map_err(|e| e.to_string())
+}
+
+/// Every file of a folder, recursively, except entries ignored by `.gitignore`
+/// and hidden ones; only those with one of `extensions` unless it is empty.
+#[tauri::command]
+fn list_folder_files(path: PathBuf, extensions: Vec<String>) -> Vec<PathBuf> {
+    walk::list_files(&path, &extensions)
 }
 
 /// Live folder watchers, by id. Dropping a watcher stops it.
@@ -162,6 +170,7 @@ pub fn run() {
             create_directory,
             rename_path,
             move_to_trash,
+            list_folder_files,
             watch_folder,
             unwatch_folder,
             read_app_data,

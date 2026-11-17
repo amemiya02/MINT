@@ -18,6 +18,7 @@ export const en = {
   "command.file.open": "Open…",
   "command.file.save": "Save",
   "command.file.openFolder": "Open Folder…",
+  "command.file.quickOpen": "Quick Open…",
   "command.view.toggleSidebar": "Toggle Sidebar",
   "command.view.toggleSourceMode": "Toggle Source Mode",
 
@@ -75,6 +76,13 @@ export const en = {
   "welcome.open": "Open Document…",
   "welcome.openFolder": "Open Folder…",
   "welcome.recent": "Recent",
+
+  "quickOpen.title": "Quick Open",
+  "quickOpen.placeholder": "Search documents by name",
+  "quickOpen.placeholderRecent": "Search recently opened documents",
+  "quickOpen.recent": "recently opened",
+  "quickOpen.noMatches": "No matching documents",
+  "quickOpen.empty": "No documents to open",
 
   "sidebar.label": "Sidebar",
   "sidebar.hide": "Hide Sidebar",
