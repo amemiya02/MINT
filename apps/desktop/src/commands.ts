@@ -14,7 +14,8 @@ export type CommandId =
   | "tab.close"
   | "tab.next"
   | "tab.previous"
-  | "window.new";
+  | "window.new"
+  | "app.settings";
 
 export interface Command {
   readonly id: CommandId;
@@ -39,6 +40,7 @@ export const commands: readonly Command[] = [
   { id: "tab.next", title: "command.tab.next", accelerator: "Ctrl+Tab" },
   { id: "tab.previous", title: "command.tab.previous", accelerator: "Ctrl+Shift+Tab" },
   { id: "window.new", title: "command.window.new", accelerator: "CmdOrCtrl+Shift+N" },
+  { id: "app.settings", title: "command.app.settings", accelerator: "CmdOrCtrl+," },
 ];
 
 export function buildMenu(t: Translate, run: (id: CommandId) => void): MenuSpec[] {
@@ -54,7 +56,14 @@ export function buildMenu(t: Translate, run: (id: CommandId) => void): MenuSpec[
     };
   };
   return [
-    { label: t("menu.app"), items: [{ kind: "native", action: "quit", label: t("menu.quit") }] },
+    {
+      label: t("menu.app"),
+      items: [
+        item("app.settings"),
+        { kind: "separator" },
+        { kind: "native", action: "quit", label: t("menu.quit") },
+      ],
+    },
     {
       label: t("menu.file"),
       items: [item("file.open"), item("file.save"), { kind: "separator" }, item("tab.close")],

@@ -18,6 +18,11 @@ export function resolveLocale(tag: string): Locale {
   return tag.toLowerCase().startsWith("zh") ? "zh-CN" : "en";
 }
 
+/** The locale for the `language` setting: a fixed locale, or the system's. */
+export function localeFor(language: Locale | "system", systemTag: string): Locale {
+  return language === "system" ? resolveLocale(systemTag) : language;
+}
+
 export function createTranslator(locale: Locale): Translate {
   const messages = catalogues[locale];
   return (key, params) =>

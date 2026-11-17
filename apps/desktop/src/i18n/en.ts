@@ -38,6 +38,29 @@ export const en = {
   "find.noResults": "No results",
   "find.invalid": "Invalid regular expression",
 
+  "command.app.settings": "Settings…",
+
+  "settings.title": "Settings",
+  "settings.close": "Close",
+  "settings.storedIn": "Stored in {path}",
+  "settings.openFile": "Open settings.json",
+  "settings.dismiss": "Dismiss",
+  "settings.issue.unreadable":
+    "settings.json could not be used ({reason}). The last valid settings are still in use.",
+  "settings.issue.invalidValue":
+    "“{key}” in settings.json must be {expected}. Its last valid value is still in use.",
+  "settings.issue.unknownKey": "settings.json contains an unknown setting “{key}”; it is ignored.",
+  "settings.issue.writeFailed": "Could not save settings.json: {reason}",
+  "settings.expected.oneOf": "one of {values}",
+  "settings.expected.toggle": "true or false",
+  "settings.expected.number": "a number from {min} to {max}",
+
+  // One block per setting (see settings/schema.ts).
+  "settings.language": "Interface language",
+  "settings.language.system": "Follow system",
+  "settings.language.zh-CN": "简体中文",
+  "settings.language.en": "English",
+
   "dialog.open.title": "Open Document",
   "dialog.filter.markdown": "Markdown",
 
