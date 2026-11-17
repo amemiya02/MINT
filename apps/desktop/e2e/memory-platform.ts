@@ -89,3 +89,11 @@ export async function writeFile(page: Page, path: string, text: string): Promise
     [path, text] as const,
   );
 }
+
+/** Read a binary file (an asset such as an image) back from the in-memory platform, as bytes. */
+export function readBinaryFile(page: Page, path: string): Promise<number[] | undefined> {
+  return page.evaluate((p) => {
+    const data = (window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.binaryFiles.get(p);
+    return data && [...data];
+  }, path);
+}

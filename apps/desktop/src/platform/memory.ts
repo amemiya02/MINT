@@ -20,6 +20,8 @@ export interface MemoryPlatformOptions {
   readonly openDialogResults?: readonly (string | null)[];
   /** Paths the open folder dialog returns, in order; `null` simulates cancelling. */
   readonly openFolderDialogResults?: readonly (string | null)[];
+  /** Initial binary files (images...), keyed by absolute path, as base64. */
+  readonly binaryFiles?: Readonly<Record<string, string>>;
   /** Initial contents of the app data directory, keyed by name. */
   readonly appData?: Readonly<Record<string, string>>;
   /** Answers the question dialog gives, in order; once used up it answers `cancel`. */
@@ -29,8 +31,10 @@ export interface MemoryPlatformOptions {
 
 /** Platform implementation backed by memory, for E2E tests and the future web build. */
 export interface MemoryPlatform extends Platform {
-  /** Current file contents, keyed by path. */
+  /** Current text file contents, keyed by path. */
   readonly files: Map<string, string>;
+  /** Current binary file contents (assets such as images), keyed by path. */
+  readonly binaryFiles: Map<string, Uint8Array>;
   /** Paths moved to the trash, in order. */
   readonly trash: string[];
   /** Contents of the app data directory, keyed by name. */
@@ -54,6 +58,13 @@ export interface MemoryPlatform extends Platform {
 
 export function createMemoryPlatform(options: MemoryPlatformOptions = {}): MemoryPlatform {
   const files = new Map(Object.entries(options.files ?? {}));
+  const binaryFiles = new Map(
+    Object.entries(options.binaryFiles ?? {}).map(([path, base64]) => [path, fromBase64(base64)]),
+  );
+  /** Every file path, text or binary. */
+  const filePaths = () => [...files.keys(), ...binaryFiles.keys()];
+  const isFile = (path: string) => files.has(path) || binaryFiles.has(path);
+  const assetUrls = new Map<Uint8Array, string>();
   // The config directory always exists, so settings.json can be created from outside.
   const directories = new Set([
     memorySettingsPath.slice(0, memorySettingsPath.lastIndexOf("/")),
@@ -106,8 +117,8 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
   });
 
   const isDirectory = (path: string): boolean =>
-    directories.has(path) || [...files.keys()].some((f) => f.startsWith(`${path}/`));
-  const exists = (path: string): boolean => files.has(path) || isDirectory(path);
+    directories.has(path) || filePaths().some((f) => f.startsWith(`${path}/`));
+  const exists = (path: string): boolean => isFile(path) || isDirectory(path);
   const within = (path: string, root: string): boolean =>
     path === root || path.startsWith(`${root}/`);
 
@@ -128,12 +139,14 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
 
   function remove(path: string): void {
     for (const key of [...files.keys()]) if (within(key, path)) files.delete(key);
+    for (const key of [...binaryFiles.keys()]) if (within(key, path)) binaryFiles.delete(key);
     for (const dir of [...directories]) if (within(dir, path)) directories.delete(dir);
   }
 
   return {
     locale: options.locale ?? navigator.language,
     files,
+    binaryFiles,
     trash,
     appData,
     openedUrls,
@@ -168,7 +181,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       if (!isDirectory(path)) throw new Error(`No such directory: ${path}`);
       const children = new Map<string, DirectoryEntry>();
       const prefix = `${path}/`;
-      for (const p of [...files.keys(), ...directories]) {
+      for (const p of [...filePaths(), ...directories]) {
         if (!p.startsWith(prefix)) continue;
         const name = p.slice(prefix.length).split("/")[0] ?? "";
         const child = prefix + name;
@@ -176,7 +189,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
           children.set(name, {
             name,
             path: child,
-            kind: files.has(child) ? "file" : "directory",
+            kind: isFile(child) ? "file" : "directory",
           });
         }
       }
@@ -185,7 +198,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     async listFolderFiles(root, extensions) {
       if (!isDirectory(root)) return [];
       const prefix = `${root}/`;
-      const inFolder = [...files.keys()].filter((p) => p.startsWith(prefix));
+      const inFolder = filePaths().filter((p) => p.startsWith(prefix));
       const ignores = createIgnoreRules(
         inFolder
           .filter((p) => p.endsWith("/.gitignore"))
@@ -200,6 +213,28 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
           return !ignores.isIgnored(relative);
         })
         .sort();
+    },
+    async saveAsset(directory, fileName, data) {
+      if (isFile(directory)) throw new Error(`Not a directory: ${directory}`);
+      const dot = fileName.lastIndexOf(".");
+      const [stem, extension] =
+        dot > 0 ? [fileName.slice(0, dot), fileName.slice(dot)] : [fileName, ""];
+      let path = `${directory}/${fileName}`;
+      for (let n = 1; exists(path); n++) path = `${directory}/${stem}-${n}${extension}`;
+      directories.add(directory);
+      binaryFiles.set(path, data.slice());
+      notify(path);
+      return path;
+    },
+    assetUrl(path) {
+      const data = binaryFiles.get(path);
+      if (!data) return null;
+      let url = assetUrls.get(data);
+      if (!url) {
+        url = URL.createObjectURL(new Blob([data.slice()], { type: mimeType(path) }));
+        assetUrls.set(data, url);
+      }
+      return url;
     },
     async createFile(path) {
       if (exists(path)) throw new Error(`${path} already exists`);
@@ -218,10 +253,12 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       if (exists(to)) throw new Error(`${to} already exists`);
       requireParent(to);
       const move = (p: string) => to + p.slice(from.length);
-      for (const [p, text] of [...files]) {
-        if (within(p, from)) {
-          files.delete(p);
-          files.set(move(p), text);
+      for (const map of [files, binaryFiles] as Map<string, unknown>[]) {
+        for (const [p, contents] of [...map]) {
+          if (within(p, from)) {
+            map.delete(p);
+            map.set(move(p), contents);
+          }
         }
       }
       for (const d of [...directories]) {
@@ -293,7 +330,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       return () => settingsListeners.delete(listener);
     },
     listPaths() {
-      const all = new Set([...files.keys(), ...directories]);
+      const all = new Set([...filePaths(), ...directories]);
       for (const p of [...all]) {
         for (let dir = parentOf(p); dir !== "" && dir !== "/"; dir = parentOf(dir)) all.add(dir);
       }
@@ -313,6 +350,25 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       command.run();
     },
   };
+}
+
+function fromBase64(base64: string): Uint8Array {
+  return Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+}
+
+const mimeTypes: Readonly<Record<string, string>> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  svg: "image/svg+xml",
+};
+
+function mimeType(path: string): string {
+  return (
+    mimeTypes[path.slice(path.lastIndexOf(".") + 1).toLowerCase()] ?? "application/octet-stream"
+  );
 }
 
 function parentOf(path: string): string {

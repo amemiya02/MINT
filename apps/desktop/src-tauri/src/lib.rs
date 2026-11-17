@@ -3,6 +3,7 @@
 //! function that is unit-tested with `cargo test`.
 
 mod app_data;
+mod assets;
 mod folder;
 mod fs;
 mod settings;
@@ -27,6 +28,17 @@ fn read_text_file(path: PathBuf) -> Result<String, String> {
 #[tauri::command]
 fn write_text_file(path: PathBuf, text: String) -> Result<(), String> {
     fs::write_atomic(&path, text.as_bytes()).map_err(|e| e.to_string())
+}
+
+/// Save a pasted or dropped asset (base64 `data`) under a name that is not
+/// taken yet in `directory`; returns the new file's path.
+#[tauri::command]
+fn save_asset(directory: PathBuf, file_name: String, data: String) -> Result<PathBuf, String> {
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data)
+        .map_err(|e| e.to_string())?;
+    assets::save(&directory, &file_name, &bytes).map_err(|e| e.to_string())
 }
 
 /// Where the settings file lives, plus the watcher that keeps it alive.
@@ -162,6 +174,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             read_text_file,
             write_text_file,
+            save_asset,
             settings_path,
             read_settings,
             write_settings,
