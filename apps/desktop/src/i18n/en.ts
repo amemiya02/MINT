@@ -30,6 +30,27 @@ export const en = {
   "command.edit.find": "Find…",
   "command.edit.replace": "Replace…",
 
+  "menu.paragraph": "Paragraph",
+  "menu.format": "Format",
+  "command.paragraph.heading1": "Heading 1",
+  "command.paragraph.heading2": "Heading 2",
+  "command.paragraph.heading3": "Heading 3",
+  "command.paragraph.heading4": "Heading 4",
+  "command.paragraph.heading5": "Heading 5",
+  "command.paragraph.heading6": "Heading 6",
+  "command.paragraph.paragraph": "Paragraph",
+  "command.paragraph.codeBlock": "Code Block",
+  "command.paragraph.table": "Insert Table",
+  "command.paragraph.formatTable": "Format Table",
+  "command.format.bold": "Bold",
+  "command.format.italic": "Italic",
+  "command.format.link": "Link",
+  "command.view.commandPalette": "Command Palette…",
+
+  "commandPalette.title": "Command Palette",
+  "commandPalette.placeholder": "Search commands by name",
+  "commandPalette.noMatches": "No matching commands",
+
   "find.label": "Find",
   "find.replaceWith": "Replace with",
   "find.caseSensitive": "Match Case",
@@ -44,7 +65,31 @@ export const en = {
   "find.noResults": "No results",
   "find.invalid": "Invalid regular expression",
 
+  "command.edit.searchFolder": "Search in Folder…",
+  "search.label": "Search in Folder",
+  "search.close": "Close Search",
+  "search.searching": "Searching…",
+  "search.summary": "{matches} in {documents}",
+  "search.matches.one": "1 result",
+  "search.matches.other": "{count} results",
+  "search.documents.one": "1 document",
+  "search.documents.other": "{count} documents",
+  "search.truncated":
+    "Showing the first {count} matching lines. Refine the search to see the rest.",
+  "search.noFolder": "Open a folder to search its documents.",
+
   "command.app.settings": "Settings…",
+  "command.app.checkForUpdates": "Check for Updates…",
+
+  "update.available": "MINT {version} is available.",
+  "update.install": "Install and Restart",
+  "update.later": "Later",
+  "update.installing": "Installing MINT {version}… MINT will restart when it is done.",
+  "update.upToDate": "MINT is up to date.",
+  "update.unavailable":
+    "Automatic updates are not available for this copy of MINT. Get new versions from the release page or your package manager.",
+  "update.checkFailed": "Could not check for updates: {reason}",
+  "update.installFailed": "Could not install MINT {version}: {reason}",
 
   "settings.title": "Settings",
   "settings.close": "Close",
@@ -60,6 +105,7 @@ export const en = {
   "settings.expected.oneOf": "one of {values}",
   "settings.expected.toggle": "true or false",
   "settings.expected.number": "a number from {min} to {max}",
+  "settings.expected.text": "text of at most {max} characters",
 
   // One block per setting (see settings/schema.ts).
   "settings.language": "Interface language",
@@ -67,6 +113,26 @@ export const en = {
   "settings.language.zh-CN": "简体中文",
   "settings.language.en": "English",
   "settings.autosave": "Save automatically",
+  "settings.checkForUpdates": "Check for updates at startup",
+
+  "settings.appearance": "Appearance",
+  "settings.appearance.system": "Follow system",
+  "settings.appearance.light": "Light",
+  "settings.appearance.dark": "Dark",
+  "settings.theme": "Theme",
+  "settings.theme.builtin": "MINT (built-in)",
+  "settings.theme.missing": "{name} (not found)",
+  "settings.theme.folder": "Themes are .css files in {path}",
+  "settings.fontFamily": "Font",
+  "settings.fontFamily.placeholder": "Theme default",
+  "settings.fontSize": "Font size (px)",
+  "settings.lineHeight": "Line height",
+  "settings.contentWidth": "Content width (px)",
+
+  "theme.issue.missing":
+    "The theme “{name}” was not found in {path}. The built-in theme is in use.",
+  "theme.issue.unreadable":
+    "The theme “{name}” could not be read ({reason}). The built-in theme is in use.",
 
   "dialog.open.title": "Open Document",
   "dialog.filter.markdown": "Markdown",
@@ -136,4 +202,17 @@ export const en = {
   "editor.table.alignRight": "Align Right",
   "editor.table.format": "Format Table",
   "editor.table.editSource": "Edit Table Source",
+
+  "external.conflict": "{name} was changed by another program, and you have unsaved changes here.",
+  "external.keepMine": "Keep My Changes",
+  "external.loadDisk": "Load from Disk",
+  "external.compare": "Compare",
+  "external.compare.title": "Compare with Disk",
+  "external.compare.legend":
+    "Lines marked − are only in this tab; lines marked + are only in {name} on disk.",
+  "external.compare.close": "Close",
+  "external.missing":
+    "{name} was deleted or moved by another program. Save to write it back to its old place.",
+  "external.save": "Save",
+  "external.dismiss": "Dismiss",
 } as const;

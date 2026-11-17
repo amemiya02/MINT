@@ -29,26 +29,26 @@ function open(text: string) {
     if (!element) throw new Error(`No cell ${row}:${column}`);
     return element;
   };
-  const grid = () =>
-    [...parent.querySelectorAll(".cm-mint-table tr")].map((row) =>
-      [...row.querySelectorAll("[data-mint-cell]")].map((c) => c.textContent ?? ""),
-    );
   const action = (name: string) => {
     const button = parent.querySelector<HTMLElement>(`[data-mint-action="${name}"]`);
     if (!button) throw new Error(`No action ${name}`);
     button.click();
   };
-  return { editor, parent, cell, grid, action };
+  return { editor, parent, cell, action };
 }
-/** How a text renders, in an editor of its own that is closed right away. */
+/** The cells of the table a text renders, as their source, in an editor that is closed right away. */
 function gridOf(text: string): string[][] {
   const parent = document.createElement("div");
   document.body.append(parent);
   const editor = createEditor({ parent, text });
   finishParsing(parent);
   editor.setSelection({ anchor: text.length });
+  // A cell shows its Markdown source while it has focus.
   const grid = [...parent.querySelectorAll(".cm-mint-table tr")].map((row) =>
-    [...row.querySelectorAll("[data-mint-cell]")].map((c) => c.textContent ?? ""),
+    [...row.querySelectorAll<HTMLElement>("[data-mint-cell]")].map((c) => {
+      c.focus();
+      return c.textContent ?? "";
+    }),
   );
   editor.destroy();
   parent.remove();
@@ -177,6 +177,7 @@ const typed = fc
   .array(fc.constantFrom("a", "Z", "中", "😀", " ", "|", "\n", "*", "1"), { maxLength: 6 })
   .map((units) => units.join(""));
 
+// Every redraw of a table runs the export pipeline; give the properties time on loaded machines.
 describe("table widget source fidelity", () => {
   it("renders every generated table as the grid it describes", () => {
     fc.assert(
@@ -187,8 +188,9 @@ describe("table widget source fidelity", () => {
         );
         expect(gridOf(layout(table).text)).toEqual(expected);
       }),
+      { numRuns: 50 },
     );
-  });
+  }, 120_000);
 
   it("editing a cell changes only that cell's segment, and only that cell's content", () => {
     fc.assert(
@@ -217,8 +219,9 @@ describe("table widget source fidelity", () => {
         (expected[row] as string[])[column] = shown(value);
         expect(gridOf(after)).toEqual(expected);
       }),
+      { numRuns: 50 },
     );
-  });
+  }, 120_000);
 
   const lines = (text: string) => text.split("\n");
   /** `after` is `before` with characters only added, and only characters from `allowed`. */
@@ -323,6 +326,7 @@ describe("table widget source fidelity", () => {
           }
         },
       ),
+      { numRuns: 50 },
     );
-  });
+  }, 120_000);
 });

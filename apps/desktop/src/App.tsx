@@ -1,20 +1,32 @@
 import type { LinkTarget } from "@mint/editor";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { createImageHost } from "./assets/image-host.ts";
 import { createAutosave } from "./autosave/autosave.ts";
-import { buildMenu, type CommandId } from "./commands.ts";
+import { CommandPalette } from "./command-palette/CommandPalette.tsx";
+import {
+  buildMenu,
+  type CommandId,
+  type EditorInvocation,
+  findCommand,
+  type ShellCommandId,
+} from "./commands.ts";
 import { EditorPane } from "./EditorPane.tsx";
 import { FindBar, type FindMode } from "./find/FindBar.tsx";
 import { type Translate, useT } from "./i18n/index.ts";
 import type { Platform } from "./platform/platform.ts";
 import { QuickOpen } from "./quick-open/QuickOpen.tsx";
 import { createRecovery, type Recovery, type RecoveryChoice } from "./recovery/recovery.ts";
+import { FolderSearch } from "./search/FolderSearch.tsx";
 import { SettingsDialog } from "./settings/SettingsDialog.tsx";
 import { SettingsIssues } from "./settings/SettingsIssues.tsx";
 import { useSettingsStore } from "./settings/useSettings.ts";
 import { TabStoreContext, useTabStore, useTabsState } from "./tabs/context.ts";
+import { ExternalChangeNotice } from "./tabs/ExternalChangeNotice.tsx";
 import { baseName, resolveFrom } from "./tabs/paths.ts";
 import { TabBar } from "./tabs/TabBar.tsx";
 import { createTabStore, type Tab, type TabError, type TabStore } from "./tabs/tab-store.ts";
+import { ThemeIssue } from "./theme/ThemeIssue.tsx";
+import { UpdateNotice, useUpdates } from "./updates/updates.tsx";
 import { documentExtensions } from "./workspace/paths.ts";
 import { type RecentList, useRecent } from "./workspace/recent.ts";
 import { Sidebar } from "./workspace/Sidebar.tsx";
@@ -95,7 +107,9 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   const { tabs, activeId, error } = useTabsState();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [quickOpenVisible, setQuickOpenVisible] = useState(false);
+  const [paletteVisible, setPaletteVisible] = useState(false);
   const active = tabs.find((tab) => tab.id === activeId) ?? null;
+  const updates = useUpdates(platform);
   const [folder, setFolder] = useState<string | null>(null);
   const [sidebarVisible, setSidebarVisible] = useState(true);
   /** Errors from folder actions; document errors live in the tab store. */
@@ -143,11 +157,15 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   }, [platform, store, t]);
 
   const [find, setFind] = useState<{ mode: FindMode; request: number } | null>(null);
+  /** While global search shows (in place of the file tree), how many times it was invoked. */
+  const [folderSearch, setFolderSearch] = useState<number | null>(null);
   const showFind = (mode: FindMode) => {
     if (activeId !== null) setFind((f) => ({ mode, request: (f?.request ?? 0) + 1 }));
   };
 
-  const handlers = useRef<Record<CommandId, () => void>>({} as Record<CommandId, () => void>);
+  const handlers = useRef<Record<ShellCommandId, () => void>>(
+    {} as Record<ShellCommandId, () => void>,
+  );
   handlers.current = {
     "file.open": () => void open(),
     "file.openFolder": () => void pickFolder(),
@@ -157,6 +175,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     },
     "edit.find": () => showFind("find"),
     "edit.replace": () => showFind("replace"),
+    "edit.searchFolder": () => setFolderSearch((request) => (request ?? 0) + 1),
     "tab.close": () => {
       if (activeId !== null) void store.close(activeId);
       else void platform.closeWindow();
@@ -166,13 +185,27 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     "view.toggleSidebar": () => setSidebarVisible((visible) => !visible),
     "window.new": () => void platform.openWindow(),
     "app.settings": () => setSettingsOpen(true),
-    "view.toggleSourceMode": () => {
-      if (activeId !== null) store.editor(activeId)?.execute("toggleSourceMode");
-    },
+    "app.checkForUpdates": () => updates.check(),
+    "view.commandPalette": () => setPaletteVisible(true),
+  };
+
+  // Editor commands run on the active document; the others go to the handlers above.
+  const run = useRef<(id: CommandId) => void>(() => {});
+  run.current = (id) => {
+    const { editor: invocation } = findCommand(id);
+    if (!invocation) {
+      handlers.current[id as ShellCommandId]();
+      return;
+    }
+    const editor = activeId === null ? undefined : store.editor(activeId);
+    if (!editor) return;
+    // `execute` is generic per command; an invocation pairs a command with its own arguments.
+    (editor.execute as unknown as (...call: EditorInvocation) => boolean)(...invocation);
+    editor.focus();
   };
 
   useEffect(() => {
-    void platform.setMenu(buildMenu(t, (id) => handlers.current[id]()));
+    void platform.setMenu(buildMenu(t, (id) => run.current(id)));
   }, [platform, t]);
 
   useEffect(
@@ -197,7 +230,9 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
 
   return (
     <div className="flex h-full flex-col bg-(--mint-bg) text-(--mint-fg)">
+      <UpdateNotice updates={updates} />
       <SettingsIssues />
+      <ThemeIssue />
       {(folderError || error) && (
         <div
           role="alert"
@@ -207,7 +242,19 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
         </div>
       )}
       <div className="flex min-h-0 flex-1">
-        {folder && sidebarVisible && (
+        {folderSearch !== null && (
+          <FolderSearch
+            platform={platform}
+            folder={folder}
+            request={folderSearch}
+            onOpenDocument={(path, select) => void store.openDocument(path, select)}
+            onClose={() => {
+              setFolderSearch(null);
+              if (activeId !== null) store.editor(activeId)?.focus();
+            }}
+          />
+        )}
+        {folderSearch === null && folder && sidebarVisible && (
           <Sidebar
             platform={platform}
             root={folder}
@@ -264,6 +311,9 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
           )}
         </div>
       </div>
+      {paletteVisible && (
+        <CommandPalette onRun={(id) => run.current(id)} onClose={() => setPaletteVisible(false)} />
+      )}
       {quickOpenVisible && (
         <QuickOpen
           platform={platform}
@@ -307,6 +357,9 @@ function TabPanel({
     store.markChanged(id);
     onEdited(id);
   }, [store, id, onEdited]);
+  const currentPath = useRef(path);
+  currentPath.current = path;
+  const [imageHost] = useState(() => createImageHost(platform, () => currentPath.current));
   const onOpenLink = useCallback(
     (link: LinkTarget) => {
       if (link.kind === "external") void platform.openExternal(link.url);
@@ -320,16 +373,20 @@ function TabPanel({
       id={`tabpanel-${id}`}
       aria-labelledby={`tab-${id}`}
       hidden={!active}
-      className="h-full"
+      className="flex h-full flex-col"
     >
-      <EditorPane
-        text={tab.text}
-        active={active}
-        onReady={onReady}
-        onChange={onChange}
-        onModeChange={onModeChange}
-        onOpenLink={onOpenLink}
-      />
+      <ExternalChangeNotice tab={tab} />
+      <div className="min-h-0 flex-1">
+        <EditorPane
+          text={tab.text}
+          active={active}
+          onReady={onReady}
+          onChange={onChange}
+          onModeChange={onModeChange}
+          onOpenLink={onOpenLink}
+          imageHost={imageHost}
+        />
+      </div>
     </div>
   );
 }

@@ -129,5 +129,7 @@ function isValid(definition: SettingDefinition, value: unknown): boolean {
         value >= definition.min &&
         value <= definition.max
       );
+    case "text":
+      return typeof value === "string" && value.length <= definition.maxLength;
   }
 }

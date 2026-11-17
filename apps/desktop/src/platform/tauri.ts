@@ -1,4 +1,4 @@
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { Channel, convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
   Menu,
@@ -11,13 +11,21 @@ import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { message, open } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { check } from "@tauri-apps/plugin-updater";
 import type {
   DirectoryEntry,
+  FileMatches,
   MenuItemSpec,
   Platform,
   RecoverySnapshot,
   SettingsFile,
 } from "./platform.ts";
+
+/** What the backend's `search_folder` sends on its channel. */
+type SearchEvent =
+  | ({ readonly kind: "file" } & FileMatches)
+  | { readonly kind: "done"; readonly truncated: boolean };
 
 const nativeItems = {
   cut: "Cut",
@@ -33,6 +41,12 @@ export function createTauriPlatform(): Platform {
     locale: navigator.language,
     readTextFile: (path) => invoke<string>("read_text_file", { path }),
     writeTextFile: (path, text) => invoke<void>("write_text_file", { path, text }),
+    async watchFile(path, onChange) {
+      const channel = new Channel<null>();
+      channel.onmessage = () => onChange();
+      const id = await invoke<number>("watch_file", { path, onChange: channel });
+      return () => void invoke<void>("unwatch_folder", { id });
+    },
     async showOpenDialog({ title, filters }) {
       const picked = await open({
         title,
@@ -48,6 +62,30 @@ export function createTauriPlatform(): Platform {
     readDirectory: (path) => invoke<DirectoryEntry[]>("read_directory", { path }),
     listFolderFiles: (path, extensions) =>
       invoke<string[]>("list_folder_files", { path, extensions }),
+    async searchFolder(path, query, extensions, listener) {
+      const channel = new Channel<SearchEvent>();
+      let cancelled = false;
+      channel.onmessage = (event) => {
+        if (cancelled) return;
+        if (event.kind === "file") listener.onFile({ path: event.path, lines: event.lines });
+        else listener.onDone({ truncated: event.truncated });
+      };
+      const id = await invoke<number>("search_folder", {
+        path,
+        query,
+        extensions,
+        onEvent: channel,
+      });
+      return () => {
+        cancelled = true;
+        void invoke<void>("cancel_search", { id });
+      };
+    },
+    saveAsset: (directory, fileName, data) =>
+      invoke<string>("save_asset", { directory, fileName, data: toBase64(data) }),
+    // The asset protocol's scope is `**` (tauri.conf.json): documents may reference images
+    // anywhere, and the page can already read any file through `read_text_file`.
+    assetUrl: (path) => convertFileSrc(path),
     createFile: (path) => invoke<void>("create_file", { path }),
     createDirectory: (path) => invoke<void>("create_directory", { path }),
     rename: (from, to) => invoke<void>("rename_path", { from, to }),
@@ -61,6 +99,7 @@ export function createTauriPlatform(): Platform {
     readAppData: (name) => invoke<string | null>("read_app_data", { name }),
     writeAppData: (name, text) => invoke<void>("write_app_data", { name, text }),
     openExternal: (url) => openUrl(url),
+    themesPath: () => invoke<string>("themes_path"),
     async showQuestionDialog({ title, message: text, yes, no, cancel }) {
       const answer = await message(text, {
         title,
@@ -96,6 +135,8 @@ export function createTauriPlatform(): Platform {
         height: 720,
         minWidth: 480,
         minHeight: 320,
+        // Let files dropped on the window reach the page (image drops into the editor).
+        dragDropEnabled: false,
       });
       await new Promise<void>((resolve, reject) => {
         void window.once("tauri://created", () => resolve());
@@ -121,6 +162,23 @@ export function createTauriPlatform(): Platform {
     writeRecoverySnapshot: (id, contents) =>
       invoke<void>("write_recovery_snapshot", { id, contents }),
     deleteRecoverySnapshot: (id) => invoke<void>("delete_recovery_snapshot", { id }),
+    isMainWindow: getCurrentWindow().label === "main",
+    async checkForUpdate() {
+      // The backend knows whether this build was given an updater key and endpoint.
+      if (!(await invoke<boolean>("updates_supported"))) return { status: "unavailable" };
+      const update = await check();
+      if (!update) return { status: "upToDate" };
+      return {
+        status: "available",
+        update: {
+          version: update.version,
+          async install() {
+            await update.downloadAndInstall();
+            await relaunch();
+          },
+        },
+      };
+    },
   };
 }
 
@@ -150,6 +208,15 @@ function toNativeItem(item: MenuItemSpec) {
     case "native":
       return PredefinedMenuItem.new({ item: nativeItems[item.action], text: item.label });
   }
+}
+
+/** Binary data travels over IPC as base64: far smaller than a JSON array of numbers. */
+function toBase64(data: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < data.length; i += 0x8000) {
+    binary += String.fromCharCode(...data.subarray(i, i + 0x8000));
+  }
+  return btoa(binary);
 }
 
 export function isTauri(): boolean {

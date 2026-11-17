@@ -19,6 +19,14 @@ export interface Platform {
   /** Write text as UTF-8 atomically: either the whole new content lands or the old file stays intact. */
   writeTextFile(path: string, text: string): Promise<void>;
 
+  /**
+   * Watch one document for changes made on disk: modified, created, deleted or
+   * renamed away. `onChange` is called after each (debounced) batch of changes,
+   * MINT's own saves included; it is up to the caller to compare contents.
+   * Resolves to a function that stops watching.
+   */
+  watchFile(path: string, onChange: () => void): Promise<() => void>;
+
   /** Ask the user to pick a document. Resolves to its path, or `null` if cancelled. */
   showOpenDialog(options: OpenDialogOptions): Promise<string | null>;
 
@@ -35,6 +43,35 @@ export interface Platform {
    * empty, only files with one of them (case-insensitive, without the dot) are listed.
    */
   listFolderFiles(path: string, extensions: readonly string[]): Promise<string[]>;
+
+  /**
+   * Search the text of the files of a folder (the same files `listFolderFiles`
+   * lists) in the background. Each file with matches is passed to `onFile` as
+   * soon as it is searched, in path order; `onDone` is called last, unless the
+   * search is cancelled. Rejects at once if `query.regexp` is set and the pattern
+   * is not a valid regular expression. Resolves to a function that cancels it.
+   */
+  searchFolder(
+    path: string,
+    query: FolderSearchQuery,
+    extensions: readonly string[],
+    listener: FolderSearchListener,
+  ): Promise<() => void>;
+
+  /**
+   * Save an asset (e.g. a pasted image) into `directory`, creating it (and its
+   * parents) if needed. The file is named `fileName`, or `name-1.ext`,
+   * `name-2.ext`... if that name is taken: nothing is ever overwritten.
+   * Resolves to the absolute path of the new file.
+   */
+  saveAsset(directory: string, fileName: string, data: Uint8Array): Promise<string>;
+
+  /**
+   * A URL the page can load to show the local file at `path` (an image in a
+   * document), or `null` if it cannot be shown. The file may not exist; then
+   * loading the URL fails.
+   */
+  assetUrl(path: string): string | null;
 
   /** Create an empty file. Rejects if anything already exists at `path`. */
   createFile(path: string): Promise<void>;
@@ -62,6 +99,14 @@ export interface Platform {
 
   /** Write a small named file to MINT's app data directory, atomically. */
   writeAppData(name: string, text: string): Promise<void>;
+
+  /**
+   * Absolute path of the theme folder (`themes` in the app data directory),
+   * created if missing. User themes are the `.css` files in it; read, list and
+   * watch it like any folder.
+   */
+  themesPath(): Promise<string>;
+
   /** Ask a three-way question (e.g. save / don't save / cancel). Dismissing the dialog answers `cancel`. */
   showQuestionDialog(options: QuestionDialogOptions): Promise<"yes" | "no" | "cancel">;
 
@@ -117,12 +162,66 @@ export interface Platform {
 
   /** Remove a snapshot from the recovery area; removing one that does not exist is not an error. */
   deleteRecoverySnapshot(id: string): Promise<void>;
+
+  /**
+   * Whether this is the first window of the app (the one opened at launch).
+   * Once-per-launch work, such as the startup update check, runs only there.
+   */
+  readonly isMainWindow: boolean;
+
+  /**
+   * Ask the release server whether a newer version of MINT exists. Rejects
+   * when the check fails (offline, server error).
+   */
+  checkForUpdate(): Promise<UpdateCheck>;
 }
 
 /** One entry of the recovery area. `contents` is opaque to the platform. */
 export interface RecoverySnapshot {
   readonly id: string;
   readonly contents: string;
+}
+
+export type UpdateCheck =
+  /** This build cannot update itself (development build, no updater key, package-manager install). */
+  | { readonly status: "unavailable" }
+  | { readonly status: "upToDate" }
+  | { readonly status: "available"; readonly update: AvailableUpdate };
+
+export interface AvailableUpdate {
+  readonly version: string;
+  /** Download and install the new version, then restart MINT into it. Rejects if any step fails. */
+  install(): Promise<void>;
+}
+
+export interface FolderSearchQuery {
+  readonly pattern: string;
+  readonly caseSensitive: boolean;
+  /** Only matches not preceded or followed by a letter, digit or underscore. */
+  readonly wholeWord: boolean;
+  /** `pattern` is a regular expression; otherwise it is literal text. */
+  readonly regexp: boolean;
+}
+
+export interface FolderSearchListener {
+  onFile(file: FileMatches): void;
+  /** `truncated`: the search stopped after too many matching lines. */
+  onDone(summary: { readonly truncated: boolean }): void;
+}
+
+/** The matching lines of one file. */
+export interface FileMatches {
+  readonly path: string;
+  readonly lines: readonly LineMatch[];
+}
+
+export interface LineMatch {
+  /** 1-based line number (lines end at a line feed). */
+  readonly line: number;
+  /** The line without its line ending; a byte order mark on line 1 is kept. */
+  readonly text: string;
+  /** The matches in `text` as `[start, end)` UTF-16 offsets. */
+  readonly ranges: readonly (readonly [number, number])[];
 }
 
 export interface QuestionDialogOptions {

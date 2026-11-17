@@ -1,113 +1,263 @@
+import type { EditorCommand, EditorCommands } from "@mint/editor";
 import type { MessageKey, Translate } from "./i18n/index.ts";
-import type { MenuSpec } from "./platform/platform.ts";
+import { isMac } from "./keys.ts";
+import type { MenuItemSpec, MenuSpec } from "./platform/platform.ts";
 
 /**
  * The command registry. Every user-invocable action is a command with an id,
- * an i18n title and an optional default shortcut; the native menu (and later
- * the command palette and shortcut overrides) are derived from this list.
+ * an i18n title and an optional default shortcut. The native menu, the
+ * command palette and the shortcuts (which are menu accelerators) are all
+ * derived from this one list, so registering a command here is all it takes
+ * to make it reachable everywhere.
+ *
+ * Shell commands are run by the window's handlers (see `App.tsx`). Editor
+ * commands name an editor core command (with its arguments) and run on the
+ * active document; the shell needs no handler for them.
  */
-export type CommandId =
-  | "file.open"
-  | "file.openFolder"
-  | "file.quickOpen"
-  | "file.save"
-  | "edit.find"
-  | "edit.replace"
-  | "tab.close"
-  | "tab.next"
-  | "tab.previous"
-  | "view.toggleSidebar"
-  | "window.new"
-  | "app.settings"
-  | "view.toggleSourceMode";
 
-export interface Command {
-  readonly id: CommandId;
+/** A named editor core command and its arguments, e.g. `["setHeading", 2]`. */
+export type EditorInvocation = {
+  [C in EditorCommand]: readonly [C, ...EditorCommands[C]];
+}[EditorCommand];
+
+/** Native menus, in menu bar order. */
+export type MenuId = "app" | "file" | "edit" | "paragraph" | "format" | "view" | "window";
+
+interface CommandSpec {
+  readonly id: string;
   readonly title: MessageKey;
-  /** Default shortcut in Tauri accelerator syntax. */
+  /** Default shortcut in Tauri accelerator syntax; `CmdOrCtrl` is ⌘ on macOS and Ctrl elsewhere. */
   readonly accelerator?: string;
+  /** The menu the command appears in. */
+  readonly menu: MenuId;
+  /** Commands of a menu are separated where their group changes. */
+  readonly group?: string;
+  /** Present for editor commands: what to run on the active document. */
+  readonly editor?: EditorInvocation;
 }
 
-const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+const heading = (level: 1 | 2 | 3 | 4 | 5 | 6) =>
+  ({
+    id: `paragraph.heading${level}`,
+    title: `command.paragraph.heading${level}`,
+    accelerator: `CmdOrCtrl+${level}`,
+    menu: "paragraph",
+    group: "heading",
+    editor: ["setHeading", level],
+  }) as const;
 
-export const commands: readonly Command[] = [
-  { id: "file.open", title: "command.file.open", accelerator: "CmdOrCtrl+O" },
-  { id: "file.openFolder", title: "command.file.openFolder" },
-  { id: "file.quickOpen", title: "command.file.quickOpen", accelerator: "CmdOrCtrl+P" },
-  { id: "file.save", title: "command.file.save", accelerator: "CmdOrCtrl+S" },
+// Default shortcuts follow Typora. Where a key clashes with the system or
+// Tauri on some platform, the clash is resolved here and noted.
+export const commands = [
+  { id: "app.checkForUpdates", title: "command.app.checkForUpdates", menu: "app", group: "update" },
   {
-    id: "view.toggleSidebar",
-    title: "command.view.toggleSidebar",
-    accelerator: "CmdOrCtrl+Shift+L",
+    id: "app.settings",
+    title: "command.app.settings",
+    accelerator: "CmdOrCtrl+,",
+    menu: "app",
+    group: "settings",
   },
-  { id: "edit.find", title: "command.edit.find", accelerator: "CmdOrCtrl+F" },
+
+  { id: "file.open", title: "command.file.open", accelerator: "CmdOrCtrl+O", menu: "file" },
+  { id: "file.openFolder", title: "command.file.openFolder", menu: "file" },
+  {
+    id: "file.quickOpen",
+    title: "command.file.quickOpen",
+    accelerator: "CmdOrCtrl+P",
+    menu: "file",
+  },
+  {
+    id: "file.save",
+    title: "command.file.save",
+    accelerator: "CmdOrCtrl+S",
+    menu: "file",
+    group: "save",
+  },
+  {
+    id: "tab.close",
+    title: "command.tab.close",
+    accelerator: "CmdOrCtrl+W",
+    menu: "file",
+    group: "save",
+  },
+
+  { id: "edit.find", title: "command.edit.find", accelerator: "CmdOrCtrl+F", menu: "edit" },
   // Typora's replace shortcut: ⌘⌥F on macOS, Ctrl+H elsewhere (Ctrl+Alt is AltGr on Windows).
   {
     id: "edit.replace",
     title: "command.edit.replace",
     accelerator: isMac ? "Cmd+Alt+F" : "Ctrl+H",
+    menu: "edit",
   },
-  { id: "tab.close", title: "command.tab.close", accelerator: "CmdOrCtrl+W" },
-  { id: "tab.next", title: "command.tab.next", accelerator: "Ctrl+Tab" },
-  { id: "tab.previous", title: "command.tab.previous", accelerator: "Ctrl+Shift+Tab" },
-  { id: "window.new", title: "command.window.new", accelerator: "CmdOrCtrl+Shift+N" },
-  { id: "app.settings", title: "command.app.settings", accelerator: "CmdOrCtrl+," },
+  {
+    id: "edit.searchFolder",
+    title: "command.edit.searchFolder",
+    accelerator: "CmdOrCtrl+Shift+F",
+    menu: "edit",
+  },
+
+  heading(1),
+  heading(2),
+  heading(3),
+  heading(4),
+  heading(5),
+  heading(6),
+  {
+    id: "paragraph.paragraph",
+    title: "command.paragraph.paragraph",
+    accelerator: "CmdOrCtrl+0",
+    menu: "paragraph",
+    group: "heading",
+    editor: ["setParagraph"],
+  },
+  {
+    id: "paragraph.codeBlock",
+    title: "command.paragraph.codeBlock",
+    accelerator: "CmdOrCtrl+Shift+K",
+    menu: "paragraph",
+    group: "blocks",
+    editor: ["insertCodeBlock"],
+  },
+  {
+    id: "paragraph.table",
+    title: "command.paragraph.table",
+    accelerator: "CmdOrCtrl+T",
+    menu: "paragraph",
+    group: "blocks",
+    editor: ["insertTable"],
+  },
+  {
+    id: "paragraph.formatTable",
+    title: "command.paragraph.formatTable",
+    menu: "paragraph",
+    group: "table",
+    editor: ["formatTable"],
+  },
+
+  {
+    id: "format.bold",
+    title: "command.format.bold",
+    accelerator: "CmdOrCtrl+B",
+    menu: "format",
+    editor: ["toggleBold"],
+  },
+  {
+    id: "format.italic",
+    title: "command.format.italic",
+    accelerator: "CmdOrCtrl+I",
+    menu: "format",
+    editor: ["toggleItalic"],
+  },
+  {
+    id: "format.link",
+    title: "command.format.link",
+    accelerator: "CmdOrCtrl+K",
+    menu: "format",
+    editor: ["toggleLink"],
+  },
+
+  {
+    id: "view.commandPalette",
+    title: "command.view.commandPalette",
+    accelerator: "CmdOrCtrl+Shift+P",
+    menu: "view",
+  },
+  {
+    id: "view.toggleSidebar",
+    title: "command.view.toggleSidebar",
+    accelerator: "CmdOrCtrl+Shift+L",
+    menu: "view",
+    group: "layout",
+  },
   {
     id: "view.toggleSourceMode",
     title: "command.view.toggleSourceMode",
     accelerator: "CmdOrCtrl+/",
+    menu: "view",
+    group: "layout",
+    editor: ["toggleSourceMode"],
   },
+
+  {
+    id: "window.new",
+    title: "command.window.new",
+    accelerator: "CmdOrCtrl+Shift+N",
+    menu: "window",
+  },
+  {
+    id: "tab.next",
+    title: "command.tab.next",
+    accelerator: "Ctrl+Tab",
+    menu: "window",
+    group: "tabs",
+  },
+  {
+    id: "tab.previous",
+    title: "command.tab.previous",
+    accelerator: "Ctrl+Shift+Tab",
+    menu: "window",
+    group: "tabs",
+  },
+] as const satisfies readonly CommandSpec[];
+
+type Registered = (typeof commands)[number];
+export type CommandId = Registered["id"];
+/** Commands that run an editor core command on the active document. */
+export type EditorCommandId = Extract<Registered, { editor: EditorInvocation }>["id"];
+/** Commands the shell window handles itself. */
+export type ShellCommandId = Exclude<CommandId, EditorCommandId>;
+export type Command = CommandSpec & { readonly id: CommandId };
+
+export function findCommand(id: CommandId): Command {
+  const command = (commands as readonly Command[]).find((c) => c.id === id);
+  if (!command) throw new Error(`Unknown command: ${id}`);
+  return command;
+}
+
+/** Menu bar layout: native items around the registry's commands. */
+const menus: readonly {
+  readonly id: MenuId;
+  readonly label: MessageKey;
+  readonly before?: readonly NativeItem[];
+  readonly after?: readonly NativeItem[];
+}[] = [
+  { id: "app", label: "menu.app", after: ["separator", "quit"] },
+  { id: "file", label: "menu.file" },
+  {
+    id: "edit",
+    label: "menu.edit",
+    before: ["cut", "copy", "paste", "separator", "selectAll", "separator"],
+  },
+  { id: "paragraph", label: "menu.paragraph" },
+  { id: "format", label: "menu.format" },
+  { id: "view", label: "menu.view" },
+  { id: "window", label: "menu.window" },
 ];
 
+type NativeItem = "separator" | "cut" | "copy" | "paste" | "selectAll" | "quit";
+
 export function buildMenu(t: Translate, run: (id: CommandId) => void): MenuSpec[] {
-  const item = (id: CommandId) => {
-    const command = commands.find((c) => c.id === id);
-    if (!command) throw new Error(`Unknown command: ${id}`);
-    return {
-      kind: "command" as const,
-      id,
-      label: t(command.title),
-      ...(command.accelerator ? { accelerator: command.accelerator } : {}),
-      run: () => run(id),
-    };
-  };
-  return [
-    {
-      label: t("menu.app"),
-      items: [
-        item("app.settings"),
-        { kind: "separator" },
-        { kind: "native", action: "quit", label: t("menu.quit") },
-      ],
-    },
-    {
-      label: t("menu.file"),
-      items: [
-        item("file.open"),
-        item("file.openFolder"),
-        item("file.quickOpen"),
-        { kind: "separator" },
-        item("file.save"),
-        item("tab.close"),
-      ],
-    },
-    {
-      label: t("menu.edit"),
-      items: [
-        { kind: "native", action: "cut", label: t("menu.cut") },
-        { kind: "native", action: "copy", label: t("menu.copy") },
-        { kind: "native", action: "paste", label: t("menu.paste") },
-        { kind: "separator" },
-        { kind: "native", action: "selectAll", label: t("menu.selectAll") },
-        { kind: "separator" },
-        item("edit.find"),
-        item("edit.replace"),
-      ],
-    },
-    { label: t("menu.view"), items: [item("view.toggleSidebar"), item("view.toggleSourceMode")] },
-    {
-      label: t("menu.window"),
-      items: [item("window.new"), { kind: "separator" }, item("tab.next"), item("tab.previous")],
-    },
-  ];
+  const native = (item: NativeItem): MenuItemSpec =>
+    item === "separator"
+      ? { kind: "separator" }
+      : { kind: "native", action: item, label: t(`menu.${item}`) };
+  return menus.map((menu) => {
+    const items: MenuItemSpec[] = (menu.before ?? []).map(native);
+    let group: string | undefined;
+    (commands as readonly Command[])
+      .filter((command) => command.menu === menu.id)
+      .forEach((command, index) => {
+        if (index > 0 && command.group !== group) items.push({ kind: "separator" });
+        group = command.group;
+        items.push({
+          kind: "command",
+          id: command.id,
+          label: t(command.title),
+          ...(command.accelerator ? { accelerator: command.accelerator } : {}),
+          run: () => run(command.id),
+        });
+      });
+    items.push(...(menu.after ?? []).map(native));
+    return { label: t(menu.label), items };
+  });
 }

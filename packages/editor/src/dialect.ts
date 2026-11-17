@@ -1,7 +1,10 @@
 import { commonmarkLanguage, markdown } from "@codemirror/lang-markdown";
+import { languages } from "@codemirror/language-data";
 import type { Extension } from "@codemirror/state";
 import { GFM, type MarkdownConfig, Subscript, Superscript } from "@lezer/markdown";
 import type { Dialect, ExtendedSyntax } from "@mint/markdown";
+import { footnoteSyntax } from "./footnote-syntax.ts";
+import { MathSyntax } from "./math-syntax.ts";
 
 type Switches = Omit<Dialect, "extended"> & ExtendedSyntax;
 
@@ -12,8 +15,8 @@ type Switches = Omit<Dialect, "extended"> & ExtendedSyntax;
  * does not parse yet map to no extensions.
  */
 const parserExtensions: { readonly [K in keyof Switches]: readonly MarkdownConfig[] } = {
-  gfm: GFM, // footnotes: added with the block-structure renderers
-  math: [], // added with the math block widget
+  gfm: [...GFM, footnoteSyntax],
+  math: [MathSyntax],
   mermaid: [], // plain fenced code; rendered by the Mermaid block widget
   frontMatter: [], // added with the front matter block widget
   toc: [],
@@ -34,6 +37,10 @@ export function dialectParserExtensions(dialect: Dialect): MarkdownConfig[] {
 export function markdownSupport(dialect: Dialect): Extension {
   return markdown({
     base: commonmarkLanguage,
+    // Fenced code is highlighted by its language; grammars load on first use.
+    codeLanguages: languages,
+    // Enter/Backspace on list and quote markup: see markup-continuation.ts.
+    addKeymap: false,
     extensions: dialectParserExtensions(dialect),
   });
 }

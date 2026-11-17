@@ -1,6 +1,8 @@
 import { createIgnoreRules } from "./gitignore.ts";
 import type {
   DirectoryEntry,
+  FolderSearchQuery,
+  LineMatch,
   MenuItemSpec,
   MenuSpec,
   Platform,
@@ -18,6 +20,9 @@ export const memorySettingsPath = "/config/MINT/settings.json";
  */
 export const memoryRecoveryDir = "/data/MINT/recovery";
 
+/** The in-memory theme folder (seed user themes through `files`). */
+export const memoryThemesPath = "/data/MINT/themes";
+
 export interface MemoryPlatformOptions {
   /** Initial files, keyed by absolute `/`-separated path. Their parent directories exist implicitly. */
   readonly files?: Readonly<Record<string, string>>;
@@ -27,17 +32,30 @@ export interface MemoryPlatformOptions {
   readonly openDialogResults?: readonly (string | null)[];
   /** Paths the open folder dialog returns, in order; `null` simulates cancelling. */
   readonly openFolderDialogResults?: readonly (string | null)[];
+  /** Initial binary files (images...), keyed by absolute path, as base64. */
+  readonly binaryFiles?: Readonly<Record<string, string>>;
   /** Initial contents of the app data directory, keyed by name. */
   readonly appData?: Readonly<Record<string, string>>;
   /** Answers the question dialog gives, in order; once used up it answers `cancel`. */
   readonly questionDialogResults?: readonly ("yes" | "no" | "cancel")[];
   readonly locale?: string;
+  /**
+   * What the release server answers: a newer version (optionally failing to
+   * install), a failing check, or `"unavailable"` for builds that cannot update.
+   * Without it MINT is up to date.
+   */
+  readonly update?:
+    | { readonly version: string; readonly installError?: string }
+    | { readonly error: string }
+    | "unavailable";
 }
 
 /** Platform implementation backed by memory, for E2E tests and the future web build. */
 export interface MemoryPlatform extends Platform {
-  /** Current file contents, keyed by path. */
+  /** Current text file contents, keyed by path. */
   readonly files: Map<string, string>;
+  /** Current binary file contents (assets such as images), keyed by path. */
+  readonly binaryFiles: Map<string, Uint8Array>;
   /** Paths moved to the trash, in order. */
   readonly trash: string[];
   /** Contents of the app data directory, keyed by name. */
@@ -51,19 +69,33 @@ export interface MemoryPlatform extends Platform {
   externalRemove(path: string): void;
   /** URLs passed to `openExternal`, in order. */
   readonly openedUrls: readonly string[];
+  /** Rename or move a file or directory as another program would (watchers are notified). */
+  externalRename(from: string, to: string): void;
   /** Messages of the question dialogs shown so far. */
   readonly questions: readonly string[];
   /** Whether this window has closed. */
   readonly closed: boolean;
+  /** Versions installed (and restarted into) so far. */
+  readonly updatesInstalled: readonly string[];
+  /** The application menu last installed with `setMenu`. */
+  readonly menu: readonly MenuSpec[];
   /** Activate a menu item by id, as a click in a native menu would. */
   runMenuItem(id: string): void;
 }
 
 export function createMemoryPlatform(options: MemoryPlatformOptions = {}): MemoryPlatform {
   const files = new Map(Object.entries(options.files ?? {}));
+  const binaryFiles = new Map(
+    Object.entries(options.binaryFiles ?? {}).map(([path, base64]) => [path, fromBase64(base64)]),
+  );
+  /** Every file path, text or binary. */
+  const filePaths = () => [...files.keys(), ...binaryFiles.keys()];
+  const isFile = (path: string) => files.has(path) || binaryFiles.has(path);
+  const assetUrls = new Map<Uint8Array, string>();
   // The config directory always exists, so settings.json can be created from outside.
   const directories = new Set([
     memorySettingsPath.slice(0, memorySettingsPath.lastIndexOf("/")),
+    memoryThemesPath,
     ...(options.directories ?? []),
   ]);
   const appData = new Map(Object.entries(options.appData ?? {}));
@@ -73,7 +105,9 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
   const watchers = new Set<{ root: string; onChange: (paths: readonly string[]) => void }>();
   const questionResults = [...(options.questionDialogResults ?? [])];
   const questions: string[] = [];
+  const updatesInstalled: string[] = [];
   let commands: Extract<MenuItemSpec, { kind: "command" }>[] = [];
+  let installedMenu: readonly MenuSpec[] = [];
   let windowTitle = "";
   const openedUrls: string[] = [];
   let closeHandler: (() => Promise<boolean>) | null = null;
@@ -90,6 +124,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       id: path.slice(memoryRecoveryDir.length + 1, -".json".length),
       contents,
     }));
+  const fileWatchers = new Set<{ readonly path: string; readonly onChange: () => void }>();
 
   // Same contract as the Rust backend's `settings::load`.
   function readSettings(): SettingsFile {
@@ -124,8 +159,8 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
   });
 
   const isDirectory = (path: string): boolean =>
-    directories.has(path) || [...files.keys()].some((f) => f.startsWith(`${path}/`));
-  const exists = (path: string): boolean => files.has(path) || isDirectory(path);
+    directories.has(path) || filePaths().some((f) => f.startsWith(`${path}/`));
+  const exists = (path: string): boolean => isFile(path) || isDirectory(path);
   const within = (path: string, root: string): boolean =>
     path === root || path.startsWith(`${root}/`);
 
@@ -142,16 +177,40 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       // Like a real file watcher, events arrive asynchronously.
       if (touched.length > 0) setTimeout(() => watcher.onChange(touched), 0);
     }
+    for (const watcher of fileWatchers) {
+      // The file itself, or a directory around it that was removed or renamed.
+      if (paths.some((p) => within(watcher.path, p))) setTimeout(() => watcher.onChange(), 0);
+    }
+  }
+
+  function move(from: string, to: string): void {
+    const moved = (p: string) => to + p.slice(from.length);
+    for (const map of [files, binaryFiles] as Map<string, unknown>[]) {
+      for (const [p, contents] of [...map]) {
+        if (within(p, from)) {
+          map.delete(p);
+          map.set(moved(p), contents);
+        }
+      }
+    }
+    for (const d of [...directories]) {
+      if (within(d, from)) {
+        directories.delete(d);
+        directories.add(moved(d));
+      }
+    }
   }
 
   function remove(path: string): void {
     for (const key of [...files.keys()]) if (within(key, path)) files.delete(key);
+    for (const key of [...binaryFiles.keys()]) if (within(key, path)) binaryFiles.delete(key);
     for (const dir of [...directories]) if (within(dir, path)) directories.delete(dir);
   }
 
   return {
     locale: options.locale ?? navigator.language,
     files,
+    binaryFiles,
     trash,
     appData,
     openedUrls,
@@ -166,7 +225,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     async writeTextFile(path, text) {
       requireParent(path);
       files.set(path, text);
-      // Mirrors the backend's file watcher: any write to settings.json is reported.
+      // Mirrors the backend's file watchers: every write is reported, MINT's own included.
       if (path === memorySettingsPath) notifySettings();
       notify(path);
     },
@@ -186,7 +245,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       if (!isDirectory(path)) throw new Error(`No such directory: ${path}`);
       const children = new Map<string, DirectoryEntry>();
       const prefix = `${path}/`;
-      for (const p of [...files.keys(), ...directories]) {
+      for (const p of [...filePaths(), ...directories]) {
         if (!p.startsWith(prefix)) continue;
         const name = p.slice(prefix.length).split("/")[0] ?? "";
         const child = prefix + name;
@@ -194,7 +253,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
           children.set(name, {
             name,
             path: child,
-            kind: files.has(child) ? "file" : "directory",
+            kind: isFile(child) ? "file" : "directory",
           });
         }
       }
@@ -203,7 +262,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     async listFolderFiles(root, extensions) {
       if (!isDirectory(root)) return [];
       const prefix = `${root}/`;
-      const inFolder = [...files.keys()].filter((p) => p.startsWith(prefix));
+      const inFolder = filePaths().filter((p) => p.startsWith(prefix));
       const ignores = createIgnoreRules(
         inFolder
           .filter((p) => p.endsWith("/.gitignore"))
@@ -218,6 +277,49 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
           return !ignores.isIgnored(relative);
         })
         .sort();
+    },
+    async searchFolder(root, query, extensions, listener) {
+      const regexp = searchRegExp(query);
+      const paths = await this.listFolderFiles(root, extensions);
+      let cancelled = false;
+      // Like the backend, results arrive asynchronously, one file at a time.
+      const next = (index: number) => {
+        if (cancelled) return;
+        const path = paths[index];
+        if (path === undefined) {
+          listener.onDone({ truncated: false });
+          return;
+        }
+        const lines = searchText(files.get(path) ?? "", regexp);
+        if (lines.length > 0) listener.onFile({ path, lines });
+        setTimeout(() => next(index + 1));
+      };
+      setTimeout(() => next(0));
+      return () => {
+        cancelled = true;
+      };
+    },
+    async saveAsset(directory, fileName, data) {
+      if (isFile(directory)) throw new Error(`Not a directory: ${directory}`);
+      const dot = fileName.lastIndexOf(".");
+      const [stem, extension] =
+        dot > 0 ? [fileName.slice(0, dot), fileName.slice(dot)] : [fileName, ""];
+      let path = `${directory}/${fileName}`;
+      for (let n = 1; exists(path); n++) path = `${directory}/${stem}-${n}${extension}`;
+      directories.add(directory);
+      binaryFiles.set(path, data.slice());
+      notify(path);
+      return path;
+    },
+    assetUrl(path) {
+      const data = binaryFiles.get(path);
+      if (!data) return null;
+      let url = assetUrls.get(data);
+      if (!url) {
+        url = URL.createObjectURL(new Blob([data.slice()], { type: mimeType(path) }));
+        assetUrls.set(data, url);
+      }
+      return url;
     },
     async createFile(path) {
       if (exists(path)) throw new Error(`${path} already exists`);
@@ -235,19 +337,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       if (!exists(from)) throw new Error(`No such file or directory: ${from}`);
       if (exists(to)) throw new Error(`${to} already exists`);
       requireParent(to);
-      const move = (p: string) => to + p.slice(from.length);
-      for (const [p, text] of [...files]) {
-        if (within(p, from)) {
-          files.delete(p);
-          files.set(move(p), text);
-        }
-      }
-      for (const d of [...directories]) {
-        if (within(d, from)) {
-          directories.delete(d);
-          directories.add(move(d));
-        }
-      }
+      move(from, to);
       notify(from, to);
     },
     async moveToTrash(path) {
@@ -261,6 +351,11 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       watchers.add(watcher);
       return () => watchers.delete(watcher);
     },
+    async watchFile(path, onChange) {
+      const watcher = { path, onChange };
+      fileWatchers.add(watcher);
+      return () => fileWatchers.delete(watcher);
+    },
     async readAppData(name) {
       return appData.get(name) ?? null;
     },
@@ -269,6 +364,9 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     },
     async openExternal(url) {
       openedUrls.push(url);
+    },
+    async themesPath() {
+      return memoryThemesPath;
     },
     async showQuestionDialog({ message }) {
       questions.push(message);
@@ -294,6 +392,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       document.title = title;
     },
     async setMenu(menu: readonly MenuSpec[]) {
+      installedMenu = menu;
       commands = menu.flatMap((m) => m.items.filter((i) => i.kind === "command"));
     },
     async settingsPath() {
@@ -310,8 +409,29 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       settingsListeners.add(listener);
       return () => settingsListeners.delete(listener);
     },
+    // A window opened by another one (see `openWindow`) is not the main window.
+    isMainWindow: !window.opener,
+    get updatesInstalled() {
+      return updatesInstalled;
+    },
+    async checkForUpdate() {
+      const update = options.update;
+      if (update === undefined) return { status: "upToDate" };
+      if (update === "unavailable") return { status: "unavailable" };
+      if ("error" in update) throw new Error(update.error);
+      return {
+        status: "available",
+        update: {
+          version: update.version,
+          async install() {
+            if (update.installError) throw new Error(update.installError);
+            updatesInstalled.push(update.version);
+          },
+        },
+      };
+    },
     listPaths() {
-      const all = new Set([...files.keys(), ...directories]);
+      const all = new Set([...filePaths(), ...directories]);
       for (const p of [...all]) {
         for (let dir = parentOf(p); dir !== "" && dir !== "/"; dir = parentOf(dir)) all.add(dir);
       }
@@ -325,6 +445,9 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       remove(path);
       notify(path);
     },
+    get menu() {
+      return installedMenu;
+    },
     async takeRecoverySnapshots() {
       const snapshots = leftOver ?? [];
       leftOver = null;
@@ -336,12 +459,56 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     async deleteRecoverySnapshot(id) {
       files.delete(recoveryPath(id));
     },
+    externalRename(from, to) {
+      move(from, to);
+      notify(from, to);
+    },
     runMenuItem(id) {
       const command = commands.find((c) => c.id === id);
       if (!command) throw new Error(`No menu item: ${id}`);
       command.run();
     },
   };
+}
+
+/** The backend's matching rules (`search.rs`) in JavaScript regular expression syntax. */
+function searchRegExp(query: FolderSearchQuery): RegExp {
+  let source = query.regexp ? query.pattern : query.pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  if (query.wholeWord) source = `(?<![\\p{L}\\p{N}_])(?:${source})(?![\\p{L}\\p{N}_])`;
+  // Throws a SyntaxError for an invalid pattern, as the backend rejects it.
+  return new RegExp(source, query.caseSensitive ? "gu" : "giu");
+}
+
+function searchText(text: string, regexp: RegExp): LineMatch[] {
+  const lines: LineMatch[] = [];
+  text.split("\n").forEach((raw, index) => {
+    const line = raw.replace(/\r+$/, "");
+    const ranges: [number, number][] = [];
+    for (const match of line.matchAll(regexp)) {
+      if (match[0].length > 0) ranges.push([match.index, match.index + match[0].length]);
+    }
+    if (ranges.length > 0) lines.push({ line: index + 1, text: line, ranges });
+  });
+  return lines;
+}
+
+function fromBase64(base64: string): Uint8Array {
+  return Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+}
+
+const mimeTypes: Readonly<Record<string, string>> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  svg: "image/svg+xml",
+};
+
+function mimeType(path: string): string {
+  return (
+    mimeTypes[path.slice(path.lastIndexOf(".") + 1).toLowerCase()] ?? "application/octet-stream"
+  );
 }
 
 function parentOf(path: string): string {

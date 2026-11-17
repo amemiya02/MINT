@@ -63,5 +63,7 @@ function describeExpected(definition: SettingDefinition, t: Translate): string {
         min: String(definition.min),
         max: String(definition.max),
       });
+    case "text":
+      return t("settings.expected.text", { max: String(definition.maxLength) });
   }
 }

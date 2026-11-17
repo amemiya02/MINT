@@ -1,5 +1,6 @@
 import { createEditor, type LinkTarget, type MintEditor } from "@mint/editor";
 import { useEffect, useRef } from "react";
+import type { ImageHost } from "./assets/image-host.ts";
 import { editorPhrases } from "./editor-phrases.ts";
 import { useT } from "./i18n/index.ts";
 
@@ -13,6 +14,8 @@ interface EditorPaneProps {
   readonly onModeChange: () => void;
   /** The user ⌘-clicked a link. */
   readonly onOpenLink: (link: LinkTarget) => void;
+  /** Resolves and saves the document's images. */
+  readonly imageHost: ImageHost;
 }
 
 /** Mounts the framework-agnostic editor core into React. */
@@ -23,6 +26,7 @@ export function EditorPane({
   onChange,
   onModeChange,
   onOpenLink,
+  imageHost,
 }: EditorPaneProps) {
   const parent = useRef<HTMLDivElement>(null);
   const t = useT();
@@ -30,8 +34,8 @@ export function EditorPane({
   const phrases = useRef<Record<string, string>>({});
   phrases.current = editorPhrases(t);
   const editor = useRef<MintEditor | null>(null);
-  const callbacks = useRef({ onReady, onChange, onModeChange, onOpenLink });
-  callbacks.current = { onReady, onChange, onModeChange, onOpenLink };
+  const callbacks = useRef({ onReady, onChange, onModeChange, onOpenLink, imageHost });
+  callbacks.current = { onReady, onChange, onModeChange, onOpenLink, imageHost };
 
   useEffect(() => {
     if (!parent.current) return;
@@ -39,7 +43,11 @@ export function EditorPane({
       parent: parent.current,
       text,
       phrases: phrases.current,
-      host: { openLink: (link) => callbacks.current.onOpenLink(link) },
+      host: {
+        openLink: (link) => callbacks.current.onOpenLink(link),
+        resolveImageUrl: (path) => callbacks.current.imageHost.resolveImageUrl(path),
+        saveImage: (file) => callbacks.current.imageHost.saveImage(file),
+      },
     });
     const unsubscribe = instance.subscribe((event) => {
       if (event.type === "change") callbacks.current.onChange();

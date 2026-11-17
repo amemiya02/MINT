@@ -1,4 +1,4 @@
-import { invertedEffects } from "@codemirror/commands";
+import { invertedEffects, isolateHistory } from "@codemirror/commands";
 import {
   type EditorState,
   type Extension,
@@ -6,6 +6,7 @@ import {
   StateField,
   Text,
   type Transaction,
+  type TransactionSpec,
 } from "@codemirror/state";
 
 /**
@@ -37,6 +38,37 @@ export interface ParsedFileText {
 }
 
 export function parseFileText(raw: string): ParsedFileText {
+  const { doc, endings } = split(raw);
+  return { doc, extension: lineEndingsField.init(() => endings) };
+}
+
+/**
+ * A transaction that turns the document into `raw` (e.g. the file reloaded
+ * from disk). Only the differing middle part is replaced, so the selection
+ * keeps its place relative to unchanged text; undo brings the old text back.
+ */
+export function replaceFileText(state: EditorState, raw: string): TransactionSpec {
+  const { doc, endings } = split(raw);
+  const from = state.doc.toString();
+  const to = doc.toString();
+  let start = 0;
+  const max = Math.min(from.length, to.length);
+  while (start < max && from.charCodeAt(start) === to.charCodeAt(start)) start++;
+  let end = 0;
+  while (
+    end < max - start &&
+    from.charCodeAt(from.length - 1 - end) === to.charCodeAt(to.length - 1 - end)
+  )
+    end++;
+  return {
+    changes: { from: start, to: from.length - end, insert: to.slice(start, to.length - end) },
+    effects: resetEndings.of(endings),
+    // A reload is its own undo step, never merged with the user's typing.
+    annotations: isolateHistory.of("full"),
+  };
+}
+
+function split(raw: string): { doc: Text; endings: LineEndings } {
   const bom = raw.startsWith(BOM);
   const body = bom ? raw.slice(1) : raw;
   const lines: string[] = [];
@@ -52,7 +84,7 @@ export function parseFileText(raw: string): ParsedFileText {
   const fallback = dominant(breaks);
   const uniform = breaks.every((b) => b === fallback);
   const endings: LineEndings = { bom, fallback, breaks: uniform ? null : breaks };
-  return { doc: Text.of(lines), extension: lineEndingsField.init(() => endings) };
+  return { doc: Text.of(lines), endings };
 }
 
 /** The full file text: what should be written to disk. */
@@ -113,11 +145,14 @@ interface Snapshot {
   readonly breaks: readonly string[];
 }
 const restoreBreaks = StateEffect.define<Snapshot>();
+/** Replaces all line ending information, for a whole-text replacement. */
+const resetEndings = StateEffect.define<LineEndings>();
 let snapshotSeq = 0;
 
 const lineEndingsField: StateField<LineEndings> = StateField.define<LineEndings>({
   create: () => ({ bom: false, fallback: "\n", breaks: null }),
   update(value, tr) {
+    for (const effect of tr.effects) if (effect.is(resetEndings)) return effect.value;
     const restored = earliestSnapshot(tr);
     if (restored && restored.breaks.length === tr.newDoc.lines - 1) {
       return { ...value, breaks: restored.breaks };
@@ -127,6 +162,9 @@ const lineEndingsField: StateField<LineEndings> = StateField.define<LineEndings>
   },
   provide: () =>
     invertedEffects.of((tr) => {
+      if (tr.effects.some((e) => e.is(resetEndings))) {
+        return [resetEndings.of(tr.startState.field(lineEndingsField))];
+      }
       const { breaks } = tr.startState.field(lineEndingsField);
       if (!breaks || !removesLineBreak(tr)) return [];
       return [restoreBreaks.of({ seq: ++snapshotSeq, breaks })];

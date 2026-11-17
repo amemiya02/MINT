@@ -4,6 +4,7 @@ import type { MemoryPlatform, MemoryPlatformOptions } from "../src/platform/memo
 export {
   memoryRecoveryDir as recoveryDir,
   memorySettingsPath as settingsPath,
+  memoryThemesPath as themesPath,
 } from "../src/platform/memory.ts";
 
 // Page functions are serialised into the browser, so they reach the platform through `window`.
@@ -82,6 +83,33 @@ export function openedUrls(page: Page): Promise<readonly string[]> {
   ]);
 }
 
+/** Rename or move a file or directory the way another program would. */
+export function externalRename(page: Page, from: string, to: string): Promise<void> {
+  return page.evaluate(
+    ([f, t]) => (window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.externalRename(f, t),
+    [from, to] as const,
+  );
+}
+
+export interface MenuSnapshot {
+  readonly label: string;
+  readonly items: readonly { id: string; label: string; accelerator: string | null }[];
+}
+
+/** The application menu the shell installed: its command items, per submenu. */
+export function menu(page: Page): Promise<MenuSnapshot[]> {
+  return page.evaluate(() =>
+    (window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.menu.map((m) => ({
+      label: m.label,
+      items: m.items.flatMap((i) =>
+        i.kind === "command"
+          ? [{ id: i.id, label: i.label, accelerator: i.accelerator ?? null }]
+          : [],
+      ),
+    })),
+  );
+}
+
 /**
  * Change a file as another program would. Watchers are notified, so this is how
  * tests edit settings.json behind MINT's back.
@@ -93,9 +121,32 @@ export async function writeFile(page: Page, path: string, text: string): Promise
   );
 }
 
+/** Read a binary file (an asset such as an image) back from the in-memory platform, as bytes. */
+export function readBinaryFile(page: Page, path: string): Promise<number[] | undefined> {
+  return page.evaluate((p) => {
+    const data = (window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.binaryFiles.get(p);
+    return data && [...data];
+  }, path);
+}
+
 /** Every file the in-memory platform holds, keyed by path (documents, settings, recovery area). */
 export function files(page: Page): Promise<Record<string, string>> {
   return page.evaluate(() =>
     Object.fromEntries((window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.files),
   );
+}
+
+/** Activate a native menu item by its command id, as a click in the menu bar would. */
+export async function runMenuItem(page: Page, id: string): Promise<void> {
+  await page.evaluate(
+    (menuId) => (window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.runMenuItem(menuId),
+    id,
+  );
+}
+
+/** Versions MINT has installed (and restarted into) so far. */
+export function updatesInstalled(page: Page): Promise<string[]> {
+  return page.evaluate(() => [
+    ...(window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.updatesInstalled,
+  ]);
 }

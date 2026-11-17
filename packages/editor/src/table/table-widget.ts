@@ -139,10 +139,33 @@ export function runInFocusedTable(view: EditorView, action: TableAction): boolea
   return controller?.run(action);
 }
 
+/** Renders Markdown to HTML the way the export does (dialect included). */
+export type MarkdownToHtml = (markdown: string) => string;
+
+/**
+ * Each cell's content rendered by the export pipeline, so that a table looks
+ * the same in the editor and in the export; null where it can't be matched up.
+ */
+function renderCells(table: Table, toHtml: MarkdownToHtml): (string | null)[][] {
+  const source = [table.rows[0], table.delimiter, ...table.rows.slice(1)]
+    .map((row) => row?.source ?? "")
+    .join("\n");
+  const template = document.createElement("template");
+  template.innerHTML = toHtml(source);
+  const rows = [...template.content.querySelectorAll("table > thead > tr, table > tbody > tr")];
+  return table.rows.map((_, r) => {
+    const cells = rows.length === table.rows.length ? rows[r]?.children : undefined;
+    return Array.from({ length: table.columns }, (_, c) => cells?.[c]?.innerHTML ?? null);
+  });
+}
+
 class TableController {
   readonly dom: HTMLElement;
   private readonly grid: HTMLTableElement;
   private table: Table;
+  private html: (string | null)[][];
+  /** What each cell element shows now, so unchanged cells are not redrawn. */
+  private readonly showing = new WeakMap<HTMLElement, string>();
   /** The cell the toolbar acts on: the focused one, or the last one that had focus. */
   private active: CellAddress = { row: 0, column: 0 };
   private composing = false;
@@ -150,8 +173,10 @@ class TableController {
   constructor(
     private readonly view: EditorView,
     table: Table,
+    private readonly toHtml: MarkdownToHtml,
   ) {
     this.table = table;
+    this.html = renderCells(table, toHtml);
     this.dom = document.createElement("div");
     this.dom.className = "cm-mint-table";
     this.dom.contentEditable = "false";
@@ -161,9 +186,18 @@ class TableController {
     this.render();
     controllers.set(this.dom, this);
 
+    // A cell shows its rendered content, and its Markdown source while it has focus.
     this.dom.addEventListener("focusin", (event) => {
       const address = this.addressOf(event.target);
-      if (address) this.active = address;
+      if (!address) return;
+      this.active = address;
+      const element = this.cellElement(address);
+      if (element && this.showSource(element, address)) this.placeCaret(element, "end");
+    });
+    this.dom.addEventListener("focusout", (event) => {
+      const address = this.addressOf(event.target);
+      const element = address && this.cellElement(address);
+      if (address && element) this.showRendered(element, address);
     });
     this.dom.addEventListener("input", (event) => {
       if (this.composing || (event as InputEvent).isComposing) return;
@@ -207,7 +241,7 @@ class TableController {
     this.grid.replaceChildren();
     const head = this.grid.createTHead();
     const body = this.grid.createTBody();
-    table.rows.forEach((row, r) => {
+    table.rows.forEach((_, r) => {
       const tr = (r === 0 ? head : body).insertRow();
       for (let c = 0; c < table.columns; c++) {
         const td = document.createElement(r === 0 ? "th" : "td");
@@ -218,7 +252,7 @@ class TableController {
         cell.dataset.mintCell = `${r}:${c}`;
         cell.setAttribute("contenteditable", "plaintext-only");
         cell.spellcheck = true;
-        cell.textContent = row.cells[c]?.text ?? "";
+        this.showRendered(cell, { row: r, column: c });
         td.append(cell);
         tr.append(td);
       }
@@ -230,6 +264,7 @@ class TableController {
   update(table: Table) {
     const old = this.table;
     this.table = table;
+    this.html = renderCells(table, this.toHtml);
     const sameShape =
       old.rows.length === table.rows.length &&
       old.columns === table.columns &&
@@ -239,16 +274,41 @@ class TableController {
     for (const element of this.grid.querySelectorAll<HTMLElement>("[data-mint-cell]")) {
       const address = this.addressOf(element);
       if (!address) continue;
-      const text = table.rows[address.row]?.cells[address.column]?.text ?? "";
-      const current = element.textContent ?? "";
-      const isFocused = focused?.row === address.row && focused.column === address.column;
+      if (focused?.row !== address.row || focused.column !== address.column) {
+        this.showRendered(element, address);
+        continue;
+      }
       // The focused cell may hold what the user is typing (say, a trailing
       // space) that the source holds normalized; leave it alone then.
-      if (isFocused ? sanitizeCellText(current) !== text : current !== text) {
-        element.textContent = text;
-        if (isFocused) this.focus(address, "end");
+      const text = this.sourceOf(address);
+      if (sanitizeCellText(element.textContent ?? "") !== text) {
+        this.showSource(element, address, true);
+        this.placeCaret(element, "end");
       }
     }
+  }
+
+  private sourceOf({ row, column }: CellAddress): string {
+    return this.table.rows[row]?.cells[column]?.text ?? "";
+  }
+
+  /** Show the cell's Markdown source; returns whether the content changed. */
+  private showSource(element: HTMLElement, address: CellAddress, force = false): boolean {
+    const text = this.sourceOf(address);
+    const key = `source:${text}`;
+    if (!force && this.showing.get(element) === key) return false;
+    element.textContent = text;
+    this.showing.set(element, key);
+    return true;
+  }
+
+  private showRendered(element: HTMLElement, address: CellAddress) {
+    const html = this.html[address.row]?.[address.column] ?? null;
+    const key = html === null ? `text:${this.sourceOf(address)}` : `html:${html}`;
+    if (this.showing.get(element) === key) return;
+    if (html === null) element.textContent = this.sourceOf(address);
+    else element.innerHTML = html;
+    this.showing.set(element, key);
   }
 
   // -- focus and caret --------------------------------------------------------
@@ -276,6 +336,11 @@ class TableController {
     if (!element) return false;
     this.active = address;
     element.focus();
+    this.placeCaret(element, caret);
+    return true;
+  }
+
+  private placeCaret(element: HTMLElement, caret: "start" | "end" | number) {
     const length = element.textContent?.length ?? 0;
     const offset = caret === "start" ? 0 : caret === "end" ? length : Math.min(caret, length);
     const selection = element.ownerDocument.getSelection();
@@ -288,7 +353,6 @@ class TableController {
       selection.removeAllRanges();
       selection.addRange(range);
     }
-    return true;
   }
 
   /** The caret's offset in the focused cell's text, or null without a collapsed caret. */
@@ -483,6 +547,7 @@ class TableWidget extends WidgetType {
   constructor(
     readonly table: Table,
     readonly source: string,
+    readonly toHtml: MarkdownToHtml,
   ) {
     super();
   }
@@ -492,7 +557,7 @@ class TableWidget extends WidgetType {
   }
 
   toDOM(view: EditorView): HTMLElement {
-    return new TableController(view, this.table).dom;
+    return new TableController(view, this.table, this.toHtml).dom;
   }
 
   override updateDOM(dom: HTMLElement): boolean {
@@ -516,23 +581,34 @@ class TableWidget extends WidgetType {
  * Renders GFM tables as {@link TableWidget}s. Like other block widgets, the
  * table expands to its source while the selection is on one of its lines.
  */
-export const tableRenderer: PreviewRenderer = {
-  nodes: ["Table"],
-  scope: "block",
-  render(node, cx) {
-    const table = tableFromNode(cx.state, node);
-    if (!table) return false;
-    const from = cx.state.doc.lineAt(node.from).from;
-    if (cx.touchesSelectedLines(from, node.to)) return false;
-    const source = cx.state.doc.sliceString(from, node.to);
-    cx.add(
-      from,
-      node.to,
-      Decoration.replace({ widget: new TableWidget(table, source), block: true }),
-    );
-    return false;
-  },
-};
+export function tableRenderer(render: MarkdownToHtml): PreviewRenderer {
+  // Tables are redrawn on every edit; most of them did not change.
+  const cache = new Map<string, string>();
+  const toHtml = (markdown: string) => {
+    let html = cache.get(markdown);
+    if (html === undefined) {
+      html = render(markdown);
+      if (cache.size >= 64) cache.delete(cache.keys().next().value as string);
+      cache.set(markdown, html);
+    }
+    return html;
+  };
+  return {
+    nodes: ["Table"],
+    scope: "block",
+    render(node, cx) {
+      const table = tableFromNode(cx.state, node);
+      if (!table) return false;
+      const from = cx.state.doc.lineAt(node.from).from;
+      // Revealed: the source shows, with whatever renders inside it (e.g. math).
+      if (cx.touchesSelectedLines(from, node.to)) return true;
+      const source = cx.state.doc.sliceString(from, node.to);
+      const widget = new TableWidget(table, source, toHtml);
+      cx.add(from, node.to, Decoration.replace({ widget, block: true }));
+      return false;
+    },
+  };
+}
 
 export const tableTheme = EditorView.baseTheme({
   ".cm-mint-table": {
@@ -544,14 +620,14 @@ export const tableTheme = EditorView.baseTheme({
     borderCollapse: "collapse",
   },
   ".cm-mint-table th, .cm-mint-table td": {
-    border: "1px solid var(--mint-table-border, rgba(127, 127, 127, 0.35))",
+    border: "1px solid var(--mint-border, rgba(127, 127, 127, 0.35))",
     padding: "0",
     minWidth: "3em",
     verticalAlign: "top",
   },
   ".cm-mint-table th": {
     fontWeight: "bold",
-    backgroundColor: "var(--mint-table-header-bg, rgba(127, 127, 127, 0.08))",
+    backgroundColor: "var(--mint-hover, rgba(127, 127, 127, 0.08))",
   },
   ".cm-mint-table-cell": {
     padding: "0.25em 0.6em",
@@ -573,7 +649,7 @@ export const tableTheme = EditorView.baseTheme({
     { visibility: "visible" },
   ".cm-mint-table-toolbar button": {
     font: "inherit",
-    border: "1px solid var(--mint-table-border, rgba(127, 127, 127, 0.35))",
+    border: "1px solid var(--mint-border, rgba(127, 127, 127, 0.35))",
     borderRadius: "3px",
     background: "transparent",
     color: "inherit",

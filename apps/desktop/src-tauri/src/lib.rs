@@ -3,16 +3,20 @@
 //! function that is unit-tested with `cargo test`.
 
 mod app_data;
+mod assets;
 mod folder;
 mod fs;
 mod recovery;
+mod search;
 mod settings;
+mod themes;
+mod updates;
 mod walk;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 
 use serde_json::{Map, Value};
 use tauri::ipc::Channel;
@@ -28,6 +32,17 @@ fn read_text_file(path: PathBuf) -> Result<String, String> {
 #[tauri::command]
 fn write_text_file(path: PathBuf, text: String) -> Result<(), String> {
     fs::write_atomic(&path, text.as_bytes()).map_err(|e| e.to_string())
+}
+
+/// Save a pasted or dropped asset (base64 `data`) under a name that is not
+/// taken yet in `directory`; returns the new file's path.
+#[tauri::command]
+fn save_asset(directory: PathBuf, file_name: String, data: String) -> Result<PathBuf, String> {
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data)
+        .map_err(|e| e.to_string())?;
+    assets::save(&directory, &file_name, &bytes).map_err(|e| e.to_string())
 }
 
 /// Where the settings file lives, plus the watcher that keeps it alive.
@@ -77,6 +92,15 @@ fn delete_recovery_snapshot(
     area.remove(&id).map_err(|e| e.to_string())
 }
 
+/// Whether this copy of MINT can check for and install new versions itself.
+#[tauri::command]
+fn updates_supported(app: tauri::AppHandle) -> bool {
+    updates::supported(
+        app.config().plugins.0.get("updater"),
+        updates::Build::current(),
+    )
+}
+
 /// Event sent to every window with the reloaded `SettingsFile` whenever the file changes on disk.
 const SETTINGS_CHANGED: &str = "settings-changed";
 
@@ -112,7 +136,66 @@ fn list_folder_files(path: PathBuf, extensions: Vec<String>) -> Vec<PathBuf> {
     walk::list_files(&path, &extensions)
 }
 
-/// Live folder watchers, by id. Dropping a watcher stops it.
+/// Running global searches, by id, each with its cancel flag.
+#[derive(Default)]
+struct Searches {
+    next_id: AtomicU32,
+    running: Mutex<HashMap<u32, Arc<AtomicBool>>>,
+}
+
+/// What a running search sends on its channel: each file with matches, then `done`.
+#[derive(Clone, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+enum SearchEvent {
+    File(search::FileMatches),
+    Done(search::SearchSummary),
+}
+
+/// Start searching the documents of a folder in the background. Results stream
+/// on `on_event`; resolves to an id for `cancel_search`. Rejects at once if the
+/// regular expression is invalid.
+#[tauri::command]
+fn search_folder(
+    path: PathBuf,
+    query: search::SearchQuery,
+    extensions: Vec<String>,
+    on_event: Channel<SearchEvent>,
+    searches: State<'_, Searches>,
+) -> Result<u32, String> {
+    let compiled = search::Search::new(&query)?;
+    let id = searches.next_id.fetch_add(1, Ordering::Relaxed);
+    let cancelled = Arc::new(AtomicBool::new(false));
+    searches
+        .running
+        .lock()
+        .map_err(|e| e.to_string())?
+        .insert(id, cancelled.clone());
+    std::thread::spawn(move || {
+        let summary = compiled.run(&path, &extensions, &cancelled, |file| {
+            if on_event.send(SearchEvent::File(file)).is_err() {
+                cancelled.store(true, Ordering::Relaxed);
+            }
+        });
+        let _ = on_event.send(SearchEvent::Done(summary));
+    });
+    Ok(id)
+}
+
+/// Stop a running search; nothing more is sent for it except `done`.
+#[tauri::command]
+fn cancel_search(id: u32, searches: State<'_, Searches>) -> Result<(), String> {
+    if let Some(cancelled) = searches
+        .running
+        .lock()
+        .map_err(|e| e.to_string())?
+        .remove(&id)
+    {
+        cancelled.store(true, Ordering::Relaxed);
+    }
+    Ok(())
+}
+
+/// Live folder and document watchers, by id. Dropping a watcher stops it.
 #[derive(Default)]
 struct Watchers {
     next_id: AtomicU32,
@@ -128,6 +211,27 @@ fn watch_folder(
 ) -> Result<u32, String> {
     let watcher = folder::FolderWatcher::new(&path, move |paths| {
         let _ = on_change.send(paths);
+    })
+    .map_err(|e| e.to_string())?;
+    let id = watchers.next_id.fetch_add(1, Ordering::Relaxed);
+    watchers
+        .active
+        .lock()
+        .map_err(|e| e.to_string())?
+        .insert(id, watcher);
+    Ok(id)
+}
+
+/// Watch one document for changes on disk; `on_change` is signalled after each debounced batch.
+/// Stop with `unwatch_folder`, which ends any watcher by id.
+#[tauri::command]
+fn watch_file(
+    path: PathBuf,
+    on_change: Channel<()>,
+    watchers: State<'_, Watchers>,
+) -> Result<u32, String> {
+    let watcher = folder::FolderWatcher::document(&path, move || {
+        let _ = on_change.send(());
     })
     .map_err(|e| e.to_string())?;
     let id = watchers.next_id.fetch_add(1, Ordering::Relaxed);
@@ -163,13 +267,26 @@ fn write_app_data(app: AppHandle, name: String, text: String) -> Result<(), Stri
     app_data::write(&app_data_dir(&app)?, &name, &text).map_err(|e| e.to_string())
 }
 
+/// The theme folder, created if missing.
+#[tauri::command]
+fn themes_path(app: AppHandle) -> Result<PathBuf, String> {
+    themes::ensure_dir(&app_data_dir(&app)?).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(Watchers::default())
+        .manage(Searches::default())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            #[cfg(desktop)]
+            {
+                app.handle()
+                    .plugin(tauri_plugin_updater::Builder::new().build())?;
+                app.handle().plugin(tauri_plugin_process::init())?;
+            }
             let path = app.path().app_config_dir()?.join(settings::FILE_NAME);
             let handle = app.handle().clone();
             let watcher = settings::watch(path.clone(), move |file| {
@@ -188,22 +305,28 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             read_text_file,
             write_text_file,
+            save_asset,
             settings_path,
             read_settings,
             write_settings,
+            updates_supported,
             read_directory,
             create_file,
             create_directory,
             rename_path,
             move_to_trash,
             list_folder_files,
+            search_folder,
+            cancel_search,
             watch_folder,
+            watch_file,
             unwatch_folder,
             read_app_data,
             write_app_data,
             take_recovery_snapshots,
             write_recovery_snapshot,
-            delete_recovery_snapshot
+            delete_recovery_snapshot,
+            themes_path
         ])
         .run(tauri::generate_context!())
         .expect("error while running MINT");

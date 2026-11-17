@@ -48,3 +48,20 @@ test("the toolbar formats the table, labelled in the UI language", async ({ page
     .poll(() => readFile(page, path))
     .toBe("# T\n\n| a   | bb  |\n| --- | --- |\n| ccc | d   |\n\nend\n");
 });
+
+test("⌘T inserts a table and puts the cursor in its first cell", async ({ page }) => {
+  const path = "/notes/new.md";
+  await launch(page, { files: { [path]: "# T\n" }, openDialogResults: [path], locale: "en-US" });
+  await page.keyboard.press("ControlOrMeta+O");
+  await expect(page.locator(".cm-line").first()).toContainText("T");
+
+  await page.keyboard.press("ControlOrMeta+T");
+  await expect(page.locator('[data-mint-cell="0:0"]')).toBeFocused();
+  await page.keyboard.type("Name");
+  await page.keyboard.press("ControlOrMeta+S");
+  await expect
+    .poll(() => readFile(page, path))
+    .toBe(
+      "# T\n\n| Name   |     |     |\n| --- | --- | --- |\n|     |     |     |\n|     |     |     |\n",
+    );
+});

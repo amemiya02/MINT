@@ -94,20 +94,49 @@ fn is_own_temp_file(path: &Path) -> bool {
         .is_some_and(|n| n.starts_with(".mint-") && n.ends_with(".tmp"))
 }
 
-/// Watches a folder recursively. Bursts of changes are debounced and reported
-/// as one list of changed paths. Dropping the watcher stops it.
+/// Watches a folder recursively, or a single document. Bursts of changes are
+/// debounced and reported together. Dropping the watcher stops it.
 pub struct FolderWatcher {
     _debouncer: Debouncer<RecommendedWatcher, RecommendedCache>,
 }
 
 impl FolderWatcher {
+    /// Watch `dir` recursively; `on_change` gets the changed paths of each batch.
     pub fn new(
         dir: &Path,
         on_change: impl Fn(Vec<PathBuf>) + Send + 'static,
     ) -> notify_debouncer_full::notify::Result<Self> {
+        Self::start(dir, RecursiveMode::Recursive, on_change)
+    }
+
+    /// Watch one document: `on_change` is called when it is written, replaced
+    /// (as editors do by renaming a new file over it), renamed away, created or
+    /// deleted. The parent directory is watched rather than the file itself,
+    /// since a watch on the file would die when it is replaced.
+    pub fn document(
+        path: &Path,
+        on_change: impl Fn() + Send + 'static,
+    ) -> notify_debouncer_full::notify::Result<Self> {
+        let dir = path.parent().unwrap_or(Path::new("/"));
+        let name = path.file_name().map(|n| n.to_os_string());
+        Self::start(dir, RecursiveMode::NonRecursive, move |paths| {
+            if paths
+                .iter()
+                .any(|p| p.file_name().map(|n| n.to_os_string()) == name)
+            {
+                on_change();
+            }
+        })
+    }
+
+    fn start(
+        dir: &Path,
+        mode: RecursiveMode,
+        on_change: impl Fn(Vec<PathBuf>) + Send + 'static,
+    ) -> notify_debouncer_full::notify::Result<Self> {
         let (tx, rx) = mpsc::channel::<DebounceEventResult>();
         let mut debouncer = new_debouncer(Duration::from_millis(200), None, tx)?;
-        debouncer.watch(dir, RecursiveMode::Recursive)?;
+        debouncer.watch(dir, mode)?;
         std::thread::spawn(move || {
             // Ends when the debouncer (and with it the sender) is dropped.
             for result in rx {
@@ -298,5 +327,62 @@ mod tests {
         let names = changed_names(&rx);
         assert!(names.contains(&"doc.md".to_string()));
         assert!(names.iter().all(|n| !n.starts_with(".mint-")), "{names:?}");
+    }
+
+    fn watch_document(path: &Path) -> (FolderWatcher, mpsc::Receiver<()>) {
+        let (tx, rx) = mpsc::channel();
+        let watcher = FolderWatcher::document(path, move || {
+            let _ = tx.send(());
+        })
+        .unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        (watcher, rx)
+    }
+
+    fn reported(rx: &mpsc::Receiver<()>) -> bool {
+        let got = rx.recv_timeout(Duration::from_secs(3)).is_ok();
+        // Drain the rest of the burst.
+        while rx.recv_timeout(Duration::from_millis(500)).is_ok() {}
+        got
+    }
+
+    #[test]
+    fn document_watcher_reports_edits_renames_over_it_and_deletion() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = fs::canonicalize(dir.path()).unwrap();
+        let path = dir.join("doc.md");
+        fs::write(&path, "one").unwrap();
+        let (_watcher, rx) = watch_document(&path);
+
+        fs::write(&path, "two").unwrap();
+        assert!(reported(&rx), "a plain write");
+
+        // Editors that save by renaming a new file over the document.
+        fs::write(dir.join("doc.md.swp"), "three").unwrap();
+        fs::rename(dir.join("doc.md.swp"), &path).unwrap();
+        assert!(reported(&rx), "a rename over the document");
+
+        fs::rename(&path, dir.join("moved.md")).unwrap();
+        assert!(reported(&rx), "a rename away");
+
+        fs::write(&path, "back").unwrap();
+        assert!(reported(&rx), "the document coming back");
+
+        fs::remove_file(&path).unwrap();
+        assert!(reported(&rx), "a deletion");
+    }
+
+    #[test]
+    fn document_watcher_ignores_other_files_and_mints_temporary_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = fs::canonicalize(dir.path()).unwrap();
+        let path = dir.join("doc.md");
+        fs::write(&path, "one").unwrap();
+        let (_watcher, rx) = watch_document(&path);
+
+        fs::write(dir.join("other.md"), "x").unwrap();
+        fs::write(dir.join(".mint-abc.tmp"), "x").unwrap();
+
+        assert!(!reported(&rx));
     }
 }

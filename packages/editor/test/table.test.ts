@@ -58,6 +58,16 @@ describe("table block widget", () => {
     expect(cell(1, 1).closest("td")?.style.textAlign).toBe("right");
   });
 
+  it("renders cell content like the export, and shows a cell's source while it has focus", () => {
+    const { cell } = open("| a |\n|---|\n| **b** `c` |\n\nend");
+    expect(cell(1, 0).querySelector("strong")?.textContent).toBe("b");
+    expect(cell(1, 0).textContent).toBe("b c");
+    cell(1, 0).focus();
+    expect(cell(1, 0).textContent).toBe("**b** `c`");
+    cell(0, 0).focus();
+    expect(cell(1, 0).querySelector("code")?.textContent).toBe("c");
+  });
+
   it("expands to source when the selection enters the table's lines", () => {
     const { editor, parent } = open(sample);
     editor.setSelection({ anchor: sample.indexOf("pear") });
@@ -429,6 +439,13 @@ describe("insert table", () => {
     expect(focusedCell()).toBe("0:0");
     typeInto(cell(0, 0), "Name");
     expect(editor.getText()).toBe(`Hello\n\n${empty3x2.replace("|     |", "| Name |")}\n\nworld`);
+  });
+
+  it("keeps the focus in the new table's cell when the host refocuses the editor", () => {
+    const { editor } = open("Hello");
+    editor.execute("insertTable");
+    editor.focus();
+    expect(focusedCell()).toBe("0:0");
   });
 
   it("uses an empty line as it is, keeping blank lines around the table", () => {
