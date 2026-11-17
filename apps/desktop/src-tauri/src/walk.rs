@@ -21,16 +21,24 @@ pub fn walker(root: &Path) -> Walk {
 
 /// Every file under `root` (see [`walker`]) whose extension is one of
 /// `extensions` (case-insensitive, without the dot), or every file when
-/// `extensions` is empty. Sorted by path. Unreadable entries are skipped.
+/// `extensions` is empty. Sorted by path. Unreadable entries are skipped, and
+/// the reason is logged.
 pub fn list_files(root: &Path, extensions: &[String]) -> Vec<PathBuf> {
     let mut files: Vec<PathBuf> = walker(root)
-        .filter_map(Result::ok)
+        .filter_map(readable)
         .filter(|entry| entry.file_type().is_some_and(|t| t.is_file()))
         .map(ignore::DirEntry::into_path)
         .filter(|path| extensions.is_empty() || has_extension(path, extensions))
         .collect();
     files.sort();
     files
+}
+
+/// The entry, or `None` (with the reason logged) if it cannot be read.
+fn readable(entry: Result<ignore::DirEntry, ignore::Error>) -> Option<ignore::DirEntry> {
+    entry
+        .inspect_err(|e| eprintln!("MINT: skipping an unreadable entry: {e}"))
+        .ok()
 }
 
 fn has_extension(path: &Path, extensions: &[String]) -> bool {

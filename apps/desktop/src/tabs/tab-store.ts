@@ -41,7 +41,9 @@ export interface TabsState {
 
 export type TabError =
   | { readonly kind: "open"; readonly path: string; readonly reason: string }
-  | { readonly kind: "save"; readonly path: string; readonly reason: string };
+  | { readonly kind: "save"; readonly path: string; readonly reason: string }
+  /** The document cannot be watched: changes other programs make to it go unnoticed. */
+  | { readonly kind: "watch"; readonly path: string; readonly reason: string };
 
 /** What the user wants to do with unsaved changes when a tab closes. */
 export type UnsavedChoice = "save" | "discard" | "cancel";
@@ -170,7 +172,13 @@ export function createTabStore({ platform, askUnsaved }: TabStoreOptions): TabSt
     unwatch(id);
     unwatchers.set(
       id,
-      platform.watchFile(path, () => void checkDisk(id)).catch(() => () => {}),
+      platform
+        .watchFile(path, () => void checkDisk(id))
+        .catch((e: unknown) => {
+          // The tab still works, but the user must know changes on disk go unnoticed.
+          set({ error: { kind: "watch", path, reason: reasonOf(e) } });
+          return () => {};
+        }),
     );
   }
 
@@ -300,7 +308,10 @@ export function createTabStore({ platform, askUnsaved }: TabStoreOptions): TabSt
           if (!diskTexts.has(id) && state.tabs.some((t) => t.id === id))
             diskTexts.set(id, diskText);
         })
-        .catch(() => {});
+        .catch((e: unknown) => {
+          // Without a baseline, the next change on disk is compared with nothing and reported as a conflict.
+          console.warn(`MINT: cannot read ${path} to compare it with the restored text`, e);
+        });
       return tab.id;
     },
 

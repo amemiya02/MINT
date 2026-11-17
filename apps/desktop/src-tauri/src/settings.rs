@@ -6,13 +6,11 @@
 
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
-use notify_debouncer_full::notify::RecursiveMode;
-use notify_debouncer_full::{new_debouncer, DebounceEventResult, Debouncer, RecommendedCache};
 use serde::Serialize;
 use serde_json::{Map, Value};
 
+use crate::folder::FolderWatcher;
 use crate::fs;
 
 pub const FILE_NAME: &str = "settings.json";
@@ -62,50 +60,22 @@ pub fn save(path: &Path, values: &Map<String, Value>) -> io::Result<()> {
 }
 
 /// Watches the settings file; dropping it stops watching.
-pub struct SettingsWatcher {
-    _debouncer: Debouncer<notify_debouncer_full::notify::RecommendedWatcher, RecommendedCache>,
-}
+pub type SettingsWatcher = FolderWatcher;
 
 /// Call `on_change` with the reloaded file whenever `path` is created, changed,
-/// replaced (as editors do with an atomic rename) or removed.
-///
-/// The parent directory is watched rather than the file itself, since a watch on
-/// the file would die when an editor renames a new file over it.
+/// replaced (as editors do with an atomic rename) or removed. It is watched like
+/// any document (see [`FolderWatcher::document`]); its directory is created first
+/// so the watch can start before the file exists.
 pub fn watch(
     path: PathBuf,
     on_change: impl Fn(SettingsFile) + Send + 'static,
 ) -> io::Result<SettingsWatcher> {
     let dir = path
         .parent()
-        .map(Path::to_path_buf)
         .ok_or_else(|| io::Error::other("the settings path has no directory"))?;
-    std::fs::create_dir_all(&dir)?;
-    let name = path.file_name().map(|n| n.to_os_string());
+    std::fs::create_dir_all(dir)?;
     let watched = path.clone();
-
-    let mut debouncer = new_debouncer(
-        Duration::from_millis(100),
-        None,
-        move |result: DebounceEventResult| {
-            let Ok(events) = result else { return };
-            let touches_file = events.iter().any(|event| {
-                event
-                    .paths
-                    .iter()
-                    .any(|p| p.file_name().map(|n| n.to_os_string()) == name)
-            });
-            if touches_file {
-                on_change(load(&watched));
-            }
-        },
-    )
-    .map_err(io::Error::other)?;
-    debouncer
-        .watch(&dir, RecursiveMode::NonRecursive)
-        .map_err(io::Error::other)?;
-    Ok(SettingsWatcher {
-        _debouncer: debouncer,
-    })
+    FolderWatcher::document(&path, move || on_change(load(&watched))).map_err(io::Error::other)
 }
 
 #[cfg(test)]
@@ -113,6 +83,7 @@ mod tests {
     use super::*;
     use serde_json::json;
     use std::sync::mpsc;
+    use std::time::Duration;
 
     fn object(value: Value) -> Map<String, Value> {
         match value {

@@ -5,6 +5,7 @@ import type {
   LineMatch,
   MenuItemSpec,
   MenuSpec,
+  OpenedPath,
   Platform,
   RecoverySnapshot,
   SettingsFile,
@@ -41,8 +42,12 @@ export interface MemoryPlatformOptions {
   /** Answers the question dialog gives, in order; once used up it answers `cancel`. */
   readonly questionDialogResults?: readonly ("yes" | "no" | "cancel")[];
   readonly locale?: string;
-  /** Text on the system clipboard. */
-  readonly clipboardText?: string;
+  /** Text on the system clipboard; `null` means it holds no text (reading it fails). */
+  readonly clipboardText?: string | null;
+  /** Documents and folders handed to MINT from outside before the window started (file association, command line). */
+  readonly openedPaths?: readonly OpenedPath[];
+  /** Documents that cannot be watched for changes on disk (`watchFile` rejects). */
+  readonly unwatchablePaths?: readonly string[];
   /**
    * What the release server answers: a newer version (optionally failing to
    * install), a failing check, or `"unavailable"` for builds that cannot update.
@@ -73,8 +78,10 @@ export interface MemoryPlatform extends Platform {
   externalRemove(path: string): void;
   /** URLs passed to `openExternal`, in order. */
   readonly openedUrls: readonly string[];
-  /** Put text on the system clipboard, as another program would. */
-  setClipboardText(text: string): void;
+  /** Put text on the system clipboard, as another program would; `null` puts something that is not text. */
+  setClipboardText(text: string | null): void;
+  /** Hand documents or folders to MINT from outside, as a double-click in the file manager would. */
+  openFromOutside(paths: readonly OpenedPath[]): void;
   /** Rename or move a file or directory as another program would (watchers are notified). */
   externalRename(from: string, to: string): void;
   /** Messages of the question dialogs shown so far. */
@@ -125,8 +132,19 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
   const openedUrls: string[] = [];
   let closeHandler: (() => Promise<boolean>) | null = null;
   let closed = false;
-  let clipboardText = options.clipboardText ?? "";
+  let clipboardText: string | null =
+    options.clipboardText === undefined ? "" : options.clipboardText;
   const settingsListeners = new Set<(file: SettingsFile) => void>();
+  let pendingOpens: OpenedPath[] = [...(options.openedPaths ?? [])];
+  const openListeners = new Set<(paths: readonly OpenedPath[]) => void>();
+  /** Like the backend, waiting paths go to one listener, which takes them all. */
+  function deliverOpens() {
+    const [listener] = openListeners;
+    if (!listener || pendingOpens.length === 0) return;
+    const paths = pendingOpens;
+    pendingOpens = [];
+    listener(paths);
+  }
   const recoveryPath = (id: string) => {
     if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error(`Invalid recovery snapshot id: ${id}`);
     return `${memoryRecoveryDir}/${id}.json`;
@@ -379,6 +397,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       return () => watchers.delete(watcher);
     },
     async watchFile(path, onChange) {
+      if (options.unwatchablePaths?.includes(path)) throw new Error("too many open files");
       const watcher = { path, onChange };
       fileWatchers.add(watcher);
       return () => fileWatchers.delete(watcher);
@@ -390,6 +409,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       appData.set(name, text);
     },
     async readClipboardText() {
+      if (clipboardText === null) throw new Error("The clipboard holds no text");
       return clipboardText;
     },
     setClipboardText(text) {
@@ -437,6 +457,15 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     async writeSettings(values) {
       files.set(memorySettingsPath, `${JSON.stringify(values, null, 2)}\n`);
       notifySettings();
+    },
+    onOpenPaths(listener) {
+      openListeners.add(listener);
+      setTimeout(deliverOpens);
+      return () => openListeners.delete(listener);
+    },
+    openFromOutside(paths) {
+      pendingOpens.push(...paths);
+      setTimeout(deliverOpens);
     },
     onSettingsChanged(listener) {
       settingsListeners.add(listener);

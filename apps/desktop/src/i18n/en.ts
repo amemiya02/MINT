@@ -17,6 +17,8 @@ export const en = {
 
   "command.file.open": "Open…",
   "command.file.save": "Save",
+  "command.file.new": "New",
+  "command.file.saveAs": "Save As…",
   "command.file.exportHtml": "Export as HTML…",
   "command.file.exportPdf": "Export as PDF…",
   "command.file.openFolder": "Open Folder…",
@@ -185,6 +187,8 @@ export const en = {
   "dialog.open.title": "Open Document",
   "dialog.filter.markdown": "Markdown",
   "dialog.openFolder.title": "Open Folder",
+  "dialog.saveAs.title": "Save As",
+  "dialog.saveAs.defaultName": "Untitled.md",
 
   "welcome.title": "No document open",
   "welcome.body": "Open a Markdown document to start writing.",
@@ -231,10 +235,15 @@ export const en = {
   "error.rename": "Could not rename to {name}: {reason}",
   "error.trash": "Could not move {name} to the trash: {reason}",
   "error.saveImage": "Could not save the image {name} in {folder}: {reason}",
+  "error.pastePlainText": "Could not paste as plain text: {reason}",
+  "error.watch": "Changes other programs make to {path} will not be detected: {reason}",
+  "error.untitledImage": "save the document first, then add images to it",
   "error.dismiss": "Dismiss",
 
   "tabs.label": "Open documents",
   "tabs.close": "Close {name}",
+  "tabs.untitled": "Untitled",
+  "tabs.untitledNumbered": "Untitled {number}",
 
   "unsaved.title": "Unsaved Changes",
   "unsaved.message":

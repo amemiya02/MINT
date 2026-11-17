@@ -64,6 +64,28 @@ packaging/               Homebrew cask and winget manifest templates (see Distri
   with `useSettings().settings.<key>`. The Rust side only reads, writes and
   watches the file and never needs to change.
 
+## Security and privacy
+
+- **Granted roots.** The Rust file commands only touch paths inside a root the
+  user granted: the folder of a document picked in an open or save dialog
+  (the dialogs run in Rust, `show_*_dialog`), a folder the user opened, a path
+  handed over by the file manager or the command line, settings.json and the
+  theme folder. Paths are compared after resolving symbolic links and `..`.
+  Grants are remembered in `access/granted-roots.json` in the app data
+  directory (outside every root), so the recent list and the recovery area
+  keep working after a restart. See `src-tauri/src/grants.rs`. The asset
+  protocol's scope starts empty and grows with the same roots. Consequence: an
+  image or asset folder outside the opened documents' folders does not load.
+- **HTML from documents.** Whatever goes into the app's DOM from a document
+  is sanitized (`renderHtml` in `packages/markdown`: GitHub's schema plus
+  MINT's own elements; ids get a `user-content-` prefix). An exported HTML file
+  keeps the HTML written in the document, minus `<script>`, `on…` handlers and
+  `javascript:` URLs (`renderExportHtml`).
+- **Remote images (privacy).** Documents may show images from `http(s)` URLs,
+  as ticket #5 requires, so opening a document can make requests to the servers
+  those images live on (revealing your IP address and when you read it). The
+  CSP keeps `img-src https: http:` for this; nothing else is loaded remotely.
+
 ## Tests
 
 Tests only go through three seams, and assert behaviour visible at that seam,

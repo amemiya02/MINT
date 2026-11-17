@@ -128,8 +128,8 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   const sidebarShown = sidebarVisible && (folder !== null || sidebarView === "outline");
   // Editors attach after their tab mounts; re-render so the outline finds the active one.
   const [, editorsChanged] = useReducer((n: number) => n + 1, 0);
-  /** Errors from folder actions; document errors live in the tab store. */
-  const [folderError, setFolderError] = useState<string | null>(null);
+  /** Errors from folder actions and other shell commands; document errors live in the tab store. */
+  const [shellError, setShellError] = useState<string | null>(null);
   const { recent, add: addRecent } = useRecent(platform);
 
   // Every document shown in this window, however it was opened, counts as recent.
@@ -137,7 +137,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   useEffect(() => {
     if (activePath === null) return;
     addRecent("document", activePath);
-    setFolderError(null);
+    setShellError(null);
   }, [activePath, addRecent]);
 
   const openFolder = useCallback(
@@ -145,12 +145,12 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
       try {
         await platform.readDirectory(path);
       } catch (e) {
-        setFolderError(t("error.openFolder", { path, reason: reasonOf(e) }));
+        setShellError(t("error.openFolder", { path, reason: reasonOf(e) }));
         return;
       }
       setFolder(path);
       setSidebarVisible(true);
-      setFolderError(null);
+      setShellError(null);
       addRecent("folder", path);
     },
     [platform, t, addRecent],
@@ -173,6 +173,20 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     });
     if (path) await store.openDocument(path);
   }, [platform, store, t]);
+
+  // Documents and folders handed over from outside (file manager, command line, a second launch).
+  const openFolderRef = useRef(openFolder);
+  openFolderRef.current = openFolder;
+  useEffect(
+    () =>
+      platform.onOpenPaths((paths) => {
+        for (const { path, kind } of paths) {
+          if (kind === "directory") void openFolderRef.current(path);
+          else void store.openDocument(path);
+        }
+      }),
+    [platform, store],
+  );
 
   const [find, setFind] = useState<{ mode: FindMode; request: number } | null>(null);
   /** While global search shows (in place of the file tree), how many times it was invoked. */
@@ -203,10 +217,13 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     "edit.pastePlainText": () => {
       const editor = activeId === null ? undefined : store.editor(activeId);
       if (!editor) return;
-      void platform.readClipboardText().then((text) => {
-        if (text) editor.execute("pastePlainText", text);
-        editor.focus();
-      });
+      void platform.readClipboardText().then(
+        (text) => {
+          if (text) editor.execute("pastePlainText", text);
+          editor.focus();
+        },
+        (e: unknown) => setShellError(t("error.pastePlainText", { reason: reasonOf(e) })),
+      );
     },
     "edit.toggleSpellcheck": () =>
       void settings.set("spellcheck", !settings.getSnapshot().settings.spellcheck),
@@ -286,12 +303,12 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
       <UpdateNotice updates={updates} />
       <SettingsIssues />
       <ThemeIssue />
-      {(folderError || error) && (
+      {(shellError || error) && (
         <div
           role="alert"
           className="border-b border-(--mint-border) bg-(--mint-error-bg) px-4 py-2 text-sm text-(--mint-error-fg)"
         >
-          {folderError ?? (error && errorMessage(t, error))}
+          {shellError ?? (error && errorMessage(t, error))}
         </div>
       )}
       <div className="flex min-h-0 flex-1">
@@ -318,7 +335,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
             onOpenDocument={(path) => void store.openDocument(path)}
             onRenamed={(from, to) => store.pathRenamed(from, to)}
             onTrashed={(path) => store.pathTrashed(path)}
-            onError={setFolderError}
+            onError={setShellError}
             onHide={() => setSidebarVisible(false)}
           />
         )}
@@ -528,7 +545,7 @@ function ImageSaveNotice(props: {
 
 function errorMessage(t: Translate, error: TabError): string {
   const params = { path: error.path, reason: error.reason };
-  return error.kind === "open" ? t("error.open", params) : t("error.save", params);
+  return t(`error.${error.kind}`, params);
 }
 
 function Welcome(props: {
