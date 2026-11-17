@@ -121,10 +121,21 @@ export const commands = [
     group: "blocks",
     editor: ["insertCodeBlock"],
   },
-  // Further editor commands only need an entry here once the editor core has
-  // them. Insert table (⌘T, #9) goes in the "blocks" group:
-  //   { id: "paragraph.table", title: "command.paragraph.table", accelerator: "CmdOrCtrl+T",
-  //     menu: "paragraph", group: "blocks", editor: ["insertTable"] },
+  {
+    id: "paragraph.table",
+    title: "command.paragraph.table",
+    accelerator: "CmdOrCtrl+T",
+    menu: "paragraph",
+    group: "blocks",
+    editor: ["insertTable"],
+  },
+  {
+    id: "paragraph.formatTable",
+    title: "command.paragraph.formatTable",
+    menu: "paragraph",
+    group: "table",
+    editor: ["formatTable"],
+  },
 
   {
     id: "format.bold",
@@ -158,6 +169,14 @@ export const commands = [
     id: "view.toggleSidebar",
     title: "command.view.toggleSidebar",
     accelerator: "CmdOrCtrl+Shift+L",
+    menu: "view",
+    group: "layout",
+  },
+  // Typora's outline shortcut: ⌃⌘1 on macOS, Ctrl+Shift+1 elsewhere.
+  {
+    id: "view.outline",
+    title: "command.view.outline",
+    accelerator: isMac ? "Cmd+Ctrl+1" : "Ctrl+Shift+1",
     menu: "view",
     group: "layout",
   },

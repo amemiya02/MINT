@@ -5,6 +5,7 @@
 import { defaultDialect } from "@mint/markdown";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createEditor, type EditorOptions, type MintEditor, renderMermaid } from "../src/index.ts";
+import { finishParsing } from "./parsed.ts";
 
 const mermaid = vi.hoisted(() => ({
   initialize: vi.fn(),
@@ -21,6 +22,9 @@ function open(text: string, options: Partial<EditorOptions> = {}) {
   document.body.append(parent);
   const editor = createEditor({ parent, text, ...options });
   mounted.push({ editor, parent });
+  // Don't race the background parse on a loaded machine (the next transaction applies it).
+  finishParsing(parent);
+  editor.setSelection(editor.getSelection());
   const diagrams = () => [...parent.querySelectorAll(".cm-mint-mermaid")];
   const shown = () =>
     [...parent.querySelectorAll(".cm-line")].map((line) => line.textContent).join("\n");
