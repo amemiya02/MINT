@@ -56,6 +56,24 @@ export const settingsSchema = {
     max: 2400,
     step: 20,
   }),
+  /** Where pasted and dropped images are saved (the asset folder). */
+  assetFolder: choice({
+    label: "settings.assetFolder",
+    default: "assets",
+    options: [
+      { value: "document", label: "settings.assetFolder.document" },
+      { value: "assets", label: "settings.assetFolder.assets" },
+      { value: "documentName", label: "settings.assetFolder.documentName" },
+      { value: "custom", label: "settings.assetFolder.custom" },
+    ],
+  }),
+  /** The asset folder when `assetFolder` is `custom`: relative to the document's folder, or absolute. */
+  assetFolderPath: text({
+    label: "settings.assetFolderPath",
+    default: "",
+    maxLength: 1000,
+    placeholder: "settings.assetFolderPath.placeholder",
+  }),
 } as const satisfies Record<string, SettingDefinition>;
 
 export type SettingKey = keyof typeof settingsSchema;

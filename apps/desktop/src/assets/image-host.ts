@@ -1,25 +1,66 @@
 import type { HostAdapter, ImageFile } from "@mint/editor";
 import type { Platform } from "../platform/platform.ts";
-import { resolveFrom } from "../tabs/paths.ts";
+import type { Settings } from "../settings/schema.ts";
+import { baseName, resolveFrom } from "../tabs/paths.ts";
 import { joinPath, parentPath } from "../workspace/paths.ts";
 
 /** The part of the editor's host adapter that deals with images. */
 export type ImageHost = Required<Pick<HostAdapter, "resolveImageUrl" | "saveImage">>;
 
+/** Where pasted and dropped images go: the `assetFolder` and `assetFolderPath` settings. */
+export type AssetFolderPolicy = Pick<Settings, "assetFolder" | "assetFolderPath">;
+
 /**
  * The asset folder of a document: where pasted and dropped images are saved.
- * For now always `assets/` next to the document.
+ * - `document`: the document's own folder;
+ * - `assets`: `assets/` next to the document;
+ * - `documentName`: `<document name>.assets/` next to the document (`notes.md` → `notes.assets/`);
+ * - `custom`: `assetFolderPath`, relative to the document's folder or absolute
+ *   (empty means the document's folder).
  */
-export function assetFolderFor(documentPath: string): string {
-  return joinPath(parentPath(documentPath), "assets");
+export function assetFolderFor(documentPath: string, policy: AssetFolderPolicy): string {
+  const folder = parentPath(documentPath);
+  switch (policy.assetFolder) {
+    case "document":
+      return folder;
+    case "assets":
+      return joinPath(folder, "assets");
+    case "documentName": {
+      const name = baseName(documentPath);
+      const dot = name.lastIndexOf(".");
+      return joinPath(folder, `${dot > 0 ? name.slice(0, dot) : name}.assets`);
+    }
+    case "custom": {
+      const path = policy.assetFolderPath.trim();
+      const resolved = resolveFrom(documentPath, path === "" ? "." : path);
+      // Absolute paths come back as written: drop a trailing separator, but keep a bare root.
+      return /^([a-z]:)?[\\/]$/i.test(resolved) ? resolved : resolved.replace(/[\\/]+$/, "");
+    }
+  }
+}
+
+/** An image that could not be saved, for the host to tell the user about. */
+export interface ImageSaveFailure {
+  /** The image's file name as pasted or dropped. */
+  readonly name: string;
+  /** The asset folder it was to be saved in. */
+  readonly folder: string;
+  readonly reason: string;
 }
 
 /**
  * Images for the document at `documentPath()` (read on every call, so a
  * renamed document keeps working): local paths resolve against the
- * document's folder, and saved images go to its asset folder.
+ * document's folder, and saved images go to its asset folder as `policy()`
+ * says at the time of saving. A failed save is passed to `onSaveFailed`, and
+ * the editor skips that image.
  */
-export function createImageHost(platform: Platform, documentPath: () => string): ImageHost {
+export function createImageHost(
+  platform: Platform,
+  documentPath: () => string,
+  policy: () => AssetFolderPolicy,
+  onSaveFailed: (failure: ImageSaveFailure) => void,
+): ImageHost {
   return {
     resolveImageUrl(path) {
       const local = fileUrlPath(path) ?? path;
@@ -27,8 +68,18 @@ export function createImageHost(platform: Platform, documentPath: () => string):
     },
     async saveImage(file) {
       const document = documentPath();
-      const saved = await platform.saveAsset(assetFolderFor(document), assetName(file), file.data);
-      return relativePath(parentPath(document), saved);
+      const folder = assetFolderFor(document, policy());
+      try {
+        const saved = await platform.saveAsset(folder, assetName(file), file.data);
+        return relativePath(parentPath(document), saved);
+      } catch (e) {
+        onSaveFailed({
+          name: file.name,
+          folder,
+          reason: e instanceof Error ? e.message : String(e),
+        });
+        throw e;
+      }
     },
   };
 }
