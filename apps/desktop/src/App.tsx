@@ -1,8 +1,9 @@
-import type { MintEditor } from "@mint/editor";
+import type { EditorMode, LinkTarget, MintEditor } from "@mint/editor";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { buildMenu, type CommandId } from "./commands.ts";
 import { EditorPane } from "./EditorPane.tsx";
 import { useT } from "./i18n/index.ts";
+import { resolveFrom } from "./paths.ts";
 import type { Platform } from "./platform/platform.ts";
 
 interface OpenDocument {
@@ -20,24 +21,39 @@ export function App({ platform }: { readonly platform: Platform }) {
   const [document, setDocument] = useState<OpenDocument | null>(null);
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mode, setMode] = useState<EditorMode>("livePreview");
   const editor = useRef<MintEditor | null>(null);
   const version = useRef(0);
+
+  const openPath = useCallback(
+    async (path: string) => {
+      try {
+        const text = await platform.readTextFile(path);
+        setDocument({ path, text, session: nextSession++ });
+        setDirty(false);
+        setError(null);
+      } catch (e) {
+        setError(t("error.open", { path, reason: reasonOf(e) }));
+      }
+    },
+    [platform, t],
+  );
 
   const openDocument = useCallback(async () => {
     const path = await platform.showOpenDialog({
       title: t("dialog.open.title"),
       filters: [{ name: t("dialog.filter.markdown"), extensions: ["md", "markdown"] }],
     });
-    if (!path) return;
-    try {
-      const text = await platform.readTextFile(path);
-      setDocument({ path, text, session: nextSession++ });
-      setDirty(false);
-      setError(null);
-    } catch (e) {
-      setError(t("error.open", { path, reason: reasonOf(e) }));
-    }
-  }, [platform, t]);
+    if (path) await openPath(path);
+  }, [platform, t, openPath]);
+
+  const onOpenLink = useCallback(
+    (link: LinkTarget) => {
+      if (link.kind === "external") void platform.openExternal(link.url);
+      else if (document) void openPath(resolveFrom(document.path, link.path));
+    },
+    [document, platform, openPath],
+  );
 
   const saveDocument = useCallback(async () => {
     if (!document || !editor.current) return;
@@ -55,6 +71,9 @@ export function App({ platform }: { readonly platform: Platform }) {
   handlers.current = {
     "file.open": () => void openDocument(),
     "file.save": () => void saveDocument(),
+    "view.toggleSourceMode": () => {
+      editor.current?.execute("toggleSourceMode");
+    },
   };
 
   useEffect(() => {
@@ -75,6 +94,10 @@ export function App({ platform }: { readonly platform: Platform }) {
   }, []);
   const onReady = useCallback((instance: MintEditor | null) => {
     editor.current = instance;
+    if (instance) setMode(instance.getMode());
+  }, []);
+  const onModeChange = useCallback(() => {
+    if (editor.current) setMode(editor.current.getMode());
   }, []);
 
   return (
@@ -94,6 +117,8 @@ export function App({ platform }: { readonly platform: Platform }) {
             text={document.text}
             onReady={onReady}
             onChange={onChange}
+            onModeChange={onModeChange}
+            onOpenLink={onOpenLink}
           />
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
@@ -112,7 +137,10 @@ export function App({ platform }: { readonly platform: Platform }) {
       {document && (
         <footer className="flex items-center justify-between border-t border-(--mint-border) px-4 py-1 text-xs text-(--mint-muted)">
           <span title={document.path}>{name}</span>
-          <span>{t(dirty ? "status.unsaved" : "status.saved")}</span>
+          <span className="flex gap-4">
+            <span>{t(mode === "source" ? "status.mode.source" : "status.mode.livePreview")}</span>
+            <span>{t(dirty ? "status.unsaved" : "status.saved")}</span>
+          </span>
         </footer>
       )}
     </div>

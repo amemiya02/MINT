@@ -22,6 +22,9 @@ export interface Platform {
   /** Ask the user to pick a document. Resolves to its path, or `null` if cancelled. */
   showOpenDialog(options: OpenDialogOptions): Promise<string | null>;
 
+  /** Open a URL (`https:`, `mailto:`, ...) in the user's default browser or handler. */
+  openExternal(url: string): Promise<void>;
+
   setWindowTitle(title: string): Promise<void>;
 
   /** Install the application menu. Item accelerators are active shortcuts. */

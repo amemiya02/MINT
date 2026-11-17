@@ -7,6 +7,7 @@ export const en = {
   "menu.app": "MINT",
   "menu.file": "File",
   "menu.edit": "Edit",
+  "menu.view": "View",
   "menu.quit": "Quit MINT",
   "menu.cut": "Cut",
   "menu.copy": "Copy",
@@ -15,6 +16,7 @@ export const en = {
 
   "command.file.open": "Open…",
   "command.file.save": "Save",
+  "command.view.toggleSourceMode": "Toggle Source Mode",
 
   "dialog.open.title": "Open Document",
   "dialog.filter.markdown": "Markdown",
@@ -25,6 +27,8 @@ export const en = {
 
   "status.saved": "Saved",
   "status.unsaved": "Unsaved changes",
+  "status.mode.livePreview": "Live Preview",
+  "status.mode.source": "Source Mode",
 
   "error.open": "Could not open {path}: {reason}",
   "error.save": "Could not save {path}: {reason}",

@@ -8,6 +8,7 @@ import {
 } from "@tauri-apps/api/menu";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import type { MenuItemSpec, Platform } from "./platform.ts";
 
 const nativeItems = {
@@ -33,6 +34,7 @@ export function createTauriPlatform(): Platform {
       });
       return picked ?? null;
     },
+    openExternal: (url) => openUrl(url),
     setWindowTitle: (title) => getCurrentWindow().setTitle(title),
     async setMenu(menu) {
       const submenus = await Promise.all(

@@ -6,7 +6,7 @@ import type { MenuSpec } from "./platform/platform.ts";
  * an i18n title and an optional default shortcut; the native menu (and later
  * the command palette and shortcut overrides) are derived from this list.
  */
-export type CommandId = "file.open" | "file.save";
+export type CommandId = "file.open" | "file.save" | "view.toggleSourceMode";
 
 export interface Command {
   readonly id: CommandId;
@@ -18,6 +18,11 @@ export interface Command {
 export const commands: readonly Command[] = [
   { id: "file.open", title: "command.file.open", accelerator: "CmdOrCtrl+O" },
   { id: "file.save", title: "command.file.save", accelerator: "CmdOrCtrl+S" },
+  {
+    id: "view.toggleSourceMode",
+    title: "command.view.toggleSourceMode",
+    accelerator: "CmdOrCtrl+/",
+  },
 ];
 
 export function buildMenu(t: Translate, run: (id: CommandId) => void): MenuSpec[] {
@@ -45,5 +50,6 @@ export function buildMenu(t: Translate, run: (id: CommandId) => void): MenuSpec[
         { kind: "native", action: "selectAll", label: t("menu.selectAll") },
       ],
     },
+    { label: t("menu.view"), items: [item("view.toggleSourceMode")] },
   ];
 }

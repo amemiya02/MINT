@@ -13,6 +13,8 @@ export interface MemoryPlatform extends Platform {
   /** Current file contents, keyed by path. */
   readonly files: Map<string, string>;
   readonly windowTitle: string;
+  /** URLs passed to `openExternal`, in order. */
+  readonly openedUrls: readonly string[];
   /** Activate a menu item by id, as a click in a native menu would. */
   runMenuItem(id: string): void;
 }
@@ -22,6 +24,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
   const dialogResults = [...(options.openDialogResults ?? [])];
   let commands: Extract<MenuItemSpec, { kind: "command" }>[] = [];
   let windowTitle = "";
+  const openedUrls: string[] = [];
 
   // Without a native menu, accelerators are handled in the page.
   window.addEventListener("keydown", (event) => {
@@ -34,6 +37,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
   return {
     locale: options.locale ?? navigator.language,
     files,
+    openedUrls,
     get windowTitle() {
       return windowTitle;
     },
@@ -47,6 +51,9 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     },
     async showOpenDialog() {
       return dialogResults.shift() ?? null;
+    },
+    async openExternal(url) {
+      openedUrls.push(url);
     },
     async setWindowTitle(title) {
       windowTitle = title;
