@@ -4,6 +4,7 @@ import { launch, menu, readFile } from "./memory-platform.ts";
 const palette = (page: Page) => page.getByRole("dialog", { name: "Command Palette" });
 const search = (page: Page) => palette(page).getByRole("combobox");
 const results = (page: Page) => palette(page).getByRole("option");
+const statusBar = (page: Page) => page.getByRole("contentinfo");
 
 async function openDocument(page: Page, text: string, locale = "en-US", primary = "ControlOrMeta") {
   const path = "/notes/doc.md";
@@ -35,7 +36,7 @@ test("⌘⇧P fuzzy-searches commands by name, shows their shortcuts and runs th
 
   await search(page).press("Enter");
   await expect(palette(page)).toBeHidden();
-  await expect(page.getByText("Source Mode")).toBeVisible();
+  await expect(statusBar(page).getByText("Source Mode", { exact: true })).toBeVisible();
   await expect(page.locator(".cm-content")).toBeFocused();
 });
 
@@ -45,7 +46,7 @@ test("Escape closes the palette without running anything", async ({ page }) => {
   await search(page).fill("source");
   await page.keyboard.press("Escape");
   await expect(palette(page)).toBeHidden();
-  await expect(page.getByText("Live Preview")).toBeVisible();
+  await expect(statusBar(page).getByText("Live Preview", { exact: true })).toBeVisible();
 });
 
 test("runs editor commands from the palette on the active document", async ({ page }) => {

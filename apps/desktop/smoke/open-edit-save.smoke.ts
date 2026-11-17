@@ -92,6 +92,13 @@ test("a document opened from the command line can be edited and saved", async ()
   const saved = await until("the document to be saved", async () => {
     const text = await readFile(document, "utf8");
     return text.includes("second line") ? text : null;
+  }).catch(async (e: unknown) => {
+    // What the window shows says whether the edit or the save went missing.
+    const page = await command<string>("POST", `/session/${session}/execute/sync`, {
+      script: "return document.body.innerText",
+      args: [],
+    }).catch((err: unknown) => `(cannot read the page: ${String(err)})`);
+    throw new Error(`${String(e)}\n--- the window shows ---\n${page}`);
   });
   assert.equal(saved, "# Smoke\n\nfirst line\nsecond line");
 });
