@@ -1,5 +1,6 @@
 import { createEditor, type LinkTarget, type MintEditor } from "@mint/editor";
 import { useEffect, useRef } from "react";
+import type { ImageHost } from "./assets/image-host.ts";
 
 interface EditorPaneProps {
   /** Initial file text. The editor is recreated only when the pane is remounted (use a `key`). */
@@ -11,6 +12,8 @@ interface EditorPaneProps {
   readonly onModeChange: () => void;
   /** The user ⌘-clicked a link. */
   readonly onOpenLink: (link: LinkTarget) => void;
+  /** Resolves and saves the document's images. */
+  readonly imageHost: ImageHost;
 }
 
 /** Mounts the framework-agnostic editor core into React. */
@@ -21,18 +24,23 @@ export function EditorPane({
   onChange,
   onModeChange,
   onOpenLink,
+  imageHost,
 }: EditorPaneProps) {
   const parent = useRef<HTMLDivElement>(null);
   const editor = useRef<MintEditor | null>(null);
-  const callbacks = useRef({ onReady, onChange, onModeChange, onOpenLink });
-  callbacks.current = { onReady, onChange, onModeChange, onOpenLink };
+  const callbacks = useRef({ onReady, onChange, onModeChange, onOpenLink, imageHost });
+  callbacks.current = { onReady, onChange, onModeChange, onOpenLink, imageHost };
 
   useEffect(() => {
     if (!parent.current) return;
     const instance = createEditor({
       parent: parent.current,
       text,
-      host: { openLink: (link) => callbacks.current.onOpenLink(link) },
+      host: {
+        openLink: (link) => callbacks.current.onOpenLink(link),
+        resolveImageUrl: (path) => callbacks.current.imageHost.resolveImageUrl(path),
+        saveImage: (file) => callbacks.current.imageHost.saveImage(file),
+      },
     });
     const unsubscribe = instance.subscribe((event) => {
       if (event.type === "change") callbacks.current.onChange();

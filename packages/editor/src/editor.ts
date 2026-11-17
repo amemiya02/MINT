@@ -19,10 +19,12 @@ import {
   findStatus,
 } from "./find.ts";
 import { type FormattingCommands, formattingCommands } from "./formatting.ts";
+import { type ImageFile, imageFileInsertion } from "./image-files.ts";
 import { type LinkTarget, linkOpening } from "./links.ts";
 import { codeBlocks, setCodeBlockLanguage } from "./live-preview/code-blocks.ts";
 import { footnotes } from "./live-preview/footnotes.ts";
 import { headings } from "./live-preview/headings.ts";
+import { imagePreview, imageUrlResolver } from "./live-preview/images.ts";
 import { inlineSpans } from "./live-preview/inline-spans.ts";
 import { lists } from "./live-preview/lists.ts";
 import { mathPreview } from "./live-preview/math.ts";
@@ -35,12 +37,26 @@ import { themeable } from "./theme.ts";
 /**
  * Capabilities the editor core needs from whatever hosts it (desktop shell,
  * a web page, tests). The core never talks to a platform directly; future
- * capabilities (resolving image paths, saving pasted images) are added here
- * as optional members.
+ * capabilities are added here as optional members.
  */
 export interface HostAdapter {
   /** Open a link the user ⌘-clicked (Ctrl-clicked off macOS). Without it, links do nothing. */
   openLink?(link: LinkTarget): void;
+  /**
+   * Turn the path of a local image, as written in the document (relative to
+   * it, or absolute; angle brackets removed and percent-decoded), into a URL
+   * the page can load, or `null` to show a placeholder. Images with a URL
+   * scheme (`https:`, `data:`...) are loaded directly. Without it, paths are
+   * used as URLs.
+   */
+  resolveImageUrl?(path: string): string | null;
+  /**
+   * Store an image file the user pasted or dropped (in the asset folder) and
+   * resolve to its path relative to the document, `/`-separated; the editor
+   * inserts a reference to it. Rejecting skips the file. Without it, pasting
+   * and dropping image files is left to the default behaviour.
+   */
+  saveImage?(file: ImageFile): Promise<string>;
 }
 
 /**
@@ -150,6 +166,11 @@ export function createEditor(options: EditorOptions): MintEditor {
         quotesAndRules,
         footnotes,
         codeBlocks,
+        imagePreview(),
+        host.resolveImageUrl
+          ? imageUrlResolver.of((path) => host.resolveImageUrl?.(path) ?? null)
+          : [],
+        host.saveImage ? imageFileInsertion(host.saveImage.bind(host)) : [],
         preview.of(modeExtension()),
         host.openLink ? linkOpening((link) => host.openLink?.(link)) : [],
         EditorView.lineWrapping,

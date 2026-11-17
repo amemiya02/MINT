@@ -58,6 +58,21 @@ export interface Platform {
     listener: FolderSearchListener,
   ): Promise<() => void>;
 
+  /**
+   * Save an asset (e.g. a pasted image) into `directory`, creating it (and its
+   * parents) if needed. The file is named `fileName`, or `name-1.ext`,
+   * `name-2.ext`... if that name is taken: nothing is ever overwritten.
+   * Resolves to the absolute path of the new file.
+   */
+  saveAsset(directory: string, fileName: string, data: Uint8Array): Promise<string>;
+
+  /**
+   * A URL the page can load to show the local file at `path` (an image in a
+   * document), or `null` if it cannot be shown. The file may not exist; then
+   * loading the URL fails.
+   */
+  assetUrl(path: string): string | null;
+
   /** Create an empty file. Rejects if anything already exists at `path`. */
   createFile(path: string): Promise<void>;
 

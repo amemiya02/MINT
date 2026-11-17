@@ -1,4 +1,4 @@
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { Channel, convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
   Menu,
@@ -81,6 +81,11 @@ export function createTauriPlatform(): Platform {
         void invoke<void>("cancel_search", { id });
       };
     },
+    saveAsset: (directory, fileName, data) =>
+      invoke<string>("save_asset", { directory, fileName, data: toBase64(data) }),
+    // The asset protocol's scope is `**` (tauri.conf.json): documents may reference images
+    // anywhere, and the page can already read any file through `read_text_file`.
+    assetUrl: (path) => convertFileSrc(path),
     createFile: (path) => invoke<void>("create_file", { path }),
     createDirectory: (path) => invoke<void>("create_directory", { path }),
     rename: (from, to) => invoke<void>("rename_path", { from, to }),
@@ -130,6 +135,8 @@ export function createTauriPlatform(): Platform {
         height: 720,
         minWidth: 480,
         minHeight: 320,
+        // Let files dropped on the window reach the page (image drops into the editor).
+        dragDropEnabled: false,
       });
       await new Promise<void>((resolve, reject) => {
         void window.once("tauri://created", () => resolve());
@@ -201,6 +208,15 @@ function toNativeItem(item: MenuItemSpec) {
     case "native":
       return PredefinedMenuItem.new({ item: nativeItems[item.action], text: item.label });
   }
+}
+
+/** Binary data travels over IPC as base64: far smaller than a JSON array of numbers. */
+function toBase64(data: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < data.length; i += 0x8000) {
+    binary += String.fromCharCode(...data.subarray(i, i + 0x8000));
+  }
+  return btoa(binary);
 }
 
 export function isTauri(): boolean {

@@ -1,5 +1,6 @@
 import type { LinkTarget } from "@mint/editor";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { createImageHost } from "./assets/image-host.ts";
 import { createAutosave } from "./autosave/autosave.ts";
 import { CommandPalette } from "./command-palette/CommandPalette.tsx";
 import {
@@ -356,6 +357,9 @@ function TabPanel({
     store.markChanged(id);
     onEdited(id);
   }, [store, id, onEdited]);
+  const currentPath = useRef(path);
+  currentPath.current = path;
+  const [imageHost] = useState(() => createImageHost(platform, () => currentPath.current));
   const onOpenLink = useCallback(
     (link: LinkTarget) => {
       if (link.kind === "external") void platform.openExternal(link.url);
@@ -380,6 +384,7 @@ function TabPanel({
           onChange={onChange}
           onModeChange={onModeChange}
           onOpenLink={onOpenLink}
+          imageHost={imageHost}
         />
       </div>
     </div>
