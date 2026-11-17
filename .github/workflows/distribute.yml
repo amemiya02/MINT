@@ -1,0 +1,145 @@
+# Updates the package managers after a release is published: renders the
+# Homebrew cask and the winget manifests from packaging/ with the checksums of
+# the released installers, commits the cask to the Homebrew tap and opens a
+# winget-pkgs pull request.
+#
+# Runs at the end of release.yml (a release published by GITHUB_TOKEN does not
+# trigger other workflows), when a release is published by hand, or manually
+# for an existing tag (Actions › Distribute › Run workflow).
+#
+# Each channel is skipped with a notice when its token is missing, so the
+# workflow succeeds before the maintainer has done the one-time setup in
+# CONTRIBUTING.md ("Distribution channels"):
+#   secret   HOMEBREW_TAP_TOKEN  push access to the tap repository
+#   variable HOMEBREW_TAP_REPO   tap repository (default amemiya02/homebrew-mint)
+#   secret   WINGET_TOKEN        classic PAT (public_repo) of the owner of a winget-pkgs fork
+# The rendered manifests are always uploaded as the "package-manifests" artifact.
+name: Distribute
+
+on:
+  release:
+    types: [released]
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag, e.g. v0.2.0
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag, e.g. v0.2.0
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: distribute-${{ inputs.tag || github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  manifests:
+    name: Render package manifests
+    runs-on: ubuntu-22.04
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Resolve the release
+        id: release
+        env:
+          TAG: ${{ inputs.tag || github.event.release.tag_name }}
+        run: |
+          if [[ ! "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Expected a release tag vX.Y.Z, got '${TAG}'."
+            exit 1
+          fi
+          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
+          echo "version=${TAG#v}" >> "${GITHUB_OUTPUT}"
+      - name: Download the installers
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          mkdir -p assets
+          for name in $(node packaging/render.mjs assets "${VERSION}"); do
+            case "${name}" in
+              *.dmg|*-setup.exe) gh release download "${TAG}" --repo "${GITHUB_REPOSITORY}" --dir assets --pattern "${name}" ;;
+            esac
+          done
+      - name: Render the cask and winget manifests
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          node packaging/render.mjs manifests "${VERSION}" assets out
+          find out -type f -print
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-manifests
+          path: out/
+
+  homebrew:
+    name: Update the Homebrew tap
+    needs: manifests
+    runs-on: ubuntu-22.04
+    env:
+      TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO || 'amemiya02/homebrew-mint' }}
+      VERSION: ${{ needs.manifests.outputs.version }}
+    steps:
+      - name: Skip without a tap token
+        if: env.TAP_TOKEN == ''
+        run: echo "::notice::HOMEBREW_TAP_TOKEN is not set; the Homebrew tap was not updated (CONTRIBUTING.md, Distribution channels)."
+      - uses: actions/download-artifact@v5
+        if: env.TAP_TOKEN != ''
+        with:
+          name: package-manifests
+          path: out
+      - uses: actions/checkout@v5
+        if: env.TAP_TOKEN != ''
+        with:
+          repository: ${{ env.TAP_REPO }}
+          token: ${{ env.TAP_TOKEN }}
+          path: tap
+      - name: Commit the cask
+        if: env.TAP_TOKEN != ''
+        working-directory: tap
+        run: |
+          mkdir -p Casks
+          cp ../out/homebrew/Casks/mint.rb Casks/mint.rb
+          git add Casks/mint.rb
+          if git diff --cached --quiet; then
+            echo "::notice::Casks/mint.rb is already at ${VERSION}."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "mint ${VERSION}"
+          git push
+
+  winget:
+    name: Submit to winget
+    needs: manifests
+    runs-on: windows-latest
+    env:
+      WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+    steps:
+      - name: Skip without a winget token
+        if: env.WINGET_TOKEN == ''
+        shell: bash
+        run: echo "::notice::WINGET_TOKEN is not set; no winget-pkgs pull request was opened (CONTRIBUTING.md, Distribution channels)."
+      # Opens a pull request on microsoft/winget-pkgs from the token owner's
+      # fork. Only updates a package that is already in winget-pkgs; the first
+      # version is submitted by hand from the package-manifests artifact.
+      - uses: vedantmgoyal9/winget-releaser@v2
+        if: env.WINGET_TOKEN != ''
+        with:
+          identifier: amemiya02.MINT
+          version: ${{ needs.manifests.outputs.version }}
+          release-tag: ${{ needs.manifests.outputs.tag }}
+          installers-regex: '_x64-setup\.exe$'
+          token: ${{ env.WINGET_TOKEN }}

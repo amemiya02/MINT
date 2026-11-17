@@ -1,0 +1,133 @@
+# Checks and tests on every pull request (and on pushes to the main branches),
+# on macOS, Windows and Linux. No performance gates.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, "feat/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Platform-independent checks: run once.
+  lint:
+    name: Lint and type check
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: pnpm install --frozen-lockfile
+      - name: Biome
+        run: pnpm exec biome ci .
+      - name: Type check
+        run: pnpm typecheck
+      - name: Package manager manifests (Homebrew cask, winget)
+        run: pnpm test:packaging
+      - name: rustfmt
+        run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check
+
+  test:
+    name: Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+      - name: Install Tauri system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - run: pnpm install --frozen-lockfile
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Install Playwright browser
+        run: pnpm --filter @mint/desktop exec playwright install --with-deps chromium
+      - name: E2E tests
+        run: pnpm test:e2e
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ matrix.os }}
+          path: |
+            apps/desktop/playwright-report/
+            apps/desktop/test-results/
+          if-no-files-found: ignore
+
+      # tauri::generate_context! embeds the frontend, so it must be built first.
+      - name: Build frontend
+        run: pnpm --filter @mint/desktop build:web
+      - name: Clippy
+        run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets -- -D warnings
+      - name: Rust tests
+        run: pnpm test:rust
+
+  # The real app (Tauri, WebKitGTK, Rust backend) driven over WebDriver by tauri-driver:
+  # open a document from the command line, edit it, save it. Linux only, since
+  # tauri-driver has no macOS support and WebKitWebDriver is the Linux driver.
+  smoke:
+    name: Desktop smoke test (Linux, tauri-driver)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+      - name: Install Tauri system dependencies, WebKitWebDriver and Xvfb
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf webkit2gtk-driver xvfb
+      - name: Install tauri-driver
+        run: cargo install tauri-driver --locked
+      - run: pnpm install --frozen-lockfile
+      - name: Build the app (debug, no installers)
+        run: pnpm --filter @mint/desktop tauri build --debug --no-bundle
+      - name: Smoke test
+        working-directory: apps/desktop
+        env:
+          MINT_APP: ${{ github.workspace }}/apps/desktop/src-tauri/target/debug/mint
+          DISPLAY: ":99"
+        run: |
+          Xvfb :99 -screen 0 1280x1024x24 &
+          tauri-driver &
+          sleep 3
+          node --test smoke/open-edit-save.smoke.ts

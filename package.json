@@ -1,0 +1,28 @@
+{
+  "name": "mint",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "pnpm@12.8.1",
+  "engines": {
+    "node": ">=24",
+    "pnpm": ">=10"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @mint/desktop dev",
+    "dev:web": "pnpm --filter @mint/desktop dev:web",
+    "build": "pnpm --filter @mint/desktop build",
+    "test": "pnpm -r --if-present test",
+    "test:e2e": "pnpm --filter @mint/desktop test:e2e",
+    "test:rust": "cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml",
+    "test:packaging": "node --test packaging/packaging.test.mjs",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "lint": "biome check . && pnpm run lint:rust",
+    "lint:rust": "cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check && cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets -- -D warnings",
+    "format": "biome check --write . && cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.8",
+    "typescript": "7.0.2"
+  }
+}

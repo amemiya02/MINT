@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+/* Theme variables (built-in light and dark themes); documented in docs/themes.md. */
+@import "./theme/builtin.css";
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--mint-font-ui);
+  background: var(--mint-bg);
+  color: var(--mint-fg);
+}
+
+.mint-editor .cm-editor {
+  height: 100%;
+  font-size: var(--mint-font-size);
+  color: var(--mint-fg);
+}
+
+.mint-editor .cm-editor.cm-focused {
+  outline: none;
+}
+
+.mint-editor .cm-scroller {
+  font-family: var(--mint-font-editor);
+  line-height: var(--mint-line-height);
+}
+
+.mint-editor .cm-content {
+  max-width: var(--mint-content-width);
+  margin: 0 auto;
+  padding: 2rem 1.5rem 40vh;
+  caret-color: var(--mint-caret);
+}

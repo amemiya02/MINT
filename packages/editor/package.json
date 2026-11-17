@@ -1,0 +1,35 @@
+{
+  "name": "@mint/editor",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@codemirror/commands": "6.11.1",
+    "@codemirror/lang-markdown": "6.5.2",
+    "@codemirror/language": "6.13.1",
+    "@codemirror/language-data": "6.5.2",
+    "@codemirror/search": "6.7.2",
+    "@codemirror/state": "6.7.6",
+    "@codemirror/view": "6.43.15",
+    "@lezer/common": "1.5.5",
+    "@lezer/highlight": "1.2.5",
+    "@lezer/markdown": "1.8.1",
+    "@mint/markdown": "workspace:*",
+    "@replit/codemirror-vim": "6.4.0",
+    "katex": "0.16.25",
+    "mermaid": "12.3.0"
+  },
+  "devDependencies": {
+    "fast-check": "4.10.2",
+    "jsdom": "31.0.1",
+    "vitest": "5.1.0"
+  }
+}
