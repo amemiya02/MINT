@@ -13,6 +13,11 @@ export function rebasePath(path: string, from: string, to: string): string {
   return isWithin(path, from) ? to + path.slice(from.length) : path;
 }
 
+/** Whether `path` is absolute: `/…`, `C:\…` or `C:/…`, or a `\\server\share` path. */
+export function isAbsolutePath(path: string): boolean {
+  return path.startsWith("/") || /^[a-z]:[\\/]/i.test(path) || path.startsWith("\\\\");
+}
+
 /**
  * Resolve `target` (a path as written in a Markdown link) against the
  * document at `from`. Absolute targets are returned as they are; relative
@@ -20,9 +25,7 @@ export function rebasePath(path: string, from: string, to: string): string {
  * the separator of `from`.
  */
 export function resolveFrom(from: string, target: string): string {
-  if (target.startsWith("/") || /^[a-z]:[\\/]/i.test(target) || target.startsWith("\\\\")) {
-    return target;
-  }
+  if (isAbsolutePath(target)) return target;
   const separator = from.includes("\\") && !from.includes("/") ? "\\" : "/";
   const base = from.split(/[\\/]/).slice(0, -1);
   const root = base[0] ?? "";

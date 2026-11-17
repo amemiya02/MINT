@@ -5,7 +5,10 @@ import { isWithin, rebasePath } from "./paths.ts";
 /** One open document in this window. */
 export interface Tab {
   readonly id: number;
-  readonly path: string;
+  /** Where the document is saved; `null` for an untitled document that has not been saved yet. */
+  readonly path: string | null;
+  /** An untitled document's number in this window (Untitled, Untitled 2, …); `null` once it has a path. */
+  readonly untitled: number | null;
   /**
    * Text the tab's editor starts from: as read from disk, or unsaved work
    * restored from the recovery area. The editor owns the live text.
@@ -52,6 +55,8 @@ export interface TabStoreOptions {
   readonly platform: Platform;
   /** Ask the user what to do with a tab that has unsaved changes. */
   readonly askUnsaved: (tab: Tab) => Promise<UnsavedChoice>;
+  /** Ask the user where to save a tab's document (Save As, or the first save of an untitled one); `null` if cancelled. */
+  readonly askSavePath: (tab: Tab) => Promise<string | null>;
 }
 
 /**
@@ -69,12 +74,15 @@ export interface TabStore {
 
   /** With `select`, the range is selected and scrolled into view once the document shows. */
   openDocument(path: string, select?: LineRange): Promise<void>;
+  /** Open a tab with a new, empty, untitled document. Returns the tab's id. */
+  newDocument(): number;
   /**
    * Open a tab showing unsaved `text` for the document at `path` (e.g. work
-   * recovered after a crash), without reading the file. If the document is
-   * already open its tab is focused instead. Returns the tab's id.
+   * recovered after a crash), without reading the file; `null` restores an
+   * untitled document. If the document is already open its tab is focused
+   * instead. Returns the tab's id.
    */
-  restoreDocument(path: string, text: string): number;
+  restoreDocument(path: string | null, text: string): number;
   activate(id: number): void;
   activateNext(): void;
   activatePrevious(): void;
@@ -82,7 +90,10 @@ export interface TabStore {
   close(id: number): Promise<boolean>;
   /** Close every tab (e.g. before the window closes). Resolves to false if the user cancelled. */
   closeAll(): Promise<boolean>;
+  /** Save the tab's document; an untitled one asks where first. Resolves to whether it was saved. */
   save(id: number): Promise<boolean>;
+  /** Ask where to save the tab's document, save it there, and let the tab follow it. */
+  saveAs(id: number): Promise<boolean>;
   /** The tab's live text, or `null` if its editor is not mounted. */
   getText(id: number): string | null;
   /** Settle a conflict with the document on disk. */
@@ -106,7 +117,7 @@ export interface TabStore {
   markChanged(id: number): void;
 }
 
-export function createTabStore({ platform, askUnsaved }: TabStoreOptions): TabStore {
+export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOptions): TabStore {
   let state: TabsState = { tabs: [], activeId: null, error: null };
   const listeners = new Set<() => void>();
   const editors = new Map<number, MintEditor>();
@@ -129,6 +140,8 @@ export function createTabStore({ platform, askUnsaved }: TabStoreOptions): TabSt
   /** Ranges to select in tabs whose editor has not mounted yet. */
   const pendingSelections = new Map<number, LineRange>();
   let nextId = 1;
+  /** Numbers untitled documents of this window (Untitled, Untitled 2, …). */
+  let nextUntitled = 1;
 
   function set(next: Partial<TabsState>) {
     state = { ...state, ...next };
@@ -155,7 +168,7 @@ export function createTabStore({ platform, askUnsaved }: TabStoreOptions): TabSt
         set({ activeId: existing.id, error: null });
         return;
       }
-      const tab: Tab = { id: nextId++, path, text, dirty: false, external: null };
+      const tab: Tab = { id: nextId++, path, untitled: null, text, dirty: false, external: null };
       versions.set(tab.id, 0);
       cleanVersions.set(tab.id, 0);
       diskTexts.set(tab.id, text);
@@ -220,7 +233,7 @@ export function createTabStore({ platform, askUnsaved }: TabStoreOptions): TabSt
       return;
     }
     const tab = state.tabs.find((t) => t.id === id);
-    if (!tab) return;
+    if (!tab || tab.path === null) return;
     const epoch = saveEpochs.get(id);
     let diskText: string | null;
     try {
@@ -256,6 +269,38 @@ export function createTabStore({ platform, askUnsaved }: TabStoreOptions): TabSt
     }
   }
 
+  /** Write the tab's text to `path`; the tab follows the document there if it was elsewhere (Save As). */
+  async function write(id: number, path: string): Promise<boolean> {
+    const tab = state.tabs.find((t) => t.id === id);
+    const editor = editors.get(id);
+    if (!tab || !editor) return false;
+    const savedVersion = versions.get(id) ?? 0;
+    const text = editor.getText();
+    saveEpochs.set(id, (saveEpochs.get(id) ?? 0) + 1);
+    savesInFlight.add(id);
+    try {
+      await platform.writeTextFile(path, text);
+      diskTexts.set(id, text);
+      cleanVersions.set(id, savedVersion);
+      const moved = path !== tab.path;
+      // Saving overwrites the disk, which settles any notice about it.
+      updateTab(id, {
+        dirty: versions.get(id) !== savedVersion,
+        external: null,
+        ...(moved ? { path, untitled: null } : {}),
+      });
+      if (moved) watch(id, path);
+      set({ error: null });
+      return true;
+    } catch (e) {
+      set({ error: { kind: "save", path, reason: reasonOf(e) } });
+      return false;
+    } finally {
+      savesInFlight.delete(id);
+      void runRecheck(id);
+    }
+  }
+
   async function runRecheck(id: number) {
     if (!recheck.delete(id)) return;
     await checkDisk(id);
@@ -287,19 +332,37 @@ export function createTabStore({ platform, askUnsaved }: TabStoreOptions): TabSt
       else pendingSelections.set(tab.id, select);
     },
 
+    newDocument() {
+      const tab: Tab = {
+        id: nextId++,
+        path: null,
+        untitled: nextUntitled++,
+        text: "",
+        dirty: false,
+        external: null,
+      };
+      versions.set(tab.id, 0);
+      cleanVersions.set(tab.id, 0);
+      saveEpochs.set(tab.id, 0);
+      set({ tabs: [...state.tabs, tab], activeId: tab.id });
+      return tab.id;
+    },
+
     restoreDocument(path, text) {
-      const existing = state.tabs.find((t) => t.path === path);
+      const existing = path === null ? undefined : state.tabs.find((t) => t.path === path);
       if (existing) {
         set({ activeId: existing.id });
         return existing.id;
       }
-      const tab: Tab = { id: nextId++, path, text, dirty: true, external: null };
+      const untitled = path === null ? nextUntitled++ : null;
+      const tab: Tab = { id: nextId++, path, untitled, text, dirty: true, external: null };
       // Unsaved work: the tab has edits of its own, so a change on disk is a conflict.
       versions.set(tab.id, 0);
       cleanVersions.set(tab.id, -1);
       saveEpochs.set(tab.id, 0);
-      watch(tab.id, path);
       set({ tabs: [...state.tabs, tab], activeId: tab.id });
+      if (path === null) return tab.id;
+      watch(tab.id, path);
       // What the disk holds now is the baseline, so only later changes count as external.
       const { id } = tab;
       void platform
@@ -354,28 +417,16 @@ export function createTabStore({ platform, askUnsaved }: TabStoreOptions): TabSt
     },
 
     async save(id) {
+      const path = state.tabs.find((t) => t.id === id)?.path;
+      if (path === undefined) return false;
+      return path === null ? store.saveAs(id) : write(id, path);
+    },
+
+    async saveAs(id) {
       const tab = state.tabs.find((t) => t.id === id);
-      const editor = editors.get(id);
-      if (!tab || !editor) return false;
-      const savedVersion = versions.get(id) ?? 0;
-      const text = editor.getText();
-      saveEpochs.set(id, (saveEpochs.get(id) ?? 0) + 1);
-      savesInFlight.add(id);
-      try {
-        await platform.writeTextFile(tab.path, text);
-        diskTexts.set(id, text);
-        cleanVersions.set(id, savedVersion);
-        // Saving overwrites the disk, which settles any notice about it.
-        updateTab(id, { dirty: versions.get(id) !== savedVersion, external: null });
-        set({ error: null });
-        return true;
-      } catch (e) {
-        set({ error: { kind: "save", path: tab.path, reason: reasonOf(e) } });
-        return false;
-      } finally {
-        savesInFlight.delete(id);
-        void runRecheck(id);
-      }
+      if (!tab || !editors.has(id)) return false;
+      const path = await askSavePath(tab);
+      return path !== null && (await write(id, path));
     },
 
     getText: (id) => editors.get(id)?.getText() ?? null,
@@ -399,15 +450,21 @@ export function createTabStore({ platform, askUnsaved }: TabStoreOptions): TabSt
 
     pathRenamed(from, to) {
       const before = state.tabs;
-      set({ tabs: state.tabs.map((t) => ({ ...t, path: rebasePath(t.path, from, to) })) });
+      set({
+        tabs: state.tabs.map((t) =>
+          t.path === null ? t : { ...t, path: rebasePath(t.path, from, to) },
+        ),
+      });
       for (const tab of state.tabs) {
-        if (before.find((t) => t.id === tab.id)?.path !== tab.path) watch(tab.id, tab.path);
+        if (tab.path !== null && before.find((t) => t.id === tab.id)?.path !== tab.path) {
+          watch(tab.id, tab.path);
+        }
       }
     },
 
     pathTrashed(path) {
       for (const tab of state.tabs) {
-        if (isWithin(tab.path, path) && !tab.dirty) void store.close(tab.id);
+        if (tab.path !== null && isWithin(tab.path, path) && !tab.dirty) void store.close(tab.id);
       }
     },
     editor: (id) => editors.get(id) ?? null,

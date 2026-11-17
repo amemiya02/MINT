@@ -59,6 +59,7 @@ export const commands = [
     group: "settings",
   },
 
+  { id: "file.new", title: "command.file.new", accelerator: "CmdOrCtrl+N", menu: "file" },
   { id: "file.open", title: "command.file.open", accelerator: "CmdOrCtrl+O", menu: "file" },
   { id: "file.openFolder", title: "command.file.openFolder", menu: "file" },
   {
@@ -71,6 +72,13 @@ export const commands = [
     id: "file.save",
     title: "command.file.save",
     accelerator: "CmdOrCtrl+S",
+    menu: "file",
+    group: "save",
+  },
+  {
+    id: "file.saveAs",
+    title: "command.file.saveAs",
+    accelerator: "CmdOrCtrl+Shift+S",
     menu: "file",
     group: "save",
   },

@@ -237,7 +237,7 @@ export const en = {
   "error.saveImage": "Could not save the image {name} in {folder}: {reason}",
   "error.pastePlainText": "Could not paste as plain text: {reason}",
   "error.watch": "Changes other programs make to {path} will not be detected: {reason}",
-  "error.untitledImage": "save the document first, then add images to it",
+  "error.untitledImage": "Save the document before adding images to it",
   "error.dismiss": "Dismiss",
 
   "tabs.label": "Open documents",

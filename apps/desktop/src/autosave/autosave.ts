@@ -43,7 +43,8 @@ export function createAutosave({
           timers.delete(id);
           const tab = store.getState().tabs.find((t) => t.id === id);
           // A notice about a change on disk must be settled by the user, never overwritten.
-          if (tab?.dirty && !tab.external && isEnabled()) void store.save(id);
+          // An untitled document waits for the user to give it a place: autosave never asks.
+          if (tab?.dirty && !tab.external && tab.path !== null && isEnabled()) void store.save(id);
         }, delayMs),
       );
     },

@@ -24,8 +24,9 @@ import { useDialect } from "./settings/useDialect.ts";
 import { useSettings, useSettingsStore } from "./settings/useSettings.ts";
 import { TabStoreContext, useTabStore, useTabsState } from "./tabs/context.ts";
 import { ExternalChangeNotice } from "./tabs/ExternalChangeNotice.tsx";
-import { baseName, resolveFrom } from "./tabs/paths.ts";
+import { baseName, isAbsolutePath, resolveFrom } from "./tabs/paths.ts";
 import { TabBar } from "./tabs/TabBar.tsx";
+import { tabName } from "./tabs/tab-name.ts";
 import { createTabStore, type Tab, type TabError, type TabStore } from "./tabs/tab-store.ts";
 import { ThemeIssue } from "./theme/ThemeIssue.tsx";
 import { UpdateNotice, useUpdates } from "./updates/updates.tsx";
@@ -43,6 +44,7 @@ export function App({ platform }: { readonly platform: Platform }) {
     createTabStore({
       platform,
       askUnsaved: (tab) => askUnsaved(platform, translate.current, tab),
+      askSavePath: (tab) => askSavePath(platform, translate.current, tab),
     }),
   );
   const [autosave] = useState(() =>
@@ -73,11 +75,15 @@ export function App({ platform }: { readonly platform: Platform }) {
 async function askRestore(
   platform: Platform,
   t: Translate,
-  paths: readonly string[],
+  paths: readonly (string | null)[],
 ): Promise<RecoveryChoice> {
   const answer = await platform.showQuestionDialog({
     title: t("recovery.title"),
-    message: t("recovery.message", { names: paths.map(baseName).join(t("recovery.separator")) }),
+    message: t("recovery.message", {
+      names: paths
+        .map((path) => tabName(t, { path, untitled: null }))
+        .join(t("recovery.separator")),
+    }),
     yes: t("recovery.restore"),
     no: t("recovery.discard"),
     cancel: t("recovery.later"),
@@ -88,12 +94,20 @@ async function askRestore(
 async function askUnsaved(platform: Platform, t: Translate, tab: Tab) {
   const answer = await platform.showQuestionDialog({
     title: t("unsaved.title"),
-    message: t("unsaved.message", { name: baseName(tab.path) }),
+    message: t("unsaved.message", { name: tabName(t, tab) }),
     yes: t("unsaved.save"),
     no: t("unsaved.discard"),
     cancel: t("unsaved.cancel"),
   });
   return answer === "yes" ? "save" : answer === "no" ? "discard" : "cancel";
+}
+
+async function askSavePath(platform: Platform, t: Translate, tab: Tab) {
+  return platform.showSaveDialog({
+    title: t("dialog.saveAs.title"),
+    defaultPath: tab.path ?? t("dialog.saveAs.defaultName"),
+    filters: [{ name: t("dialog.filter.markdown"), extensions: documentExtensions }],
+  });
 }
 
 interface WindowProps {
@@ -202,8 +216,12 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     "file.open": () => void open(),
     "file.openFolder": () => void pickFolder(),
     "file.quickOpen": () => setQuickOpenVisible(true),
+    "file.new": () => void store.newDocument(),
     "file.save": () => {
       if (activeId !== null) void store.save(activeId);
+    },
+    "file.saveAs": () => {
+      if (activeId !== null) void store.saveAs(activeId);
     },
     "file.exportHtml": () => {
       if (activeId !== null) setExporting({ tab: activeId, format: "html" });
@@ -289,7 +307,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   );
 
   const exportedTab = tabs.find((tab) => tab.id === exporting?.tab) ?? null;
-  const name = active ? baseName(active.path) : null;
+  const name = active ? tabName(t, active) : null;
   const dirty = active?.dirty ?? false;
   useEffect(() => {
     const title = name
@@ -375,7 +393,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
           </main>
           {active && (
             <footer className="flex items-center justify-between border-t border-(--mint-border) px-4 py-1 text-xs text-(--mint-muted)">
-              <span title={active.path}>{name}</span>
+              <span title={active.path ?? undefined}>{name}</span>
               <span className="flex gap-4">
                 {wordCount && <WordCountStatus count={wordCount} />}
                 <span>
@@ -403,7 +421,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
         <ExportDialog
           platform={platform}
           format={exporting?.format ?? "html"}
-          path={exportedTab.path}
+          path={exportedTab.path ?? tabName(t, exportedTab)}
           getText={() => store.editor(exportedTab.id)?.getText() ?? exportedTab.text}
           onClose={() => {
             setExporting(null);
@@ -473,7 +491,9 @@ function TabPanel({
   const onOpenLink = useCallback(
     (link: LinkTarget) => {
       if (link.kind === "external") void platform.openExternal(link.url);
-      else void store.openDocument(resolveFrom(path, link.path));
+      else if (path !== null) void store.openDocument(resolveFrom(path, link.path));
+      // An untitled document has no folder for relative links to start from.
+      else if (isAbsolutePath(link.path)) void store.openDocument(link.path);
     },
     [platform, store, path],
   );
@@ -531,7 +551,11 @@ function ImageSaveNotice(props: {
       role="alert"
       className="flex items-start justify-between gap-3 border-b border-(--mint-border) bg-(--mint-error-bg) px-4 py-2 text-sm text-(--mint-error-fg)"
     >
-      <span>{t("error.saveImage", { ...props.failure })}</span>
+      <span>
+        {props.failure.folder === null
+          ? t("error.untitledImage")
+          : t("error.saveImage", { ...props.failure, folder: props.failure.folder })}
+      </span>
       <button
         type="button"
         onClick={props.onDismiss}
