@@ -1,4 +1,7 @@
-import type { MenuItemSpec, MenuSpec, Platform } from "./platform.ts";
+import type { MenuItemSpec, MenuSpec, Platform, SettingsFile, SettingsValues } from "./platform.ts";
+
+/** Where the in-memory platform keeps settings.json (seed it through `files`). */
+export const memorySettingsPath = "/config/MINT/settings.json";
 
 export interface MemoryPlatformOptions {
   /** Initial files, keyed by path. */
@@ -32,6 +35,31 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
   let windowTitle = "";
   let closeHandler: (() => Promise<boolean>) | null = null;
   let closed = false;
+  const settingsListeners = new Set<(file: SettingsFile) => void>();
+
+  // Same contract as the Rust backend's `settings::load`.
+  function readSettings(): SettingsFile {
+    const text = files.get(memorySettingsPath);
+    if (text === undefined) return { status: "missing" };
+    let values: unknown;
+    try {
+      values = JSON.parse(text);
+    } catch (e) {
+      return { status: "invalid", message: e instanceof Error ? e.message : String(e) };
+    }
+    if (typeof values !== "object" || values === null || Array.isArray(values)) {
+      return { status: "invalid", message: "the file must contain a JSON object" };
+    }
+    return { status: "ok", values: values as SettingsValues };
+  }
+
+  function notifySettings() {
+    const file = readSettings();
+    // Watchers report asynchronously, like file system events do.
+    setTimeout(() => {
+      for (const listener of settingsListeners) listener(file);
+    });
+  }
 
   // Without a native menu, accelerators are handled in the page.
   window.addEventListener("keydown", (event) => {
@@ -54,6 +82,8 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     },
     async writeTextFile(path, text) {
       files.set(path, text);
+      // Mirrors the backend's file watcher: any write to settings.json is reported.
+      if (path === memorySettingsPath) notifySettings();
     },
     get questions() {
       return questions;
@@ -89,6 +119,20 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     },
     async setMenu(menu: readonly MenuSpec[]) {
       commands = menu.flatMap((m) => m.items.filter((i) => i.kind === "command"));
+    },
+    async settingsPath() {
+      return memorySettingsPath;
+    },
+    async readSettings() {
+      return readSettings();
+    },
+    async writeSettings(values) {
+      files.set(memorySettingsPath, `${JSON.stringify(values, null, 2)}\n`);
+      notifySettings();
+    },
+    onSettingsChanged(listener) {
+      settingsListeners.add(listener);
+      return () => settingsListeners.delete(listener);
     },
     runMenuItem(id) {
       const command = commands.find((c) => c.id === id);

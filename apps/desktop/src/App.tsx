@@ -3,6 +3,8 @@ import { buildMenu, type CommandId } from "./commands.ts";
 import { EditorPane } from "./EditorPane.tsx";
 import { type Translate, useT } from "./i18n/index.ts";
 import type { Platform } from "./platform/platform.ts";
+import { SettingsDialog } from "./settings/SettingsDialog.tsx";
+import { SettingsIssues } from "./settings/SettingsIssues.tsx";
 import { TabStoreContext, useTabStore, useTabsState } from "./tabs/context.ts";
 import { baseName } from "./tabs/paths.ts";
 import { TabBar } from "./tabs/TabBar.tsx";
@@ -41,6 +43,7 @@ async function askUnsaved(platform: Platform, t: Translate, tab: Tab) {
 function Window({ platform, store }: { readonly platform: Platform; readonly store: TabStore }) {
   const t = useT();
   const { tabs, activeId, error } = useTabsState();
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const active = tabs.find((tab) => tab.id === activeId) ?? null;
 
   const open = useCallback(async () => {
@@ -64,6 +67,7 @@ function Window({ platform, store }: { readonly platform: Platform; readonly sto
     "tab.next": () => store.activateNext(),
     "tab.previous": () => store.activatePrevious(),
     "window.new": () => void platform.openWindow(),
+    "app.settings": () => setSettingsOpen(true),
   };
 
   useEffect(() => {
@@ -83,6 +87,7 @@ function Window({ platform, store }: { readonly platform: Platform; readonly sto
 
   return (
     <div className="flex h-full flex-col bg-(--mint-bg) text-(--mint-fg)">
+      <SettingsIssues />
       {error && (
         <div
           role="alert"
@@ -115,6 +120,12 @@ function Window({ platform, store }: { readonly platform: Platform; readonly sto
           <span title={active.path}>{name}</span>
           <span>{t(dirty ? "status.unsaved" : "status.saved")}</span>
         </footer>
+      )}
+      {settingsOpen && (
+        <SettingsDialog
+          onClose={() => setSettingsOpen(false)}
+          onOpenFile={(path) => void store.openDocument(path)}
+        />
       )}
     </div>
   );

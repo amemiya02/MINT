@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import {
   Menu,
   MenuItem,
@@ -9,7 +10,7 @@ import {
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { message, open } from "@tauri-apps/plugin-dialog";
-import type { MenuItemSpec, Platform } from "./platform.ts";
+import type { MenuItemSpec, Platform, SettingsFile } from "./platform.ts";
 
 const nativeItems = {
   cut: "Cut",
@@ -81,6 +82,13 @@ export function createTauriPlatform(): Platform {
       const unlisten = getCurrentWindow().onCloseRequested(async (event) => {
         if (!(await handler())) event.preventDefault();
       });
+      return () => void unlisten.then((stop) => stop());
+    },
+    settingsPath: () => invoke<string>("settings_path"),
+    readSettings: () => invoke<SettingsFile>("read_settings"),
+    writeSettings: (values) => invoke<void>("write_settings", { values }),
+    onSettingsChanged(listener) {
+      const unlisten = listen<SettingsFile>("settings-changed", (event) => listener(event.payload));
       return () => void unlisten.then((stop) => stop());
     },
   };
