@@ -23,6 +23,7 @@ import { type ImageFile, imageFileInsertion } from "./image-files.ts";
 import { type LinkTarget, linkOpening } from "./links.ts";
 import { codeBlocks, setCodeBlockLanguage } from "./live-preview/code-blocks.ts";
 import { footnotes } from "./live-preview/footnotes.ts";
+import { frontMatterPreview } from "./live-preview/front-matter.ts";
 import { headings } from "./live-preview/headings.ts";
 import { imagePreview, imageUrlResolver } from "./live-preview/images.ts";
 import { inlineSpans } from "./live-preview/inline-spans.ts";
@@ -174,6 +175,7 @@ export function createEditor(options: EditorOptions): MintEditor {
           ? imageUrlResolver.of((path) => host.resolveImageUrl?.(path) ?? null)
           : [],
         host.saveImage ? imageFileInsertion(host.saveImage.bind(host)) : [],
+        frontMatterPreview,
         preview.of(modeExtension()),
         host.openLink ? linkOpening((link) => host.openLink?.(link)) : [],
         EditorView.lineWrapping,
