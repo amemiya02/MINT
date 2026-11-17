@@ -6,6 +6,13 @@ import { EditorView, keymap } from "@codemirror/view";
 import { GFM } from "@lezer/markdown";
 import { type Dialect, defaultDialect } from "@mint/markdown";
 import { fileText, fromFileOffset, parseFileText, toFileOffset } from "./file-text.ts";
+import {
+  type FindCommands,
+  type FindStatus,
+  findCommands,
+  findReplace,
+  findStatus,
+} from "./find.ts";
 
 /**
  * Capabilities the editor core needs from whatever hosts it (desktop shell,
@@ -32,7 +39,7 @@ export interface TextSelection {
 }
 
 /** Named commands and their arguments. */
-export interface EditorCommands {
+export interface EditorCommands extends FindCommands {
   undo: [];
   redo: [];
   /** Replace the selection with text, as if typed. Line breaks take the document's line ending. */
@@ -47,6 +54,8 @@ export interface MintEditor {
   getText(): string;
   getSelection(): TextSelection;
   setSelection(selection: { anchor: number; head?: number }): void;
+  /** Matches of the find query set with the `setFindQuery` command. */
+  getFindStatus(): FindStatus;
   /** Run a named command. Returns whether it did anything. */
   execute<C extends EditorCommand>(command: C, ...args: EditorCommands[C]): boolean;
   /** Listen for text and selection changes. Returns an unsubscribe function. */
@@ -67,6 +76,7 @@ export function createEditor(options: EditorOptions): MintEditor {
       extensions: [
         parsed.extension,
         history(),
+        findReplace(),
         keymap.of([...defaultKeymap, ...historyKeymap]),
         markdown({ base: commonmarkLanguage, extensions: dialect.gfm ? [GFM] : [] }),
         syntaxHighlighting(defaultHighlightStyle),
@@ -84,6 +94,7 @@ export function createEditor(options: EditorOptions): MintEditor {
   }
 
   const commands: { [C in EditorCommand]: (...args: EditorCommands[C]) => boolean } = {
+    ...findCommands(view),
     undo: () => undo(view),
     redo: () => redo(view),
     insertText: (text) => {
@@ -109,6 +120,7 @@ export function createEditor(options: EditorOptions): MintEditor {
         ),
       });
     },
+    getFindStatus: () => findStatus(view.state),
     execute: (command, ...args) => (commands[command] as (...a: typeof args) => boolean)(...args),
     subscribe(listener) {
       listeners.add(listener);
