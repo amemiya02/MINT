@@ -1,5 +1,6 @@
 import type { MintEditor } from "@mint/editor";
 import type { Platform } from "../platform/platform.ts";
+import { isWithin, rebasePath } from "./paths.ts";
 
 /** One open document in this window. */
 export interface Tab {
@@ -52,6 +53,16 @@ export interface TabStore {
   closeAll(): Promise<boolean>;
   save(id: number): Promise<boolean>;
 
+  /** A file or directory was renamed: tabs of documents at or under `from` follow it to `to`. */
+  pathRenamed(from: string, to: string): void;
+  /**
+   * A file or directory was moved to the trash: tabs of documents at or under
+   * it close, except those with unsaved changes (saving them restores the file).
+   */
+  pathTrashed(path: string): void;
+
+  /** The editor of a tab, once its view has mounted. */
+  editor(id: number): MintEditor | null;
   /** Called by a tab's editor view as it mounts (`editor`) and unmounts (`null`). */
   attachEditor(id: number, editor: MintEditor | null): void;
   /** Called by a tab's editor view on every text change. */
@@ -169,6 +180,17 @@ export function createTabStore({ platform, askUnsaved }: TabStoreOptions): TabSt
         return false;
       }
     },
+
+    pathRenamed(from, to) {
+      set({ tabs: state.tabs.map((t) => ({ ...t, path: rebasePath(t.path, from, to) })) });
+    },
+
+    pathTrashed(path) {
+      for (const tab of state.tabs) {
+        if (isWithin(tab.path, path) && !tab.dirty) void store.close(tab.id);
+      }
+    },
+    editor: (id) => editors.get(id) ?? null,
 
     attachEditor(id, editor) {
       if (editor) editors.set(id, editor);

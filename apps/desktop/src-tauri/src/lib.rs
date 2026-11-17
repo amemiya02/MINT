@@ -2,14 +2,20 @@
 //! cannot do well lives here. Each IPC command is a small wrapper over a plain
 //! function that is unit-tested with `cargo test`.
 
+mod app_data;
+mod folder;
 mod fs;
 mod settings;
 mod updates;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Mutex;
 
 use serde_json::{Map, Value};
-use tauri::{Emitter, Manager, State};
+use tauri::ipc::Channel;
+use tauri::{AppHandle, Emitter, Manager, State};
 
 /// Read a document as UTF-8 text, keeping a BOM and line endings as they are.
 #[tauri::command]
@@ -59,10 +65,87 @@ fn updates_supported(app: tauri::AppHandle) -> bool {
 /// Event sent to every window with the reloaded `SettingsFile` whenever the file changes on disk.
 const SETTINGS_CHANGED: &str = "settings-changed";
 
+#[tauri::command]
+fn read_directory(path: PathBuf) -> Result<Vec<folder::Entry>, String> {
+    folder::list_dir(&path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn create_file(path: PathBuf) -> Result<(), String> {
+    folder::create_file(&path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn create_directory(path: PathBuf) -> Result<(), String> {
+    folder::create_dir(&path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn rename_path(from: PathBuf, to: PathBuf) -> Result<(), String> {
+    folder::rename(&from, &to).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn move_to_trash(path: PathBuf) -> Result<(), String> {
+    folder::move_to_trash(&path).map_err(|e| e.to_string())
+}
+
+/// Live folder watchers, by id. Dropping a watcher stops it.
+#[derive(Default)]
+struct Watchers {
+    next_id: AtomicU32,
+    active: Mutex<HashMap<u32, folder::FolderWatcher>>,
+}
+
+/// Watch a folder recursively; each debounced batch of changed paths is sent on `on_change`.
+#[tauri::command]
+fn watch_folder(
+    path: PathBuf,
+    on_change: Channel<Vec<PathBuf>>,
+    watchers: State<'_, Watchers>,
+) -> Result<u32, String> {
+    let watcher = folder::FolderWatcher::new(&path, move |paths| {
+        let _ = on_change.send(paths);
+    })
+    .map_err(|e| e.to_string())?;
+    let id = watchers.next_id.fetch_add(1, Ordering::Relaxed);
+    watchers
+        .active
+        .lock()
+        .map_err(|e| e.to_string())?
+        .insert(id, watcher);
+    Ok(id)
+}
+
+#[tauri::command]
+fn unwatch_folder(id: u32, watchers: State<'_, Watchers>) -> Result<(), String> {
+    watchers
+        .active
+        .lock()
+        .map_err(|e| e.to_string())?
+        .remove(&id);
+    Ok(())
+}
+
+fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path().app_data_dir().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn read_app_data(app: AppHandle, name: String) -> Result<Option<String>, String> {
+    app_data::read(&app_data_dir(&app)?, &name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn write_app_data(app: AppHandle, name: String, text: String) -> Result<(), String> {
+    app_data::write(&app_data_dir(&app)?, &name, &text).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .manage(Watchers::default())
         .setup(|app| {
             #[cfg(desktop)]
             {
@@ -89,7 +172,16 @@ pub fn run() {
             settings_path,
             read_settings,
             write_settings,
-            updates_supported
+            updates_supported,
+            read_directory,
+            create_file,
+            create_directory,
+            rename_path,
+            move_to_trash,
+            watch_folder,
+            unwatch_folder,
+            read_app_data,
+            write_app_data,
         ])
         .run(tauri::generate_context!())
         .expect("error while running MINT");
