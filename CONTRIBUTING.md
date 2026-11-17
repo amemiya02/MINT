@@ -39,6 +39,8 @@ apps/desktop/            Tauri app
     tabs/                Tab store of one window; show a document with useTabStore().openDocument(path[, range]).
                          It also watches each open document and reloads it or reports conflicts
     commands.ts          Command registry (menus and shortcuts derive from it)
+    App.tsx              One window: wires the tab store, commands, sidebar and overlays together
+    window/              Parts of a window: tab panel, status bar, welcome screen, overlay state, dialogs it asks
     settings/            Settings schema, store synced with settings.json, settings window
     updates/             Update checks and the update notice (Platform.checkForUpdate)
     print/               The print window PDF export opens (see the exception below)
