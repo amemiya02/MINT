@@ -159,6 +159,14 @@ export const commands = [
     menu: "view",
     group: "layout",
   },
+  // Typora's outline shortcut: ⌃⌘1 on macOS, Ctrl+Shift+1 elsewhere.
+  {
+    id: "view.outline",
+    title: "command.view.outline",
+    accelerator: isMac ? "Cmd+Ctrl+1" : "Ctrl+Shift+1",
+    menu: "view",
+    group: "layout",
+  },
   {
     id: "view.toggleSourceMode",
     title: "command.view.toggleSourceMode",

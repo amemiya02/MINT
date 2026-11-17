@@ -1,3 +1,4 @@
+import type { MintEditor } from "@mint/editor";
 import {
   type KeyboardEvent,
   type MouseEvent,
@@ -7,11 +8,69 @@ import {
   useState,
 } from "react";
 import { useT } from "../i18n/index.ts";
+import { Outline } from "../outline/Outline.tsx";
 import type { DirectoryEntry, Platform } from "../platform/platform.ts";
 import { baseName, isDocumentPath, isValidName, joinPath, parentPath } from "./paths.ts";
 import { type TreeRow, useFileTree } from "./useFileTree.ts";
 
-export interface SidebarProps {
+/** What the sidebar shows: the file tree of the open folder, or the outline of the active document. */
+export type SidebarView = "files" | "outline";
+
+export interface SidebarProps extends Omit<FileTreeProps, "root"> {
+  /** The open folder, if any; without one only the outline is offered. */
+  readonly root: string | null;
+  readonly view: SidebarView;
+  readonly onViewChange: (view: SidebarView) => void;
+  /** The editor of the active document, for the outline. */
+  readonly editor: MintEditor | null;
+  readonly onHide: () => void;
+}
+
+/** The sidebar: the file tree of the open folder or the outline of the active document. */
+export function Sidebar(props: SidebarProps) {
+  const { root, editor, onViewChange, onHide, ...tree } = props;
+  const t = useT();
+  const view: SidebarView = root === null ? "outline" : props.view;
+  const views: readonly SidebarView[] = root === null ? ["outline"] : ["files", "outline"];
+  return (
+    <aside
+      aria-label={t("sidebar.label")}
+      className="flex h-full w-60 shrink-0 flex-col border-r border-(--mint-border) bg-(--mint-sidebar-bg)"
+    >
+      <header className="flex items-center gap-1 border-b border-(--mint-border) px-2 py-1">
+        <div className="flex flex-1 gap-1">
+          {views.map((v) => (
+            <button
+              key={v}
+              type="button"
+              aria-pressed={v === view}
+              onClick={() => onViewChange(v)}
+              className={[
+                "rounded-sm px-2 py-0.5 text-xs font-semibold focus-visible:outline-2 focus-visible:outline-(--mint-accent)",
+                v === view
+                  ? "bg-(--mint-selected) text-(--mint-fg)"
+                  : "text-(--mint-muted) hover:bg-(--mint-hover) hover:text-(--mint-fg)",
+              ].join(" ")}
+            >
+              {t(v === "files" ? "sidebar.files" : "sidebar.outline")}
+            </button>
+          ))}
+        </div>
+        <IconButton label={t("sidebar.hide")} onClick={onHide}>
+          <rect x="1.5" y="2.5" width="13" height="11" rx="1" />
+          <path d="M6 2.5v11M11 6.5 9.5 8l1.5 1.5" />
+        </IconButton>
+      </header>
+      {view === "files" && root !== null ? (
+        <FileTree root={root} {...tree} />
+      ) : (
+        <Outline editor={editor} />
+      )}
+    </aside>
+  );
+}
+
+interface FileTreeProps {
   readonly platform: Platform;
   /** The open folder. */
   readonly root: string;
@@ -24,7 +83,6 @@ export interface SidebarProps {
   /** An entry was moved to the trash. */
   readonly onTrashed: (path: string) => void;
   readonly onError: (message: string) => void;
-  readonly onHide: () => void;
 }
 
 /** What the inline name field is for. */
@@ -39,8 +97,8 @@ interface ContextMenu {
   readonly entry: DirectoryEntry | null;
 }
 
-/** The sidebar: the file tree of the open folder, with create, rename and trash actions. */
-export function Sidebar(props: SidebarProps) {
+/** The file tree of the open folder, with create, rename and trash actions. */
+function FileTree(props: FileTreeProps) {
   const { platform, root, activePath, onOpenDocument, onRenamed, onTrashed, onError } = props;
   const t = useT();
   const tree = useFileTree(platform, root);
@@ -224,11 +282,8 @@ export function Sidebar(props: SidebarProps) {
   });
 
   return (
-    <aside
-      aria-label={t("sidebar.label")}
-      className="flex h-full w-60 shrink-0 flex-col border-r border-(--mint-border) bg-(--mint-sidebar-bg)"
-    >
-      <header className="flex items-center gap-1 border-b border-(--mint-border) px-2 py-1.5">
+    <>
+      <div className="flex items-center gap-1 border-b border-(--mint-border) px-2 py-1">
         <span className="flex-1 truncate text-xs font-semibold" title={root}>
           {baseName(root)}
         </span>
@@ -240,11 +295,7 @@ export function Sidebar(props: SidebarProps) {
           <path d="M1.5 4a1 1 0 0 1 1-1h3.5l1.5 1.5h6a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1V4Z" />
           <path d="M8 6.5v4M6 8.5h4" />
         </IconButton>
-        <IconButton label={t("sidebar.hide")} onClick={props.onHide}>
-          <rect x="1.5" y="2.5" width="13" height="11" rx="1" />
-          <path d="M6 2.5v11M11 6.5 9.5 8l1.5 1.5" />
-        </IconButton>
-      </header>
+      </div>
       <div
         ref={treeRef}
         role="tree"
@@ -292,7 +343,7 @@ export function Sidebar(props: SidebarProps) {
           ]}
         />
       )}
-    </aside>
+    </>
   );
 }
 

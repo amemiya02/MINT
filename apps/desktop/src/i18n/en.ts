@@ -20,6 +20,7 @@ export const en = {
   "command.file.openFolder": "Open Folder…",
   "command.file.quickOpen": "Quick Open…",
   "command.view.toggleSidebar": "Toggle Sidebar",
+  "command.view.outline": "Outline",
   "command.view.toggleSourceMode": "Toggle Source Mode",
 
   "command.tab.close": "Close Tab",
@@ -171,6 +172,10 @@ export const en = {
 
   "sidebar.label": "Sidebar",
   "sidebar.hide": "Hide Sidebar",
+  "sidebar.files": "Files",
+  "sidebar.outline": "Outline",
+  "outline.label": "Outline",
+  "outline.empty": "No headings",
   "tree.newDocument": "New Document",
   "tree.newFolder": "New Folder",
   "tree.rename": "Rename",

@@ -21,6 +21,7 @@ export const zhCN: Messages = {
   "command.file.openFolder": "打开文件夹…",
   "command.file.quickOpen": "快速打开…",
   "command.view.toggleSidebar": "显示/隐藏侧边栏",
+  "command.view.outline": "大纲",
   "command.view.toggleSourceMode": "切换源码模式",
 
   "command.tab.close": "关闭标签页",
@@ -166,6 +167,10 @@ export const zhCN: Messages = {
 
   "sidebar.label": "侧边栏",
   "sidebar.hide": "隐藏侧边栏",
+  "sidebar.files": "文件",
+  "sidebar.outline": "大纲",
+  "outline.label": "大纲",
+  "outline.empty": "没有标题",
   "tree.newDocument": "新建文档",
   "tree.newFolder": "新建文件夹",
   "tree.rename": "重命名",

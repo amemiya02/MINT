@@ -526,7 +526,10 @@ function matchesAccelerator(event: KeyboardEvent, accelerator: string): boolean 
   const wantCtrl = mods.has("ctrl") || mods.has("control") || (primary && !isMac);
   return (
     // With Option held, macOS reports the composed character (⌥F is "ƒ"), so fall back to the physical key.
-    (event.key.toLowerCase() === key || event.code.toLowerCase() === `key${key}`) &&
+    // With Shift held, digits arrive as symbols (⇧1 is "!"), so fall back to the physical key too.
+    (event.key.toLowerCase() === key ||
+      event.code.toLowerCase() === `key${key}` ||
+      event.code.toLowerCase() === `digit${key}`) &&
     event.metaKey === wantMeta &&
     event.ctrlKey === wantCtrl &&
     event.shiftKey === mods.has("shift") &&
