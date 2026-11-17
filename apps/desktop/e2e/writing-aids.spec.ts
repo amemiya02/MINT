@@ -83,8 +83,8 @@ test("focus and typewriter mode can be switched from the command palette and the
     .toEqual({ typewriterMode: true });
 
   await page.keyboard.press("ControlOrMeta+,");
-  await expect(page.getByLabel("Typewriter mode")).toBeChecked();
-  await page.getByLabel("Focus mode").check();
+  await expect(page.getByRole("checkbox", { name: "Typewriter mode" })).toBeChecked();
+  await page.getByRole("checkbox", { name: "Focus mode" }).check();
   await expect
     .poll(async () => JSON.parse((await readFile(page, settingsPath)) ?? "{}"))
     .toEqual({ typewriterMode: true, focusMode: true });
