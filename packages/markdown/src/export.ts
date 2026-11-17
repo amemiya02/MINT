@@ -1,5 +1,6 @@
 import rehypeKatex from "rehype-katex";
 import rehypeStringify from "rehype-stringify";
+import remarkFrontmatter from "remark-frontmatter";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import remarkParse from "remark-parse";
@@ -30,6 +31,8 @@ const extendedPlugins: { readonly [K in keyof ExtendedSyntax]: PluggableList } =
 /** The remark plugins that parse exactly the syntax enabled in `dialect`. */
 function syntaxPlugins(dialect: Dialect): PluggableList {
   const plugins: PluggableList = [];
+  // Front matter is metadata: recognised (so it is not read as a rule and a heading) but not rendered.
+  if (dialect.frontMatter) plugins.push([remarkFrontmatter, ["yaml"]]);
   // GFM strikethrough is `~~…~~` only, as in the editor; a single `~` belongs to subscript.
   if (dialect.gfm) plugins.push([remarkGfm, { singleTilde: false }]);
   if (dialect.math) plugins.push(remarkMath);

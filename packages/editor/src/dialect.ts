@@ -10,6 +10,7 @@ import {
   tocSyntax,
 } from "./extended-syntax.ts";
 import { footnoteSyntax } from "./footnote-syntax.ts";
+import { FrontMatter } from "./front-matter.ts";
 import { MathSyntax } from "./math-syntax.ts";
 
 type Switches = Omit<Dialect, "extended"> & ExtendedSyntax;
@@ -23,7 +24,7 @@ const parserExtensions: { readonly [K in keyof Switches]: readonly MarkdownConfi
   gfm: [...GFM, footnoteSyntax],
   math: [MathSyntax],
   mermaid: [], // plain fenced code; rendered by the Mermaid block widget
-  frontMatter: [], // added with the front matter block widget
+  frontMatter: [FrontMatter],
   toc: [tocSyntax], // rendered by the table of contents block widget
   highlight: [highlightSyntax],
   superscript: [superscriptSyntax],

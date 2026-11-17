@@ -1,0 +1,37 @@
+cask "mint" do
+  arch arm: "aarch64", intel: "x64"
+
+  version "@VERSION@"
+  sha256 arm:   "@SHA256_ARM@",
+         intel: "@SHA256_INTEL@"
+
+  url "https://github.com/amemiya02/MINT/releases/download/v#{version}/MINT_#{version}_#{arch}.dmg"
+  name "MINT"
+  desc "Markdown editor with live preview that keeps your source intact"
+  homepage "https://github.com/amemiya02/MINT"
+
+  livecheck do
+    url :url
+    strategy :github_latest
+  end
+
+  # MINT updates itself (MINT › Check for Updates…).
+  auto_updates true
+  depends_on :macos
+
+  app "MINT.app"
+
+  zap trash: [
+    "~/Library/Application Support/io.github.amemiya02.mint",
+    "~/Library/Caches/io.github.amemiya02.mint",
+    "~/Library/Preferences/io.github.amemiya02.mint.plist",
+    "~/Library/Saved Application State/io.github.amemiya02.mint.savedState",
+    "~/Library/WebKit/io.github.amemiya02.mint",
+  ]
+
+  caveats <<~EOS
+    MINT is not notarized by Apple yet. If macOS refuses to open it, run
+      xattr -dr com.apple.quarantine /Applications/MINT.app
+    or allow it in System Settings › Privacy & Security.
+  EOS
+end
