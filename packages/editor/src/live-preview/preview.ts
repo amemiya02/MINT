@@ -39,6 +39,14 @@ export interface PreviewRenderer {
    */
   readonly scope?: "inline" | "block";
   /**
+   * Whether this renderer draws `node` (default: every node named in
+   * `nodes`). When several renderers claim a node, the first one in facet
+   * order (highest precedence first) that matches draws it, in its own
+   * scope; the others leave it alone. This lets a specific renderer (a
+   * Mermaid diagram) take over some nodes of a generic one (code blocks).
+   */
+  matches?(node: SyntaxNode, state: EditorState): boolean;
+  /**
    * Add decorations for one node. Return `false` to skip the node's
    * descendants (for example when the whole block is replaced by a widget).
    */
@@ -72,12 +80,18 @@ function build(
   scope: "inline" | "block",
   ranges: readonly { from: number; to: number }[],
 ): DecorationSet {
-  const byNode = new Map<string, PreviewRenderer>();
+  // Renderers of every scope, so that precedence holds across scopes.
+  const byNode = new Map<string, PreviewRenderer[]>();
+  let any = false;
   for (const renderer of state.facet(previewRenderer)) {
-    if ((renderer.scope ?? "inline") !== scope) continue;
-    for (const name of renderer.nodes) byNode.set(name, renderer);
+    any ||= (renderer.scope ?? "inline") === scope;
+    for (const name of renderer.nodes) {
+      const list = byNode.get(name);
+      if (list) list.push(renderer);
+      else byNode.set(name, [renderer]);
+    }
   }
-  if (byNode.size === 0) return Decoration.none;
+  if (!any) return Decoration.none;
 
   const decorations: Range<Decoration>[] = [];
   const selection = state.selection.ranges;
@@ -112,9 +126,12 @@ function build(
       from,
       to,
       enter(ref) {
-        const renderer = byNode.get(ref.name);
-        if (!renderer) return;
-        return renderer.render(ref.node, context) !== false;
+        const candidates = byNode.get(ref.name);
+        if (!candidates) return;
+        const node = ref.node;
+        const renderer = candidates.find((r) => r.matches?.(node, state) ?? true);
+        if (!renderer || (renderer.scope ?? "inline") !== scope) return;
+        return renderer.render(node, context) !== false;
       },
     });
   }

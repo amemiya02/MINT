@@ -28,6 +28,7 @@ import { imagePreview, imageUrlResolver } from "./live-preview/images.ts";
 import { inlineSpans } from "./live-preview/inline-spans.ts";
 import { lists } from "./live-preview/lists.ts";
 import { mathPreview } from "./live-preview/math.ts";
+import { mermaidDiagrams } from "./live-preview/mermaid.ts";
 import { livePreview, previewRenderer } from "./live-preview/preview.ts";
 import { quotesAndRules } from "./live-preview/quotes-and-rules.ts";
 import { markupContinuation } from "./markup-continuation.ts";
@@ -165,6 +166,8 @@ export function createEditor(options: EditorOptions): MintEditor {
         lists,
         quotesAndRules,
         footnotes,
+        // Mermaid takes over its fences from codeBlocks (it matches only ```mermaid; the rest stay code blocks).
+        dialect.mermaid ? mermaidDiagrams() : [],
         codeBlocks,
         imagePreview(),
         host.resolveImageUrl
