@@ -89,6 +89,8 @@ export interface MemoryPlatform extends Platform {
   readonly questions: readonly string[];
   /** The paths each save dialog suggested, in order. */
   readonly saveDialogs: readonly string[];
+  /** The directories listed with `readDirectory` so far, in order. */
+  readonly directoriesRead: readonly string[];
   /** The documents printed so far, in order. */
   readonly printed: readonly { readonly html: string; readonly title: string }[];
   /** Whether this window has closed. */
@@ -122,6 +124,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
   const saveDialogResults = [...(options.saveDialogResults ?? [])];
   const saveDialogs: string[] = [];
   const printed: { html: string; title: string }[] = [];
+  const directoriesRead: string[] = [];
   const folderDialogResults = [...(options.openFolderDialogResults ?? [])];
   const watchers = new Set<{ root: string; onChange: (paths: readonly string[]) => void }>();
   const questionResults = [...(options.questionDialogResults ?? [])];
@@ -204,9 +207,27 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     }
   }
 
+  /** The `.gitignore` rules of the folder `root`. */
+  function ignoreRulesOf(root: string) {
+    const prefix = `${root}/`;
+    return createIgnoreRules(
+      filePaths()
+        .filter((p) => p.startsWith(prefix) && p.endsWith("/.gitignore"))
+        .map((p) => ({ dir: parentOf(p).slice(root.length + 1), text: files.get(p) ?? "" })),
+    );
+  }
+
+  /** Like the backend's folder watcher: changes inside `.git` and to ignored entries are not reported. */
+  function reported(path: string, root: string): boolean {
+    if (path === root) return true;
+    const relative = path.slice(root.length + 1);
+    if (relative.split("/").includes(".git")) return false;
+    return !ignoreRulesOf(root).isIgnored(relative);
+  }
+
   function notify(...paths: string[]): void {
     for (const watcher of watchers) {
-      const touched = paths.filter((p) => within(p, watcher.root));
+      const touched = paths.filter((p) => within(p, watcher.root) && reported(p, watcher.root));
       // Like a real file watcher, events arrive asynchronously.
       if (touched.length > 0) setTimeout(() => watcher.onChange(touched), 0);
     }
@@ -287,7 +308,11 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     async showOpenFolderDialog() {
       return folderDialogResults.shift() ?? null;
     },
+    get directoriesRead() {
+      return directoriesRead;
+    },
     async readDirectory(path) {
+      directoriesRead.push(path);
       if (!isDirectory(path)) throw new Error(`No such directory: ${path}`);
       const children = new Map<string, DirectoryEntry>();
       const prefix = `${path}/`;
@@ -309,11 +334,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       if (!isDirectory(root)) return [];
       const prefix = `${root}/`;
       const inFolder = filePaths().filter((p) => p.startsWith(prefix));
-      const ignores = createIgnoreRules(
-        inFolder
-          .filter((p) => p.endsWith("/.gitignore"))
-          .map((p) => ({ dir: parentOf(p).slice(root.length + 1), text: files.get(p) ?? "" })),
-      );
+      const ignores = ignoreRulesOf(root);
       const wanted = extensions.map((e) => `.${e.toLowerCase()}`);
       return inFolder
         .filter((p) => {

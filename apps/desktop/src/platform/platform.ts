@@ -100,7 +100,8 @@ export interface Platform {
 
   /**
    * Watch a folder recursively. `onChange` receives the paths touched by each
-   * batch of changes, MINT's own included. Resolves to a function that stops watching.
+   * batch of changes, MINT's own included, except changes inside `.git` and to
+   * entries the folder's `.gitignore` excludes. Resolves to a function that stops watching.
    */
   watchFolder(path: string, onChange: (paths: readonly string[]) => void): Promise<() => void>;
 

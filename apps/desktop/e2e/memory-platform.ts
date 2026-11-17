@@ -46,6 +46,13 @@ export function listPaths(page: Page): Promise<string[]> {
   );
 }
 
+/** The directories the shell listed so far, in order. */
+export function directoriesRead(page: Page): Promise<string[]> {
+  return page.evaluate(() => [
+    ...(window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.directoriesRead,
+  ]);
+}
+
 /** Paths moved to the trash, in order. */
 export function trashed(page: Page): Promise<string[]> {
   return page.evaluate(() => [...(window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.trash]);

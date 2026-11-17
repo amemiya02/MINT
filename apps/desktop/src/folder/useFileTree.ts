@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { isHiddenName, rebasePath } from "../paths.ts";
+import { isHiddenName, isWithin, parentPath, rebasePath } from "../paths.ts";
 import type { DirectoryEntry, Platform } from "../platform/platform.ts";
 
 /** One visible row of the file tree, in display order. */
@@ -20,9 +20,39 @@ function sortEntries(entries: readonly DirectoryEntry[]): DirectoryEntry[] {
     );
 }
 
+/** How long changes reported by the folder watcher are gathered before the tree re-reads directories. */
+const changeDelay = 100;
+
+/**
+ * The listed directories whose listing changes when `paths` change: the
+ * nearest listed directory around each path (its parent, or the ancestor that
+ * shows a new or removed directory), and listed directories that were
+ * themselves changed (removed or renamed away), so they are dropped.
+ */
+function affectedDirectories(
+  listed: ReadonlySet<string>,
+  root: string,
+  paths: Iterable<string>,
+): Set<string> {
+  const dirs = new Set<string>();
+  for (const path of paths) {
+    if (!isWithin(path, root)) continue;
+    for (const dir of listed) if (isWithin(dir, path)) dirs.add(dir);
+    for (let dir = parentPath(path); isWithin(dir, root); dir = parentPath(dir)) {
+      if (listed.has(dir)) {
+        dirs.add(dir);
+        break;
+      }
+      if (dir === root) break;
+    }
+  }
+  return dirs;
+}
+
 /**
  * The file tree of a folder: lists directories lazily as they are expanded and
- * keeps every listed directory in sync with the disk through a folder watcher.
+ * keeps the listed directories in sync with the disk through a folder watcher,
+ * re-reading only those a change touches.
  */
 export function useFileTree(platform: Platform, root: string) {
   const [children, setChildren] = useState<ReadonlyMap<string, DirectoryEntry[]>>(new Map());
@@ -63,17 +93,30 @@ export function useFileTree(platform: Platform, root: string) {
     void load(root);
     let stop: (() => void) | null = null;
     let cancelled = false;
+    // Changes are gathered for a moment, then only the directories they touch are re-read.
+    const changed = new Set<string>();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const flush = () => {
+      timer = undefined;
+      const dirs = affectedDirectories(listed.current, root, changed);
+      changed.clear();
+      for (const dir of dirs) void load(dir);
+    };
     void platform
-      .watchFolder(root, () => void refresh())
+      .watchFolder(root, (paths) => {
+        for (const path of paths) changed.add(path);
+        timer ??= setTimeout(flush, changeDelay);
+      })
       .then((unwatch) => {
         if (cancelled) unwatch();
         else stop = unwatch;
       });
     return () => {
       cancelled = true;
+      clearTimeout(timer);
       stop?.();
     };
-  }, [platform, root, load, refresh]);
+  }, [platform, root, load]);
 
   const expand = useCallback(
     async (dir: string) => {
