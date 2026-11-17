@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.10.0.schema.json
+PackageIdentifier: amemiya02.MINT
+PackageVersion: @VERSION@
+PackageLocale: en-US
+Publisher: amemiya02
+PublisherUrl: https://github.com/amemiya02
+PackageName: MINT
+PackageUrl: https://github.com/amemiya02/MINT
+License: MIT
+LicenseUrl: https://github.com/amemiya02/MINT/blob/main/LICENSE
+ShortDescription: Markdown editor with live preview that keeps your source intact.
+Description: MINT (MINT Is Not Typora) edits the Markdown files on your disk in place, rendering them as you type while leaving every part you did not edit byte-for-byte unchanged.
+Tags:
+  - markdown
+  - editor
+  - live-preview
+ReleaseNotesUrl: https://github.com/amemiya02/MINT/releases/tag/v@VERSION@
+ManifestType: defaultLocale
+ManifestVersion: 1.10.0
