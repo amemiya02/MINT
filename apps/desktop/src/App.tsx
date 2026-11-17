@@ -19,7 +19,7 @@ import { createRecovery, type Recovery, type RecoveryChoice } from "./recovery/r
 import { FolderSearch } from "./search/FolderSearch.tsx";
 import { SettingsDialog } from "./settings/SettingsDialog.tsx";
 import { SettingsIssues } from "./settings/SettingsIssues.tsx";
-import { useSettingsStore } from "./settings/useSettings.ts";
+import { useSettings, useSettingsStore } from "./settings/useSettings.ts";
 import { TabStoreContext, useTabStore, useTabsState } from "./tabs/context.ts";
 import { ExternalChangeNotice } from "./tabs/ExternalChangeNotice.tsx";
 import { baseName, resolveFrom } from "./tabs/paths.ts";
@@ -108,6 +108,9 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [quickOpenVisible, setQuickOpenVisible] = useState(false);
   const [paletteVisible, setPaletteVisible] = useState(false);
+  /** True while the settings window records a shortcut: no shortcut may run meanwhile. */
+  const [recordingShortcut, setRecordingShortcut] = useState(false);
+  const { shortcuts } = useSettings().settings;
   const active = tabs.find((tab) => tab.id === activeId) ?? null;
   const updates = useUpdates(platform);
   const [folder, setFolder] = useState<string | null>(null);
@@ -205,8 +208,8 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   };
 
   useEffect(() => {
-    void platform.setMenu(buildMenu(t, (id) => run.current(id)));
-  }, [platform, t]);
+    void platform.setMenu(buildMenu(t, (id) => run.current(id), shortcuts, !recordingShortcut));
+  }, [platform, t, shortcuts, recordingShortcut]);
 
   useEffect(
     () =>
@@ -325,7 +328,11 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
       )}
       {settingsOpen && (
         <SettingsDialog
-          onClose={() => setSettingsOpen(false)}
+          onClose={() => {
+            setSettingsOpen(false);
+            setRecordingShortcut(false);
+          }}
+          onRecordingShortcut={setRecordingShortcut}
           onOpenFile={(path) => void store.openDocument(path)}
         />
       )}

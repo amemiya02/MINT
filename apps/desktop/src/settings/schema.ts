@@ -6,7 +6,7 @@ import type { MessageKey } from "../i18n/index.ts";
  * controls in the settings window are all derived from it.
  *
  * To add a setting:
- *   1. Add an entry below with `choice(…)`, `toggle(…)`, `number(…)` or `text(…)`; its key
+ *   1. Add an entry below with `choice(…)`, `toggle(…)`, `number(…)`, `text(…)` or `shortcuts(…)`; its key
  *      is the key in settings.json and `default` is used when the key is absent.
  *   2. Add its `label` (and option labels) to `i18n/en.ts` and `i18n/zh-CN.ts`.
  *   3. Read it where it takes effect with `useSettings().settings.<key>`.
@@ -56,6 +56,11 @@ export const settingsSchema = {
     max: 2400,
     step: 20,
   }),
+  /**
+   * Shortcut overrides by command id, e.g. `{ "format.bold": "CmdOrCtrl+Shift+B" }`;
+   * `null` removes a command's shortcut. Commands not listed keep their default.
+   */
+  shortcuts: shortcuts({ label: "settings.shortcuts", default: {} }),
 } as const satisfies Record<string, SettingDefinition>;
 
 export type SettingKey = keyof typeof settingsSchema;
@@ -105,7 +110,20 @@ export interface TextSetting extends BaseSetting<string> {
   readonly optionsFrom?: "themes";
 }
 
-export type SettingDefinition = ChoiceSetting | ToggleSetting | NumberSetting | TextSetting;
+/** Shortcut overrides: a command id to an accelerator, or to `null` for no shortcut. */
+export type ShortcutOverrides = Readonly<Record<string, string | null>>;
+
+/** Shortcut overrides; shown as the list of commands, each with a shortcut recorder. */
+export interface ShortcutsSetting extends BaseSetting<ShortcutOverrides> {
+  readonly kind: "shortcuts";
+}
+
+export type SettingDefinition =
+  | ChoiceSetting
+  | ToggleSetting
+  | NumberSetting
+  | TextSetting
+  | ShortcutsSetting;
 
 type ValueOf<D> = D extends BaseSetting<infer T> ? T : never;
 
@@ -125,4 +143,8 @@ function number(definition: Omit<NumberSetting, "kind">): NumberSetting {
 
 function text(definition: Omit<TextSetting, "kind">): TextSetting {
   return { kind: "text", ...definition };
+}
+
+function shortcuts(definition: Omit<ShortcutsSetting, "kind">): ShortcutsSetting {
+  return { kind: "shortcuts", ...definition };
 }

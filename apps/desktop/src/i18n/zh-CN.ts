@@ -102,6 +102,8 @@ export const zhCN: Messages = {
   "settings.expected.toggle": " true 或 false ",
   "settings.expected.number": " {min} 到 {max} 之间的数字",
   "settings.expected.text": "不超过 {max} 个字符的文本",
+  "settings.expected.shortcuts":
+    '从命令 ID 到快捷键（如 "CmdOrCtrl+Shift+B"，null 表示无快捷键）的对象',
 
   "settings.language": "界面语言",
   "settings.language.system": "跟随系统",
@@ -123,6 +125,17 @@ export const zhCN: Messages = {
   "settings.fontSize": "字号（px）",
   "settings.lineHeight": "行高",
   "settings.contentWidth": "内容宽度（px）",
+
+  "settings.shortcuts": "快捷键",
+  "settings.shortcuts.record": "录制",
+  "settings.shortcuts.recording": "请按下新的快捷键（Esc 取消）",
+  "settings.shortcuts.none": "无",
+  "settings.shortcuts.reset": "恢复默认",
+  "settings.shortcuts.remove": "移除",
+  "settings.shortcuts.conflict": "{shortcut} 已被「{commands}」使用。",
+  "settings.shortcuts.useAnyway": "仍然使用",
+  "settings.shortcuts.cancel": "取消",
+  "settings.shortcuts.alsoUsedBy": "与「{commands}」冲突",
 
   "theme.issue.missing": "在 {path} 中找不到主题“{name}”，正在使用内置主题。",
   "theme.issue.unreadable": "无法读取主题“{name}”（{reason}），正在使用内置主题。",
