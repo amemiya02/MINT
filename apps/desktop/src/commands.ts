@@ -8,10 +8,12 @@ import type { MenuSpec } from "./platform/platform.ts";
  */
 export type CommandId =
   | "file.open"
+  | "file.openFolder"
   | "file.save"
   | "tab.close"
   | "tab.next"
   | "tab.previous"
+  | "view.toggleSidebar"
   | "window.new"
   | "app.settings";
 
@@ -24,7 +26,13 @@ export interface Command {
 
 export const commands: readonly Command[] = [
   { id: "file.open", title: "command.file.open", accelerator: "CmdOrCtrl+O" },
+  { id: "file.openFolder", title: "command.file.openFolder" },
   { id: "file.save", title: "command.file.save", accelerator: "CmdOrCtrl+S" },
+  {
+    id: "view.toggleSidebar",
+    title: "command.view.toggleSidebar",
+    accelerator: "CmdOrCtrl+Shift+L",
+  },
   { id: "tab.close", title: "command.tab.close", accelerator: "CmdOrCtrl+W" },
   { id: "tab.next", title: "command.tab.next", accelerator: "Ctrl+Tab" },
   { id: "tab.previous", title: "command.tab.previous", accelerator: "Ctrl+Shift+Tab" },
@@ -55,7 +63,13 @@ export function buildMenu(t: Translate, run: (id: CommandId) => void): MenuSpec[
     },
     {
       label: t("menu.file"),
-      items: [item("file.open"), item("file.save"), { kind: "separator" }, item("tab.close")],
+      items: [
+        item("file.open"),
+        item("file.openFolder"),
+        { kind: "separator" },
+        item("file.save"),
+        item("tab.close"),
+      ],
     },
     {
       label: t("menu.edit"),
@@ -67,6 +81,7 @@ export function buildMenu(t: Translate, run: (id: CommandId) => void): MenuSpec[
         { kind: "native", action: "selectAll", label: t("menu.selectAll") },
       ],
     },
+    { label: t("menu.view"), items: [item("view.toggleSidebar")] },
     {
       label: t("menu.window"),
       items: [item("window.new"), { kind: "separator" }, item("tab.next"), item("tab.previous")],
