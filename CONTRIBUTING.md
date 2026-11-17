@@ -34,6 +34,7 @@ apps/desktop/            Tauri app
     tabs/                Tab store of one window; show a document with useTabStore().openDocument(path)
     commands.ts          Command registry (menus and shortcuts derive from it)
     settings/            Settings schema, store synced with settings.json, settings window
+    updates/             Update checks and the update notice (Platform.checkForUpdate)
   src-tauri/             Rust backend (kept thin, see ADR-0005)
   e2e/                   Playwright tests
 packages/editor/         Editor core: CodeMirror 6, no framework or platform imports
@@ -73,6 +74,74 @@ E2E tests seed the in-memory platform with `launch(page, { files, openDialogResu
 and settings.json via `files: { [settingsPath]: "…" }`, change files from outside with
 `writeFile(page, path, text)`,
 and read files back with `readFile(page, path)` (see `e2e/memory-platform.ts`).
+
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every pull request (and on pushes to `main`
+and `feat/**`): Biome, type check and rustfmt once on Linux, then unit tests,
+Playwright E2E tests, clippy and `cargo test` on Linux, macOS and Windows.
+There are no performance gates.
+
+## Releases and automatic updates
+
+`.github/workflows/release.yml` runs when a tag `vX.Y.Z` is pushed. It builds
+the installers with `tauri-action` (macOS Apple silicon and Intel: `.dmg` +
+`.app.tar.gz`; Windows: NSIS `-setup.exe` + `.msi`; Linux: `.AppImage`, `.deb`,
+`.rpm`), uploads them with signatures and the updater manifest `latest.json` to
+a draft GitHub Release, and publishes the release once all four builds have
+succeeded.
+
+Installed copies of MINT check
+`https://github.com/amemiya02/MINT/releases/latest/download/latest.json` at
+startup (setting `checkForUpdates`, on by default) and from **MINT › Check for
+Updates…**, then download, verify and install the new version and restart.
+Updates are only offered by release builds that were given the updater public
+key, and not to Linux `.deb`/`.rpm` installs (their package manager updates
+them). `pnpm dev`, debug builds and local `pnpm build` need no keys: the
+committed `tauri.conf.json` has an empty `plugins.updater.pubkey` and does not
+create updater artifacts; the release workflow fills both in.
+
+### One-time setup for the maintainer
+
+1. Generate the updater key pair (this signs updates; it is not OS code signing):
+
+   ```sh
+   pnpm --filter @mint/desktop tauri signer generate -w ~/.tauri/mint-updater.key
+   ```
+
+   Choose a password when asked. This writes the private key to
+   `~/.tauri/mint-updater.key` and the public key to `~/.tauri/mint-updater.key.pub`.
+   **Back up the private key and password offline.** If either is lost, installed
+   copies can never auto-update again; users would have to reinstall by hand.
+2. In the GitHub repository, **Settings › Secrets and variables › Actions**:
+
+   | Kind | Name | Value |
+   | --- | --- | --- |
+   | Secret | `TAURI_SIGNING_PRIVATE_KEY` | contents of `~/.tauri/mint-updater.key` |
+   | Secret | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | the password from step 1 |
+   | Variable | `TAURI_UPDATER_PUBKEY` | contents of `~/.tauri/mint-updater.key.pub` |
+
+   The release workflow stops before building if the private key or the public
+   key is missing, and fails to sign if the password is wrong.
+3. **Settings › Actions › General › Workflow permissions**: allow read and write
+   (the workflow also declares `contents: write`).
+
+Optional, not wired yet: Apple Developer ID signing and notarization
+(`APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`,
+`APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`, passed to `tauri-action` as env)
+and Windows code signing. Without them macOS users must right-click › Open the
+first time (or run `xattr -dr com.apple.quarantine /Applications/MINT.app`) and
+Windows SmartScreen warns about an unrecognised app. Updates work either way.
+
+### Cutting a release
+
+1. Set the same version in `apps/desktop/src-tauri/tauri.conf.json`,
+   `apps/desktop/src-tauri/Cargo.toml` and `apps/desktop/package.json`
+   (MSI needs a plain `X.Y.Z` or a numeric pre-release).
+2. Commit, then tag and push: `git tag v0.2.0 && git push origin v0.2.0`.
+   The workflow refuses a tag that does not match `tauri.conf.json`.
+3. When the workflow finishes, the release is public and installed copies see
+   the update on their next check.
 
 ## Commits
 

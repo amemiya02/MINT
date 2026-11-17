@@ -11,6 +11,15 @@ export interface MemoryPlatformOptions {
   /** Answers the question dialog gives, in order; once used up it answers `cancel`. */
   readonly questionDialogResults?: readonly ("yes" | "no" | "cancel")[];
   readonly locale?: string;
+  /**
+   * What the release server answers: a newer version (optionally failing to
+   * install), a failing check, or `"unavailable"` for builds that cannot update.
+   * Without it MINT is up to date.
+   */
+  readonly update?:
+    | { readonly version: string; readonly installError?: string }
+    | { readonly error: string }
+    | "unavailable";
 }
 
 /** Platform implementation backed by memory, for E2E tests and the future web build. */
@@ -22,6 +31,8 @@ export interface MemoryPlatform extends Platform {
   readonly questions: readonly string[];
   /** Whether this window has closed. */
   readonly closed: boolean;
+  /** Versions installed (and restarted into) so far. */
+  readonly updatesInstalled: readonly string[];
   /** Activate a menu item by id, as a click in a native menu would. */
   runMenuItem(id: string): void;
 }
@@ -31,6 +42,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
   const dialogResults = [...(options.openDialogResults ?? [])];
   const questionResults = [...(options.questionDialogResults ?? [])];
   const questions: string[] = [];
+  const updatesInstalled: string[] = [];
   let commands: Extract<MenuItemSpec, { kind: "command" }>[] = [];
   let windowTitle = "";
   let closeHandler: (() => Promise<boolean>) | null = null;
@@ -133,6 +145,27 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     onSettingsChanged(listener) {
       settingsListeners.add(listener);
       return () => settingsListeners.delete(listener);
+    },
+    // A window opened by another one (see `openWindow`) is not the main window.
+    isMainWindow: !window.opener,
+    get updatesInstalled() {
+      return updatesInstalled;
+    },
+    async checkForUpdate() {
+      const update = options.update;
+      if (update === undefined) return { status: "upToDate" };
+      if (update === "unavailable") return { status: "unavailable" };
+      if ("error" in update) throw new Error(update.error);
+      return {
+        status: "available",
+        update: {
+          version: update.version,
+          async install() {
+            if (update.installError) throw new Error(update.installError);
+            updatesInstalled.push(update.version);
+          },
+        },
+      };
     },
     runMenuItem(id) {
       const command = commands.find((c) => c.id === id);

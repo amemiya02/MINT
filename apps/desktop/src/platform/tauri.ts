@@ -10,6 +10,8 @@ import {
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { message, open } from "@tauri-apps/plugin-dialog";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { check } from "@tauri-apps/plugin-updater";
 import type { MenuItemSpec, Platform, SettingsFile } from "./platform.ts";
 
 const nativeItems = {
@@ -90,6 +92,23 @@ export function createTauriPlatform(): Platform {
     onSettingsChanged(listener) {
       const unlisten = listen<SettingsFile>("settings-changed", (event) => listener(event.payload));
       return () => void unlisten.then((stop) => stop());
+    },
+    isMainWindow: getCurrentWindow().label === "main",
+    async checkForUpdate() {
+      // The backend knows whether this build was given an updater key and endpoint.
+      if (!(await invoke<boolean>("updates_supported"))) return { status: "unavailable" };
+      const update = await check();
+      if (!update) return { status: "upToDate" };
+      return {
+        status: "available",
+        update: {
+          version: update.version,
+          async install() {
+            await update.downloadAndInstall();
+            await relaunch();
+          },
+        },
+      };
     },
   };
 }

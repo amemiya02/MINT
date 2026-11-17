@@ -44,3 +44,18 @@ export async function writeFile(page: Page, path: string, text: string): Promise
     [path, text] as const,
   );
 }
+
+/** Activate a native menu item by its command id, as a click in the menu bar would. */
+export async function runMenuItem(page: Page, id: string): Promise<void> {
+  await page.evaluate(
+    (menuId) => (window as unknown as MemoryWindow).__MINT_MEMORY_PLATFORM__.runMenuItem(menuId),
+    id,
+  );
+}
+
+/** Versions MINT has installed (and restarted into) so far. */
+export function updatesInstalled(page: Page): Promise<string[]> {
+  return page.evaluate(() => [
+    ...(window as unknown as MemoryWindow).__MINT_MEMORY_PLATFORM__.updatesInstalled,
+  ]);
+}

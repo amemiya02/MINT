@@ -9,6 +9,7 @@ import { TabStoreContext, useTabStore, useTabsState } from "./tabs/context.ts";
 import { baseName } from "./tabs/paths.ts";
 import { TabBar } from "./tabs/TabBar.tsx";
 import { createTabStore, type Tab, type TabError, type TabStore } from "./tabs/tab-store.ts";
+import { UpdateNotice, useUpdates } from "./updates/updates.tsx";
 
 /** One window of the shell. Each window owns its own tabs; nothing is shared between windows. */
 export function App({ platform }: { readonly platform: Platform }) {
@@ -45,6 +46,7 @@ function Window({ platform, store }: { readonly platform: Platform; readonly sto
   const { tabs, activeId, error } = useTabsState();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const active = tabs.find((tab) => tab.id === activeId) ?? null;
+  const updates = useUpdates(platform);
 
   const open = useCallback(async () => {
     const path = await platform.showOpenDialog({
@@ -68,6 +70,7 @@ function Window({ platform, store }: { readonly platform: Platform; readonly sto
     "tab.previous": () => store.activatePrevious(),
     "window.new": () => void platform.openWindow(),
     "app.settings": () => setSettingsOpen(true),
+    "app.checkForUpdates": () => updates.check(),
   };
 
   useEffect(() => {
@@ -87,6 +90,7 @@ function Window({ platform, store }: { readonly platform: Platform; readonly sto
 
   return (
     <div className="flex h-full flex-col bg-(--mint-bg) text-(--mint-fg)">
+      <UpdateNotice updates={updates} />
       <SettingsIssues />
       {error && (
         <div

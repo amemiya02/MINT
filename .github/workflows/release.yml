@@ -1,0 +1,140 @@
+# Pushing a tag vX.Y.Z builds the installers on macOS, Windows and Linux,
+# uploads them with the updater manifest (latest.json) to a draft GitHub
+# Release, and publishes the release once every platform has succeeded.
+# Installed copies of MINT find the new version through
+# https://github.com/amemiya02/MINT/releases/latest/download/latest.json.
+#
+# Needs (see CONTRIBUTING.md, "Releases"):
+#   secret   TAURI_SIGNING_PRIVATE_KEY           updater private key
+#   secret   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  its password
+#   variable TAURI_UPDATER_PUBKEY                matching public key
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  preflight:
+    name: Check tag and signing setup
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Tag matches the app version
+        run: |
+          version=$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")
+          if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match the version in tauri.conf.json (v${version})."
+            exit 1
+          fi
+      - name: Updater keys are configured
+        env:
+          HAS_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+          PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}
+        run: |
+          if [ "${HAS_PRIVATE_KEY}" != "true" ] || [ -z "${PUBKEY}" ]; then
+            echo "::error::Set the TAURI_SIGNING_PRIVATE_KEY secret and the TAURI_UPDATER_PUBKEY variable (CONTRIBUTING.md, Releases)."
+            exit 1
+          fi
+
+  build:
+    name: Build (${{ matrix.name }})
+    needs: preflight
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS Apple silicon
+            os: macos-latest
+            rust-target: aarch64-apple-darwin
+            args: --target aarch64-apple-darwin
+          - name: macOS Intel
+            os: macos-latest
+            rust-target: x86_64-apple-darwin
+            args: --target x86_64-apple-darwin
+          - name: Windows x64
+            os: windows-latest
+            rust-target: ""
+            args: ""
+          # The oldest supported Ubuntu, so the AppImage runs on as many distributions as possible.
+          - name: Linux x64
+            os: ubuntu-22.04
+            rust-target: ""
+            args: ""
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+          key: ${{ matrix.rust-target }}
+      - name: Install Tauri system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - run: pnpm install --frozen-lockfile
+
+      # The public key and updater artifacts only exist in release builds, so
+      # `pnpm dev` and local `pnpm build` work without any keys. The checkout is
+      # throwaway, so the committed tauri.conf.json is edited in place; both the
+      # Tauri CLI and tauri-action then see the same configuration.
+      - name: Enable the updater in tauri.conf.json
+        shell: bash
+        env:
+          PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}
+          CONF: apps/desktop/src-tauri/tauri.conf.json
+        run: |
+          node -e '
+            const fs = require("fs");
+            const path = process.env.CONF;
+            const config = JSON.parse(fs.readFileSync(path, "utf8"));
+            config.bundle.createUpdaterArtifacts = true;
+            config.plugins.updater.pubkey = process.env.PUBKEY.trim();
+            fs.writeFileSync(path, JSON.stringify(config, null, 2));
+          '
+
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: apps/desktop
+          tauriScript: pnpm tauri
+          args: ${{ matrix.args }}
+          tagName: ${{ github.ref_name }}
+          releaseName: MINT ${{ github.ref_name }}
+          releaseBody: See the assets below to download and install MINT ${{ github.ref_name }}.
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: true
+
+  publish:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      # Publishing makes releases/latest (and so latest.json) point at this version.
+      - name: Publish the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --draft=false --latest

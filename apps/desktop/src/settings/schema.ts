@@ -22,6 +22,7 @@ export const settingsSchema = {
       { value: "en", label: "settings.language.en" },
     ],
   }),
+  checkForUpdates: toggle({ label: "settings.checkForUpdates", default: true }),
 } as const satisfies Record<string, SettingDefinition>;
 
 export type SettingKey = keyof typeof settingsSchema;
@@ -68,11 +69,11 @@ function choice<const T extends string>(
   return { kind: "choice", ...definition };
 }
 
-// Not used by any setting yet; kept so boolean and numeric settings are one table entry away.
-export function toggle(definition: Omit<ToggleSetting, "kind">): ToggleSetting {
+function toggle(definition: Omit<ToggleSetting, "kind">): ToggleSetting {
   return { kind: "toggle", ...definition };
 }
 
+// Not used by any setting yet; kept so numeric settings are one table entry away.
 export function number(definition: Omit<NumberSetting, "kind">): NumberSetting {
   return { kind: "number", ...definition };
 }

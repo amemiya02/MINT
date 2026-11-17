@@ -4,6 +4,7 @@
 
 mod fs;
 mod settings;
+mod updates;
 
 use std::path::PathBuf;
 
@@ -46,6 +47,15 @@ fn write_settings(
     settings::save(&state.path, &values).map_err(|e| e.to_string())
 }
 
+/// Whether this copy of MINT can check for and install new versions itself.
+#[tauri::command]
+fn updates_supported(app: tauri::AppHandle) -> bool {
+    updates::supported(
+        app.config().plugins.0.get("updater"),
+        updates::Build::current(),
+    )
+}
+
 /// Event sent to every window with the reloaded `SettingsFile` whenever the file changes on disk.
 const SETTINGS_CHANGED: &str = "settings-changed";
 
@@ -54,6 +64,12 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            #[cfg(desktop)]
+            {
+                app.handle()
+                    .plugin(tauri_plugin_updater::Builder::new().build())?;
+                app.handle().plugin(tauri_plugin_process::init())?;
+            }
             let path = app.path().app_config_dir()?.join(settings::FILE_NAME);
             let handle = app.handle().clone();
             let watcher = settings::watch(path.clone(), move |file| {
@@ -72,7 +88,8 @@ pub fn run() {
             write_text_file,
             settings_path,
             read_settings,
-            write_settings
+            write_settings,
+            updates_supported
         ])
         .run(tauri::generate_context!())
         .expect("error while running MINT");

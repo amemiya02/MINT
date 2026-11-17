@@ -56,6 +56,30 @@ export interface Platform {
    * whoever changed it. Returns a function that stops listening.
    */
   onSettingsChanged(listener: (file: SettingsFile) => void): () => void;
+
+  /**
+   * Whether this is the first window of the app (the one opened at launch).
+   * Once-per-launch work, such as the startup update check, runs only there.
+   */
+  readonly isMainWindow: boolean;
+
+  /**
+   * Ask the release server whether a newer version of MINT exists. Rejects
+   * when the check fails (offline, server error).
+   */
+  checkForUpdate(): Promise<UpdateCheck>;
+}
+
+export type UpdateCheck =
+  /** This build cannot update itself (development build, no updater key, package-manager install). */
+  | { readonly status: "unavailable" }
+  | { readonly status: "upToDate" }
+  | { readonly status: "available"; readonly update: AvailableUpdate };
+
+export interface AvailableUpdate {
+  readonly version: string;
+  /** Download and install the new version, then restart MINT into it. Rejects if any step fails. */
+  install(): Promise<void>;
 }
 
 export interface QuestionDialogOptions {
