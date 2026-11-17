@@ -17,6 +17,27 @@ export const zhCN: Messages = {
   "command.file.open": "打开…",
   "command.file.save": "保存",
 
+  "command.app.settings": "设置…",
+
+  "settings.title": "设置",
+  "settings.close": "关闭",
+  "settings.storedIn": "保存在 {path}",
+  "settings.openFile": "打开 settings.json",
+  "settings.dismiss": "关闭提示",
+  "settings.issue.unreadable": "settings.json 无法使用（{reason}），继续使用上一次的有效设置。",
+  "settings.issue.invalidValue":
+    "settings.json 中的“{key}”必须是{expected}，该项继续使用上一次的有效设置。",
+  "settings.issue.unknownKey": "settings.json 中有未知的设置项“{key}”，已忽略。",
+  "settings.issue.writeFailed": "无法保存 settings.json：{reason}",
+  "settings.expected.oneOf": "以下之一：{values}",
+  "settings.expected.toggle": " true 或 false ",
+  "settings.expected.number": " {min} 到 {max} 之间的数字",
+
+  "settings.language": "界面语言",
+  "settings.language.system": "跟随系统",
+  "settings.language.zh-CN": "简体中文",
+  "settings.language.en": "English",
+
   "dialog.open.title": "打开文档",
   "dialog.filter.markdown": "Markdown",
 

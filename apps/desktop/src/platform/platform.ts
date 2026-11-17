@@ -26,7 +26,32 @@ export interface Platform {
 
   /** Install the application menu. Item accelerators are active shortcuts. */
   setMenu(menu: readonly MenuSpec[]): Promise<void>;
+
+  /** Absolute path of settings.json in the system configuration directory. */
+  settingsPath(): Promise<string>;
+
+  /** Read and parse settings.json. Values are not validated; that is the shell's job. */
+  readSettings(): Promise<SettingsFile>;
+
+  /** Replace settings.json with `values`, pretty-printed, atomically. */
+  writeSettings(values: SettingsValues): Promise<void>;
+
+  /**
+   * Call `listener` with the reloaded file whenever settings.json changes on disk,
+   * whoever changed it. Returns a function that stops listening.
+   */
+  onSettingsChanged(listener: (file: SettingsFile) => void): () => void;
 }
+
+/** The raw key/value pairs of settings.json. */
+export type SettingsValues = Readonly<Record<string, unknown>>;
+
+/** What settings.json currently holds. */
+export type SettingsFile =
+  | { readonly status: "missing" }
+  | { readonly status: "ok"; readonly values: SettingsValues }
+  /** Unreadable or not a JSON object; `message` says why (e.g. a syntax error and its line). */
+  | { readonly status: "invalid"; readonly message: string };
 
 export interface OpenDialogOptions {
   readonly title: string;

@@ -4,6 +4,8 @@ import { buildMenu, type CommandId } from "./commands.ts";
 import { EditorPane } from "./EditorPane.tsx";
 import { useT } from "./i18n/index.ts";
 import type { Platform } from "./platform/platform.ts";
+import { SettingsDialog } from "./settings/SettingsDialog.tsx";
+import { SettingsIssues } from "./settings/SettingsIssues.tsx";
 
 interface OpenDocument {
   readonly path: string;
@@ -20,24 +22,31 @@ export function App({ platform }: { readonly platform: Platform }) {
   const [document, setDocument] = useState<OpenDocument | null>(null);
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const editor = useRef<MintEditor | null>(null);
   const version = useRef(0);
+
+  const openPath = useCallback(
+    async (path: string) => {
+      try {
+        const text = await platform.readTextFile(path);
+        setDocument({ path, text, session: nextSession++ });
+        setDirty(false);
+        setError(null);
+      } catch (e) {
+        setError(t("error.open", { path, reason: reasonOf(e) }));
+      }
+    },
+    [platform, t],
+  );
 
   const openDocument = useCallback(async () => {
     const path = await platform.showOpenDialog({
       title: t("dialog.open.title"),
       filters: [{ name: t("dialog.filter.markdown"), extensions: ["md", "markdown"] }],
     });
-    if (!path) return;
-    try {
-      const text = await platform.readTextFile(path);
-      setDocument({ path, text, session: nextSession++ });
-      setDirty(false);
-      setError(null);
-    } catch (e) {
-      setError(t("error.open", { path, reason: reasonOf(e) }));
-    }
-  }, [platform, t]);
+    if (path) await openPath(path);
+  }, [platform, t, openPath]);
 
   const saveDocument = useCallback(async () => {
     if (!document || !editor.current) return;
@@ -55,6 +64,7 @@ export function App({ platform }: { readonly platform: Platform }) {
   handlers.current = {
     "file.open": () => void openDocument(),
     "file.save": () => void saveDocument(),
+    "app.settings": () => setSettingsOpen(true),
   };
 
   useEffect(() => {
@@ -79,6 +89,7 @@ export function App({ platform }: { readonly platform: Platform }) {
 
   return (
     <div className="flex h-full flex-col bg-(--mint-bg) text-(--mint-fg)">
+      <SettingsIssues />{" "}
       {error && (
         <div
           role="alert"
@@ -114,6 +125,9 @@ export function App({ platform }: { readonly platform: Platform }) {
           <span title={document.path}>{name}</span>
           <span>{t(dirty ? "status.unsaved" : "status.saved")}</span>
         </footer>
+      )}
+      {settingsOpen && (
+        <SettingsDialog onClose={() => setSettingsOpen(false)} onOpenFile={openPath} />
       )}
     </div>
   );
