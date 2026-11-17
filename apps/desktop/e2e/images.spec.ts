@@ -1,14 +1,20 @@
 import { expect, type Page, test } from "@playwright/test";
-import { launch, listPaths, readBinaryFile, readFile } from "./memory-platform.ts";
+import { launch, listPaths, readBinaryFile, readFile, settingsPath } from "./memory-platform.ts";
 
 /** A 1×1 PNG. */
 const pngBase64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
 const pngBytes = [...Buffer.from(pngBase64, "base64")];
 
-async function openDocument(page: Page, path: string, text: string, binaryFiles = {}) {
+async function openDocument(
+  page: Page,
+  path: string,
+  text: string,
+  binaryFiles = {},
+  settings: Record<string, unknown> = {},
+) {
   await launch(page, {
-    files: { [path]: text },
+    files: { [path]: text, [settingsPath]: JSON.stringify(settings) },
     binaryFiles,
     openDialogResults: [path],
     locale: "en-US",
@@ -123,4 +129,75 @@ test("dropped image files are copied to the asset folder without overwriting", a
   expect(await readFile(page, path)).toBe(
     "Photos:\n![cat-1](assets/cat-1.png)\n![my dog](assets/my%20dog.png)",
   );
+});
+
+for (const { policy, custom, folder, reference } of [
+  { policy: "document", custom: "", folder: "/notes/", reference: "" },
+  { policy: "assets", custom: "", folder: "/notes/assets/", reference: "assets/" },
+  {
+    policy: "documentName",
+    custom: "",
+    folder: "/notes/my doc.assets/",
+    reference: "my%20doc.assets/",
+  },
+  { policy: "custom", custom: "img/shots", folder: "/notes/img/shots/", reference: "img/shots/" },
+  { policy: "custom", custom: "../media", folder: "/media/", reference: "../media/" },
+  { policy: "custom", custom: "/pics/all", folder: "/pics/all/", reference: "../pics/all/" },
+]) {
+  test(`asset folder "${policy}" ${custom} saves next to the document and references it relatively`, async ({
+    page,
+  }) => {
+    const path = "/notes/my doc.md";
+    await openDocument(
+      page,
+      path,
+      "Shot: \n",
+      {},
+      { assetFolder: policy, assetFolderPath: custom },
+    );
+    await page.keyboard.press("End");
+
+    await sendFiles(page, "paste", [{ name: "image.png", mime: "image/png" }]);
+
+    await expect(page.locator(".cm-content")).toContainText(`](${reference}image-`);
+    const saved = (await listPaths(page)).filter((p) => p.endsWith(".png"));
+    expect(saved).toEqual([expect.stringMatching(/image-\d{8}-\d{6}\.png$/)]);
+    const asset = saved[0] ?? "";
+    expect(asset.slice(0, asset.lastIndexOf("/") + 1)).toBe(folder);
+    expect(await readBinaryFile(page, asset)).toEqual(pngBytes);
+  });
+}
+
+test("the asset folder can be chosen in the settings window", async ({ page }) => {
+  await openDocument(page, "/notes/doc.md", "Shot: \n");
+  await page.keyboard.press("ControlOrMeta+,");
+  await page.getByLabel("Asset folder", { exact: true }).selectOption({ label: "Custom folder" });
+  await page.getByLabel("Custom asset folder").fill("pics");
+  await page.keyboard.press("Enter");
+  await expect
+    .poll(async () => JSON.parse((await readFile(page, settingsPath)) ?? "{}"))
+    .toEqual({ assetFolder: "custom", assetFolderPath: "pics" });
+  await page.keyboard.press("Escape");
+
+  await page.locator(".cm-content").click();
+  await page.keyboard.press("ControlOrMeta+End");
+  await sendFiles(page, "paste", [{ name: "image.png", mime: "image/png" }]);
+  await expect(page.locator(".cm-content")).toContainText("](pics/image-");
+});
+
+test("an image that cannot be saved is reported instead of silently skipped", async ({ page }) => {
+  const path = "/notes/doc.md";
+  // A file named `assets` stands where the asset folder should go.
+  await openDocument(page, path, "Shot: \n", { "/notes/assets": pngBase64 });
+  await page.keyboard.press("End");
+
+  await sendFiles(page, "paste", [{ name: "image.png", mime: "image/png" }]);
+
+  const alert = page.getByRole("alert");
+  await expect(alert).toContainText("Could not save the image");
+  await expect(alert).toContainText("/notes/assets");
+  await expect(page.locator(".cm-content")).toHaveText("Shot: ");
+
+  await alert.getByRole("button", { name: "Dismiss" }).click();
+  await expect(page.getByRole("alert")).toHaveCount(0);
 });

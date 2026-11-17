@@ -1,6 +1,6 @@
 import type { LinkTarget } from "@mint/editor";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { createImageHost } from "./assets/image-host.ts";
+import { createImageHost, type ImageSaveFailure } from "./assets/image-host.ts";
 import { createAutosave } from "./autosave/autosave.ts";
 import { CommandPalette } from "./command-palette/CommandPalette.tsx";
 import {
@@ -359,7 +359,16 @@ function TabPanel({
   }, [store, id, onEdited]);
   const currentPath = useRef(path);
   currentPath.current = path;
-  const [imageHost] = useState(() => createImageHost(platform, () => currentPath.current));
+  const settings = useSettingsStore();
+  const [imageFailure, setImageFailure] = useState<ImageSaveFailure | null>(null);
+  const [imageHost] = useState(() =>
+    createImageHost(
+      platform,
+      () => currentPath.current,
+      () => settings.getSnapshot().settings,
+      setImageFailure,
+    ),
+  );
   const onOpenLink = useCallback(
     (link: LinkTarget) => {
       if (link.kind === "external") void platform.openExternal(link.url);
@@ -376,6 +385,9 @@ function TabPanel({
       className="flex h-full flex-col"
     >
       <ExternalChangeNotice tab={tab} />
+      {imageFailure && (
+        <ImageSaveNotice failure={imageFailure} onDismiss={() => setImageFailure(null)} />
+      )}
       <div className="min-h-0 flex-1">
         <EditorPane
           text={tab.text}
@@ -387,6 +399,29 @@ function TabPanel({
           imageHost={imageHost}
         />
       </div>
+    </div>
+  );
+}
+
+/** Tells the user that a pasted or dropped image could not be saved in the asset folder. */
+function ImageSaveNotice(props: {
+  readonly failure: ImageSaveFailure;
+  readonly onDismiss: () => void;
+}) {
+  const t = useT();
+  return (
+    <div
+      role="alert"
+      className="flex items-start justify-between gap-3 border-b border-(--mint-border) bg-(--mint-error-bg) px-4 py-2 text-sm text-(--mint-error-fg)"
+    >
+      <span>{t("error.saveImage", { ...props.failure })}</span>
+      <button
+        type="button"
+        onClick={props.onDismiss}
+        className="shrink-0 rounded px-2 hover:bg-(--mint-hover) focus-visible:outline-2 focus-visible:outline-(--mint-accent)"
+      >
+        {t("error.dismiss")}
+      </button>
     </div>
   );
 }
