@@ -17,7 +17,7 @@ const driver = process.env.TAURI_DRIVER_URL ?? "http://127.0.0.1:4444";
 const application = process.env.MINT_APP;
 
 /** WebDriver's key codes (https://w3c.github.io/webdriver/#keyboard-actions). */
-const keys = { control: "\uE009", end: "\uE010", enter: "\uE007", release: "\uE000" } as const;
+const keys = { control: "\uE009", end: "\uE010", enter: "\uE007" } as const;
 /** The element reference key of the WebDriver protocol. */
 const elementKey = "element-6066-11e4-a52e-4f735466cecf";
 
@@ -45,6 +45,35 @@ async function until<T>(what: string, probe: () => Promise<T | null>, ms = 30_00
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   throw new Error(`timed out waiting for ${what}${last ? `: ${String(last)}` : ""}`);
+}
+
+type KeyAction = { type: "keyDown" | "keyUp"; value: string };
+const typing = (text: string): KeyAction[] =>
+  [...text].flatMap((value) => [
+    { type: "keyDown", value },
+    { type: "keyUp", value },
+  ]);
+/** Hold `modifier` while pressing `key`. */
+const chord = (modifier: string, key: string): KeyAction[] => [
+  { type: "keyDown", value: modifier },
+  ...typing(key),
+  { type: "keyUp", value: modifier },
+];
+async function keyActions(actions: KeyAction[]): Promise<void> {
+  await command("POST", `/session/${session}/actions`, {
+    actions: [{ type: "key", id: "keyboard", actions }],
+  });
+  await command("DELETE", `/session/${session}/actions`);
+}
+
+/** Fail with what the window shows, which says which step went missing. */
+async function explain(e: unknown): Promise<never> {
+  const page = await command<string>("POST", `/session/${session}/execute/sync`, {
+    script:
+      'return document.body.innerText + "\\n(focus: " + document.activeElement?.className + ")"',
+    args: [],
+  }).catch((err: unknown) => `(cannot read the page: ${String(err)})`);
+  throw new Error(`${String(e)}\n--- the window shows ---\n${page}`);
 }
 
 let dir = "";
@@ -82,16 +111,21 @@ test("a document opened from the command line can be edited and saved", async ()
   });
 
   await command("POST", `/session/${session}/element/${editor}/click`, {});
-  await command("POST", `/session/${session}/element/${editor}/value`, {
-    text: `${keys.control}${keys.end}${keys.release}${keys.enter}second line`,
-  });
-  await command("POST", `/session/${session}/element/${editor}/value`, {
-    text: `${keys.control}s${keys.release}`,
-  });
+  // Key actions go to the focused element, as real key presses do.
+  await keyActions([...chord(keys.control, keys.end), ...typing(`${keys.enter}second line`)]);
+  await until(
+    "the edit to show",
+    async () => {
+      const text = await command<string>("GET", `/session/${session}/element/${editor}/text`);
+      return text.includes("second line") ? text : null;
+    },
+    10_000,
+  ).catch(explain);
+  await keyActions(chord(keys.control, "s"));
 
   const saved = await until("the document to be saved", async () => {
     const text = await readFile(document, "utf8");
     return text.includes("second line") ? text : null;
-  });
+  }).catch(explain);
   assert.equal(saved, "# Smoke\n\nfirst line\nsecond line");
 });

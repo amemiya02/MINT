@@ -1,7 +1,8 @@
-import { type KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from "react";
+import { type KeyboardEvent, useEffect, useId, useMemo, useState } from "react";
 import { useT } from "../i18n/index.ts";
 import { baseName, documentExtensions, isWithin } from "../paths.ts";
 import type { Platform } from "../platform/platform.ts";
+import { useModalDialog } from "../window/useModalDialog.ts";
 import { type FuzzyMatch, fuzzyMatch } from "./fuzzy.ts";
 
 export interface QuickOpenProps {
@@ -88,7 +89,7 @@ function useCandidates(
 export function QuickOpen(props: QuickOpenProps) {
   const { platform, folder, recentDocuments, onOpenDocument, onClose } = props;
   const t = useT();
-  const dialog = useRef<HTMLDialogElement>(null);
+  const { close, props: dialogProps } = useModalDialog(onClose);
   const listId = useId();
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(0);
@@ -99,13 +100,9 @@ export function QuickOpen(props: QuickOpenProps) {
   );
   const current = Math.min(selected, results.length - 1);
 
-  useEffect(() => {
-    dialog.current?.showModal();
-  }, []);
-
   function choose(result: Result | undefined) {
     if (!result) return;
-    dialog.current?.close();
+    close();
     onOpenDocument(result.path);
   }
 
@@ -129,12 +126,11 @@ export function QuickOpen(props: QuickOpenProps) {
 
   return (
     <dialog
-      ref={dialog}
+      {...dialogProps}
       aria-label={t("quickOpen.title")}
-      onClose={onClose}
       onMouseDown={(event) => {
         // A click on the backdrop dismisses quick open.
-        if (event.target === dialog.current) dialog.current.close();
+        if (event.target === event.currentTarget) close();
       }}
       className="mx-auto mt-[12vh] w-[min(36rem,calc(100%-2rem))] rounded-lg border border-(--mint-border) bg-(--mint-bg) p-0 text-(--mint-fg) shadow-xl backdrop:bg-black/20"
     >

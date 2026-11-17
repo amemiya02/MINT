@@ -1,5 +1,6 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { useT } from "../i18n/index.ts";
+import { useModalDialog } from "../window/useModalDialog.ts";
 import { useTabStore } from "./context.ts";
 import { diffLines } from "./line-diff.ts";
 import { tabName } from "./tab-name.ts";
@@ -88,24 +89,19 @@ interface CompareDialogProps {
 /** Line-by-line differences between the tab's text (removed) and the disk (added). */
 function CompareDialog({ name, local, disk, onChoose, onClose }: CompareDialogProps) {
   const t = useT();
-  const dialog = useRef<HTMLDialogElement>(null);
+  const { close, props: dialogProps } = useModalDialog(onClose);
   const titleId = useId();
   const lines = useMemo(() => diffLines(local, disk), [local, disk]);
 
-  useEffect(() => {
-    dialog.current?.showModal();
-  }, []);
-
   const choose = (choice: "keepMine" | "loadDisk") => {
-    dialog.current?.close();
+    close();
     onChoose(choice);
   };
 
   return (
     <dialog
-      ref={dialog}
+      {...dialogProps}
       aria-labelledby={titleId}
-      onClose={onClose}
       className="m-auto flex max-h-[80vh] w-[min(48rem,calc(100%-2rem))] flex-col rounded-lg border border-(--mint-border) bg-(--mint-bg) p-0 text-(--mint-fg) shadow-xl backdrop:bg-black/30"
     >
       <div className="border-b border-(--mint-border) px-5 py-3">
@@ -136,7 +132,7 @@ function CompareDialog({ name, local, disk, onChoose, onClose }: CompareDialogPr
         <button
           type="button"
           className="rounded-md border border-(--mint-border) px-3 py-1 hover:bg-(--mint-hover) focus-visible:outline-2 focus-visible:outline-(--mint-accent)"
-          onClick={() => dialog.current?.close()}
+          onClick={close}
         >
           {t("external.compare.close")}
         </button>

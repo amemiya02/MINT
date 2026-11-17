@@ -1,9 +1,10 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useId, useState } from "react";
 import { useT } from "../i18n/index.ts";
 import { baseName } from "../paths.ts";
 import type { Platform } from "../platform/platform.ts";
 import { useSettings } from "../settings/useSettings.ts";
 import { useTheme } from "../theme/useTheme.ts";
+import { useModalDialog } from "../window/useModalDialog.ts";
 import { documentHtml, type HtmlExportChoice } from "./html-export.ts";
 
 /** What a document exports to: an HTML file, or a PDF through the print dialog. */
@@ -37,7 +38,7 @@ export function ExportDialog({ platform, format, path, getText, onClose }: Expor
   const t = useT();
   const { settings } = useSettings();
   const { folder, themes } = useTheme();
-  const dialog = useRef<HTMLDialogElement>(null);
+  const { close, props: dialogProps } = useModalDialog(onClose);
   const titleId = useId();
   const themeId = useId();
   const appearanceId = useId();
@@ -56,10 +57,6 @@ export function ExportDialog({ platform, format, path, getText, onClose }: Expor
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    dialog.current?.showModal();
-  }, []);
-
   const exportFile = async () => {
     setBusy(true);
     setError(null);
@@ -71,7 +68,7 @@ export function ExportDialog({ platform, format, path, getText, onClose }: Expor
           { ...choice, embedImages: true },
         );
         await platform.printDocument(html, { title: name });
-        dialog.current?.close();
+        close();
         return;
       }
       const target = await platform.showSaveDialog({
@@ -86,7 +83,7 @@ export function ExportDialog({ platform, format, path, getText, onClose }: Expor
         );
         await platform.writeTextFile(target, html);
       }
-      dialog.current?.close();
+      close();
     } catch (e) {
       setError(t("export.html.failed", { reason: e instanceof Error ? e.message : String(e) }));
       setBusy(false);
@@ -95,11 +92,11 @@ export function ExportDialog({ platform, format, path, getText, onClose }: Expor
 
   return (
     <dialog
-      ref={dialog}
+      {...dialogProps}
       aria-labelledby={titleId}
-      onClose={onClose}
       onCancel={(e) => {
         if (busy) e.preventDefault();
+        else dialogProps.onCancel(e);
       }}
       className="m-auto w-[min(26rem,calc(100%-2rem))] rounded-lg border border-(--mint-border) bg-(--mint-bg) p-0 text-(--mint-fg) shadow-xl backdrop:bg-black/30"
     >
@@ -170,12 +167,7 @@ export function ExportDialog({ platform, format, path, getText, onClose }: Expor
           )}
         </div>
         <div className="flex justify-end gap-2 border-t border-(--mint-border) px-5 py-3">
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => dialog.current?.close()}
-            className={buttonClass}
-          >
+          <button type="button" disabled={busy} onClick={close} className={buttonClass}>
             {t("export.html.cancel")}
           </button>
           <button

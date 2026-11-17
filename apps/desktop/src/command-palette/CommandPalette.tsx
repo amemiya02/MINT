@@ -1,9 +1,10 @@
-import { type KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from "react";
+import { type KeyboardEvent, useEffect, useId, useMemo, useState } from "react";
 import { type Command, type CommandId, commands, shortcutOf } from "../commands.ts";
 import { useT } from "../i18n/index.ts";
 import { ariaKeyShortcut, formatAccelerator } from "../keys.ts";
 import { type FuzzyMatch, fuzzyMatch } from "../quick-open/fuzzy.ts";
 import { useSettings } from "../settings/useSettings.ts";
+import { useModalDialog } from "../window/useModalDialog.ts";
 
 export interface CommandPaletteProps {
   /** Run the chosen command; called after the palette has closed. */
@@ -21,7 +22,7 @@ interface Result {
 export function CommandPalette({ onRun, onClose }: CommandPaletteProps) {
   const t = useT();
   const { shortcuts } = useSettings().settings;
-  const dialog = useRef<HTMLDialogElement>(null);
+  const { close, props: dialogProps } = useModalDialog(onClose);
   const listId = useId();
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(0);
@@ -40,16 +41,12 @@ export function CommandPalette({ onRun, onClose }: CommandPaletteProps) {
   const current = Math.min(selected, results.length - 1);
 
   useEffect(() => {
-    dialog.current?.showModal();
-  }, []);
-
-  useEffect(() => {
     document.getElementById(`${listId}-${current}`)?.scrollIntoView({ block: "nearest" });
   }, [listId, current]);
 
   function choose(result: Result | undefined) {
     if (!result) return;
-    dialog.current?.close();
+    close();
     onRun(result.command.id);
   }
 
@@ -69,12 +66,11 @@ export function CommandPalette({ onRun, onClose }: CommandPaletteProps) {
 
   return (
     <dialog
-      ref={dialog}
+      {...dialogProps}
       aria-label={t("commandPalette.title")}
-      onClose={onClose}
       onMouseDown={(event) => {
         // A click on the backdrop dismisses the palette.
-        if (event.target === dialog.current) dialog.current.close();
+        if (event.target === event.currentTarget) close();
       }}
       className="mx-auto mt-[12vh] w-[min(36rem,calc(100%-2rem))] rounded-lg border border-(--mint-border) bg-(--mint-bg) p-0 text-(--mint-fg) shadow-xl backdrop:bg-black/20"
     >
