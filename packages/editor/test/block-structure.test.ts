@@ -277,6 +277,27 @@ describe("outline", () => {
     expect(outlineEvents()).toBe(2);
     expect(editor.getOutline().map((heading) => heading.text)).toEqual(["One!", "bodyx"]);
   });
+
+  it("notifies subscribers when the editor scrolls, and reports the visible range", () => {
+    const text = "# One\n\nbody\n\n## Two\n";
+    const { editor, parent } = open(text);
+    const events: string[] = [];
+    editor.subscribe((event) => events.push(event.type));
+    parent.querySelector(".cm-scroller")?.dispatchEvent(new Event("scroll"));
+    expect(events).toContain("scroll");
+
+    const { from, to } = editor.getVisibleRange();
+    expect(from).toBeGreaterThanOrEqual(0);
+    expect(to).toBeGreaterThanOrEqual(from);
+    expect(to).toBeLessThanOrEqual(text.length);
+  });
+
+  it("jumps to a heading, scrolling it to the top, in getText() offsets", () => {
+    const { editor } = open("\uFEFFa\r\n\r\n## Two\r\n");
+    const [two] = editor.getOutline();
+    editor.setSelection({ anchor: two?.from ?? -1, scrollIntoView: "start" });
+    expect(editor.getSelection()).toEqual({ anchor: 6, head: 6 });
+  });
 });
 
 describe("footnotes", () => {
