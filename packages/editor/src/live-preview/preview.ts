@@ -167,7 +167,18 @@ const inlinePreview = ViewPlugin.fromClass(
       }
     }
   },
-  { decorations: (plugin) => plugin.decorations },
+  {
+    decorations: (plugin) => plugin.decorations,
+    eventObservers: {
+      // CodeMirror does not always update the view when a composition ends (e.g. when the
+      // input method's last change was already read). Ask for an update so stale markers go.
+      compositionend(_event, view) {
+        setTimeout(() => {
+          if (this.stale && !view.composing) view.dispatch({});
+        });
+      },
+    },
+  },
 );
 
 const blockPreview = StateField.define<DecorationSet>({
