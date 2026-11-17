@@ -1,7 +1,12 @@
 import { expect, test } from "@playwright/test";
-import { launch, questionsAsked, readFile } from "./memory-platform.ts";
+import { launch, questionsAsked, readFile, settingsPath } from "./memory-platform.ts";
 
-const files = { "/notes/a.md": "# Alpha\n", "/notes/b.md": "# Beta\n" };
+const files = {
+  "/notes/a.md": "# Alpha\n",
+  "/notes/b.md": "# Beta\n",
+  // These tests are about unsaved changes, so autosave must not save them meanwhile.
+  [settingsPath]: '{ "autosave": false }',
+};
 
 test("open several documents in tabs and switch between them", async ({ page }) => {
   await launch(page, { files, openDialogResults: ["/notes/a.md", "/notes/b.md"], locale: "en-US" });
