@@ -1,5 +1,5 @@
 import { Channel, convertFileSrc, invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { emitTo, listen } from "@tauri-apps/api/event";
 import {
   Menu,
   MenuItem,
@@ -14,6 +14,7 @@ import { message, open, save } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
+import { type PrintJob, printEvents } from "../print/protocol.ts";
 import type {
   DirectoryEntry,
   FileMatches,
@@ -64,6 +65,36 @@ export function createTauriPlatform(): Platform {
         filters: filters.map((f) => ({ name: f.name, extensions: [...f.extensions] })),
       });
       return picked ?? null;
+    },
+    async printDocument(html, { title }) {
+      // A window of its own shows the document and opens the print dialog on it (src/print/main.ts).
+      const label = `print-${crypto.randomUUID()}`;
+      const job: PrintJob = { html, title };
+      let deliver = (_sent: Promise<void>) => {};
+      const delivered = new Promise<void>((resolve) => {
+        deliver = resolve;
+      });
+      const stop = await listen<string>(printEvents.ready, (event) => {
+        if (event.payload !== label) return;
+        stop();
+        deliver(emitTo(label, printEvents.document, job));
+      });
+      const window = new WebviewWindow(label, {
+        url: "/print.html",
+        title,
+        width: 860,
+        height: 900,
+      });
+      try {
+        await new Promise<void>((resolve, reject) => {
+          void window.once("tauri://created", () => resolve());
+          void window.once("tauri://error", (e) => reject(new Error(String(e.payload))));
+        });
+      } catch (e) {
+        stop();
+        throw e;
+      }
+      await delivered;
     },
     async showOpenFolderDialog({ title }) {
       return (await open({ title, multiple: false, directory: true })) ?? null;

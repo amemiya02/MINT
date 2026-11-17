@@ -37,6 +37,7 @@ export async function documentHtml(source: HtmlExportSource, choice: HtmlExportC
   const { platform, settings } = source;
   const userTheme =
     choice.theme === "" ? "" : await readUserTheme(platform, source.themeFolder, choice.theme);
+  // Only resolving images: export never saves one.
   const images = createImageHost(
     platform,
     () => source.path,

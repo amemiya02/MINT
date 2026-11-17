@@ -18,6 +18,7 @@ export const en = {
   "command.file.open": "Open…",
   "command.file.save": "Save",
   "command.file.exportHtml": "Export as HTML…",
+  "command.file.exportPdf": "Export as PDF…",
   "command.file.openFolder": "Open Folder…",
   "command.file.quickOpen": "Quick Open…",
   "command.view.toggleSidebar": "Toggle Sidebar",
@@ -167,6 +168,10 @@ export const en = {
   "export.html.exporting": "Exporting…",
   "export.html.cancel": "Cancel",
   "export.html.failed": "Could not export: {reason}",
+  "export.pdf.title": "Export as PDF",
+  "export.pdf.print": "Print…",
+  "export.pdf.hint":
+    "In the print dialog, choose “Save as PDF” (macOS), “Microsoft Print to PDF” (Windows) or “Print to File” (Linux).",
 
   "theme.issue.missing":
     "The theme “{name}” was not found in {path}. The built-in theme is in use.",

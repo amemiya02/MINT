@@ -82,6 +82,7 @@ export const commands = [
     group: "save",
   },
   { id: "file.exportHtml", title: "command.file.exportHtml", menu: "file", group: "export" },
+  { id: "file.exportPdf", title: "command.file.exportPdf", menu: "file", group: "export" },
 
   // Typora's shortcut. A plain paste turns rich text from the clipboard into Markdown.
   {

@@ -11,7 +11,7 @@ import {
   type ShellCommandId,
 } from "./commands.ts";
 import { EditorPane } from "./EditorPane.tsx";
-import { ExportDialog } from "./export/ExportDialog.tsx";
+import { ExportDialog, type ExportFormat } from "./export/ExportDialog.tsx";
 import { FindBar, type FindMode } from "./find/FindBar.tsx";
 import { type Translate, useT } from "./i18n/index.ts";
 import type { Platform } from "./platform/platform.ts";
@@ -113,8 +113,11 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   /** True while the settings window records a shortcut: no shortcut may run meanwhile. */
   const [recordingShortcut, setRecordingShortcut] = useState(false);
   const { shortcuts } = useSettings().settings;
-  /** The tab being exported while the export dialog shows. */
-  const [exporting, setExporting] = useState<number | null>(null);
+  /** The tab being exported, and to what, while the export dialog shows. */
+  const [exporting, setExporting] = useState<{
+    readonly tab: number;
+    readonly format: ExportFormat;
+  } | null>(null);
   const active = tabs.find((tab) => tab.id === activeId) ?? null;
   const updates = useUpdates(platform);
   const [folder, setFolder] = useState<string | null>(null);
@@ -188,7 +191,10 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
       if (activeId !== null) void store.save(activeId);
     },
     "file.exportHtml": () => {
-      if (activeId !== null) setExporting(activeId);
+      if (activeId !== null) setExporting({ tab: activeId, format: "html" });
+    },
+    "file.exportPdf": () => {
+      if (activeId !== null) setExporting({ tab: activeId, format: "pdf" });
     },
     "edit.find": () => showFind("find"),
     "edit.replace": () => showFind("replace"),
@@ -264,7 +270,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     [platform, store, recovery],
   );
 
-  const exportedTab = tabs.find((tab) => tab.id === exporting) ?? null;
+  const exportedTab = tabs.find((tab) => tab.id === exporting?.tab) ?? null;
   const name = active ? baseName(active.path) : null;
   const dirty = active?.dirty ?? false;
   useEffect(() => {
@@ -378,6 +384,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
       {exportedTab && (
         <ExportDialog
           platform={platform}
+          format={exporting?.format ?? "html"}
           path={exportedTab.path}
           getText={() => store.editor(exportedTab.id)?.getText() ?? exportedTab.text}
           onClose={() => {

@@ -81,6 +81,8 @@ export interface MemoryPlatform extends Platform {
   readonly questions: readonly string[];
   /** The paths each save dialog suggested, in order. */
   readonly saveDialogs: readonly string[];
+  /** The documents printed so far, in order. */
+  readonly printed: readonly { readonly html: string; readonly title: string }[];
   /** Whether this window has closed. */
   readonly closed: boolean;
   /** Versions installed (and restarted into) so far. */
@@ -111,6 +113,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
   const dialogResults = [...(options.openDialogResults ?? [])];
   const saveDialogResults = [...(options.saveDialogResults ?? [])];
   const saveDialogs: string[] = [];
+  const printed: { html: string; title: string }[] = [];
   const folderDialogResults = [...(options.openFolderDialogResults ?? [])];
   const watchers = new Set<{ root: string; onChange: (paths: readonly string[]) => void }>();
   const questionResults = [...(options.questionDialogResults ?? [])];
@@ -248,6 +251,12 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     },
     async showOpenDialog() {
       return dialogResults.shift() ?? null;
+    },
+    get printed() {
+      return printed;
+    },
+    async printDocument(html, { title }) {
+      printed.push({ html, title });
     },
     get saveDialogs() {
       return saveDialogs;

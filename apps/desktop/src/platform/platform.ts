@@ -36,6 +36,13 @@ export interface Platform {
    */
   showSaveDialog(options: SaveDialogOptions): Promise<string | null>;
 
+  /**
+   * Print a standalone HTML document (as HTML export writes it) through the
+   * system print dialog, where the user saves it as a PDF. `title` names the
+   * print job, and so the suggested PDF file. Resolves once the dialog is up.
+   */
+  printDocument(html: string, options: { readonly title: string }): Promise<void>;
+
   /** Ask the user to pick a folder. Resolves to its path, or `null` if cancelled. */
   showOpenFolderDialog(options: { readonly title: string }): Promise<string | null>;
 

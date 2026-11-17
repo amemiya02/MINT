@@ -6,8 +6,12 @@ import { baseName } from "../tabs/paths.ts";
 import { useTheme } from "../theme/useTheme.ts";
 import { documentHtml, type HtmlExportChoice } from "./html-export.ts";
 
+/** What a document exports to: an HTML file, or a PDF through the print dialog. */
+export type ExportFormat = "html" | "pdf";
+
 interface ExportDialogProps {
   readonly platform: Platform;
+  readonly format: ExportFormat;
   /** The document to export. */
   readonly path: string;
   /** Its current text, unsaved edits included. */
@@ -25,8 +29,11 @@ function stem(path: string): string {
   return baseName(path).replace(/\.(md|markdown|mdown|mkd|txt)$/i, "");
 }
 
-/** Export a document as a single HTML file: pick the theme, appearance and whether to embed images. */
-export function ExportDialog({ platform, path, getText, onClose }: ExportDialogProps) {
+/**
+ * Export a document: pick the theme and appearance, then either save a single
+ * HTML file (optionally embedding images) or print it, to save as a PDF.
+ */
+export function ExportDialog({ platform, format, path, getText, onClose }: ExportDialogProps) {
   const t = useT();
   const { settings } = useSettings();
   const { folder, themes } = useTheme();
@@ -38,7 +45,12 @@ export function ExportDialog({ platform, path, getText, onClose }: ExportDialogP
   const [choice, setChoice] = useState<HtmlExportChoice>(() => ({
     // The look on screen: the theme in use and the current appearance.
     theme: themes.includes(settings.theme) ? settings.theme : "",
-    appearance: document.documentElement.dataset.appearance === "dark" ? "dark" : "light",
+    // Paper is light; HTML keeps the current appearance.
+    appearance:
+      format === "html" && document.documentElement.dataset.appearance === "dark"
+        ? "dark"
+        : "light",
+    // The print window has no folder to resolve images against: PDFs always embed them.
     embedImages: true,
   }));
   const [busy, setBusy] = useState(false);
@@ -53,6 +65,15 @@ export function ExportDialog({ platform, path, getText, onClose }: ExportDialogP
     setError(null);
     try {
       const name = stem(path);
+      if (format === "pdf") {
+        const html = await documentHtml(
+          { platform, path, text: getText(), settings, themeFolder: folder, title: name },
+          { ...choice, embedImages: true },
+        );
+        await platform.printDocument(html, { title: name });
+        dialog.current?.close();
+        return;
+      }
       const target = await platform.showSaveDialog({
         title: t("export.html.saveTitle"),
         defaultPath: `${path.slice(0, path.length - baseName(path).length)}${name}.html`,
@@ -93,7 +114,7 @@ export function ExportDialog({ platform, path, getText, onClose }: ExportDialogP
           id={titleId}
           className="border-b border-(--mint-border) px-5 py-3 text-base font-medium"
         >
-          {t("export.html.title")}
+          {t(format === "pdf" ? "export.pdf.title" : "export.html.title")}
         </h2>
         <div className="flex flex-col gap-4 px-5 py-4 text-sm">
           <div className="flex items-center justify-between gap-4">
@@ -126,16 +147,19 @@ export function ExportDialog({ platform, path, getText, onClose }: ExportDialogP
               <option value="dark">{t("settings.appearance.dark")}</option>
             </select>
           </div>
-          <div className="flex items-center justify-between gap-4">
-            <label htmlFor={imagesId}>{t("export.html.embedImages")}</label>
-            <input
-              id={imagesId}
-              type="checkbox"
-              checked={choice.embedImages}
-              onChange={(e) => setChoice({ ...choice, embedImages: e.target.checked })}
-              className="size-4 accent-(--mint-accent)"
-            />
-          </div>
+          {format === "html" && (
+            <div className="flex items-center justify-between gap-4">
+              <label htmlFor={imagesId}>{t("export.html.embedImages")}</label>
+              <input
+                id={imagesId}
+                type="checkbox"
+                checked={choice.embedImages}
+                onChange={(e) => setChoice({ ...choice, embedImages: e.target.checked })}
+                className="size-4 accent-(--mint-accent)"
+              />
+            </div>
+          )}
+          {format === "pdf" && <p className="text-(--mint-muted)">{t("export.pdf.hint")}</p>}
           {error && (
             <p
               role="alert"
@@ -159,7 +183,13 @@ export function ExportDialog({ platform, path, getText, onClose }: ExportDialogP
             disabled={busy}
             className={`${buttonClass} border-(--mint-accent) font-medium`}
           >
-            {t(busy ? "export.html.exporting" : "export.html.export")}
+            {t(
+              busy
+                ? "export.html.exporting"
+                : format === "pdf"
+                  ? "export.pdf.print"
+                  : "export.html.export",
+            )}
           </button>
         </div>
       </form>
