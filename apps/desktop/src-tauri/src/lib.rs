@@ -8,8 +8,8 @@ mod fs;
 mod recovery;
 mod search;
 mod settings;
-mod updates;
 mod themes;
+mod updates;
 mod walk;
 
 use std::collections::HashMap;

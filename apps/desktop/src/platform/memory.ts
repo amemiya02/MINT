@@ -73,6 +73,8 @@ export interface MemoryPlatform extends Platform {
   readonly closed: boolean;
   /** Versions installed (and restarted into) so far. */
   readonly updatesInstalled: readonly string[];
+  /** The application menu last installed with `setMenu`. */
+  readonly menu: readonly MenuSpec[];
   /** Activate a menu item by id, as a click in a native menu would. */
   runMenuItem(id: string): void;
 }
@@ -94,6 +96,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
   const questions: string[] = [];
   const updatesInstalled: string[] = [];
   let commands: Extract<MenuItemSpec, { kind: "command" }>[] = [];
+  let installedMenu: readonly MenuSpec[] = [];
   let windowTitle = "";
   const openedUrls: string[] = [];
   let closeHandler: (() => Promise<boolean>) | null = null;
@@ -352,6 +355,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       document.title = title;
     },
     async setMenu(menu: readonly MenuSpec[]) {
+      installedMenu = menu;
       commands = menu.flatMap((m) => m.items.filter((i) => i.kind === "command"));
     },
     async settingsPath() {
@@ -403,6 +407,9 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     externalRemove(path) {
       remove(path);
       notify(path);
+    },
+    get menu() {
+      return installedMenu;
     },
     async takeRecoverySnapshots() {
       const snapshots = leftOver ?? [];

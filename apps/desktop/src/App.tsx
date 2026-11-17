@@ -1,7 +1,14 @@
 import type { LinkTarget } from "@mint/editor";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { createAutosave } from "./autosave/autosave.ts";
-import { buildMenu, type CommandId } from "./commands.ts";
+import { CommandPalette } from "./command-palette/CommandPalette.tsx";
+import {
+  buildMenu,
+  type CommandId,
+  type EditorInvocation,
+  findCommand,
+  type ShellCommandId,
+} from "./commands.ts";
 import { EditorPane } from "./EditorPane.tsx";
 import { FindBar, type FindMode } from "./find/FindBar.tsx";
 import { type Translate, useT } from "./i18n/index.ts";
@@ -99,6 +106,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   const { tabs, activeId, error } = useTabsState();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [quickOpenVisible, setQuickOpenVisible] = useState(false);
+  const [paletteVisible, setPaletteVisible] = useState(false);
   const active = tabs.find((tab) => tab.id === activeId) ?? null;
   const updates = useUpdates(platform);
   const [folder, setFolder] = useState<string | null>(null);
@@ -154,7 +162,9 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     if (activeId !== null) setFind((f) => ({ mode, request: (f?.request ?? 0) + 1 }));
   };
 
-  const handlers = useRef<Record<CommandId, () => void>>({} as Record<CommandId, () => void>);
+  const handlers = useRef<Record<ShellCommandId, () => void>>(
+    {} as Record<ShellCommandId, () => void>,
+  );
   handlers.current = {
     "file.open": () => void open(),
     "file.openFolder": () => void pickFolder(),
@@ -174,14 +184,27 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     "view.toggleSidebar": () => setSidebarVisible((visible) => !visible),
     "window.new": () => void platform.openWindow(),
     "app.settings": () => setSettingsOpen(true),
-    "view.toggleSourceMode": () => {
-      if (activeId !== null) store.editor(activeId)?.execute("toggleSourceMode");
-    },
     "app.checkForUpdates": () => updates.check(),
+    "view.commandPalette": () => setPaletteVisible(true),
+  };
+
+  // Editor commands run on the active document; the others go to the handlers above.
+  const run = useRef<(id: CommandId) => void>(() => {});
+  run.current = (id) => {
+    const { editor: invocation } = findCommand(id);
+    if (!invocation) {
+      handlers.current[id as ShellCommandId]();
+      return;
+    }
+    const editor = activeId === null ? undefined : store.editor(activeId);
+    if (!editor) return;
+    // `execute` is generic per command; an invocation pairs a command with its own arguments.
+    (editor.execute as unknown as (...call: EditorInvocation) => boolean)(...invocation);
+    editor.focus();
   };
 
   useEffect(() => {
-    void platform.setMenu(buildMenu(t, (id) => handlers.current[id]()));
+    void platform.setMenu(buildMenu(t, (id) => run.current(id)));
   }, [platform, t]);
 
   useEffect(
@@ -287,6 +310,9 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
           )}
         </div>
       </div>
+      {paletteVisible && (
+        <CommandPalette onRun={(id) => run.current(id)} onClose={() => setPaletteVisible(false)} />
+      )}
       {quickOpenVisible && (
         <QuickOpen
           platform={platform}
