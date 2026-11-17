@@ -17,6 +17,8 @@
   --mint-muted: #6b717a;
   --mint-border: #e3e5e8;
   --mint-hover: #f1f2f4;
+  --mint-selected: #e3efec;
+  --mint-sidebar-bg: #f7f7f6;
   --mint-accent: #2f7d6d;
   --mint-error-bg: #fdecea;
   --mint-error-fg: #a1260d;
@@ -35,6 +37,8 @@
     --mint-muted: #9aa0a8;
     --mint-border: #33373c;
     --mint-hover: #2a2d31;
+    --mint-selected: #24423c;
+    --mint-sidebar-bg: #191b1e;
     --mint-accent: #5fc2ac;
     --mint-error-bg: #3b1f1c;
     --mint-error-fg: #f2b8ad;

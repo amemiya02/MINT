@@ -1,5 +1,6 @@
 import type { MintEditor } from "@mint/editor";
 import type { Platform } from "../platform/platform.ts";
+import { isWithin, rebasePath } from "./paths.ts";
 
 /** One open document in this window. */
 export interface Tab {
@@ -69,6 +70,16 @@ export interface TabStore {
   /** Hide the notice about a document that was deleted or moved (the tab stays unsaved). */
   dismissExternal(id: number): void;
 
+  /** A file or directory was renamed: tabs of documents at or under `from` follow it to `to`. */
+  pathRenamed(from: string, to: string): void;
+  /**
+   * A file or directory was moved to the trash: tabs of documents at or under
+   * it close, except those with unsaved changes (saving them restores the file).
+   */
+  pathTrashed(path: string): void;
+
+  /** The editor of a tab, once its view has mounted. */
+  editor(id: number): MintEditor | null;
   /** Called by a tab's editor view as it mounts (`editor`) and unmounts (`null`). */
   attachEditor(id: number, editor: MintEditor | null): void;
   /** Called by a tab's editor view on every text change. */
@@ -127,14 +138,26 @@ export function createTabStore({ platform, askUnsaved }: TabStoreOptions): TabSt
       cleanVersions.set(tab.id, 0);
       diskTexts.set(tab.id, text);
       saveEpochs.set(tab.id, 0);
-      unwatchers.set(
-        tab.id,
-        platform.watchFile(path, () => void checkDisk(tab.id)).catch(() => () => {}),
-      );
+      watch(tab.id, path);
       set({ tabs: [...state.tabs, tab], activeId: tab.id, error: null });
     } catch (e) {
       set({ error: { kind: "open", path, reason: reasonOf(e) } });
     }
+  }
+
+  /** Watch the tab's document for changes by other programs (replacing any earlier watch). */
+  function watch(id: number, path: string) {
+    unwatch(id);
+    unwatchers.set(
+      id,
+      platform.watchFile(path, () => void checkDisk(id)).catch(() => () => {}),
+    );
+  }
+
+  function unwatch(id: number) {
+    const stop = unwatchers.get(id);
+    unwatchers.delete(id);
+    void stop?.then((f) => f());
   }
 
   function hasOwnEdits(id: number) {
@@ -256,9 +279,7 @@ export function createTabStore({ platform, askUnsaved }: TabStoreOptions): TabSt
       diskTexts.delete(id);
       saveEpochs.delete(id);
       recheck.delete(id);
-      const unwatch = unwatchers.get(id);
-      unwatchers.delete(id);
-      void unwatch?.then((stop) => stop());
+      unwatch(id);
       set({ tabs, activeId });
       return true;
     },
@@ -313,6 +334,22 @@ export function createTabStore({ platform, askUnsaved }: TabStoreOptions): TabSt
     dismissExternal(id) {
       updateTab(id, { external: null });
     },
+
+    pathRenamed(from, to) {
+      const before = state.tabs;
+      set({ tabs: state.tabs.map((t) => ({ ...t, path: rebasePath(t.path, from, to) })) });
+      for (const tab of state.tabs) {
+        if (before.find((t) => t.id === tab.id)?.path !== tab.path) watch(tab.id, tab.path);
+      }
+    },
+
+    pathTrashed(path) {
+      for (const tab of state.tabs) {
+        if (isWithin(tab.path, path) && !tab.dirty) void store.close(tab.id);
+      }
+    },
+
+    editor: (id) => editors.get(id) ?? null,
 
     attachEditor(id, editor) {
       if (editor) editors.set(id, editor);
