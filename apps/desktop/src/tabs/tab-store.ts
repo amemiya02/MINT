@@ -348,7 +348,6 @@ export function createTabStore({ platform, askUnsaved }: TabStoreOptions): TabSt
         if (isWithin(tab.path, path) && !tab.dirty) void store.close(tab.id);
       }
     },
-
     editor: (id) => editors.get(id) ?? null,
 
     attachEditor(id, editor) {
