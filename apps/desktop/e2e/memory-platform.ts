@@ -1,7 +1,10 @@
 import type { Page } from "@playwright/test";
 import type { MemoryPlatform, MemoryPlatformOptions } from "../src/platform/memory.ts";
 
-export { memorySettingsPath as settingsPath } from "../src/platform/memory.ts";
+export {
+  memoryRecoveryDir as recoveryDir,
+  memorySettingsPath as settingsPath,
+} from "../src/platform/memory.ts";
 
 // Page functions are serialised into the browser, so they reach the platform through `window`.
 type MintWindow = {
@@ -106,5 +109,12 @@ export async function writeFile(page: Page, path: string, text: string): Promise
   await page.evaluate(
     ([p, t]) => (window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.writeTextFile(p, t),
     [path, text] as const,
+  );
+}
+
+/** Every file the in-memory platform holds, keyed by path (documents, settings, recovery area). */
+export function files(page: Page): Promise<Record<string, string>> {
+  return page.evaluate(() =>
+    Object.fromEntries((window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.files),
   );
 }

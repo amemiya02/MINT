@@ -85,6 +85,7 @@ export const en = {
   "settings.language.system": "Follow system",
   "settings.language.zh-CN": "简体中文",
   "settings.language.en": "English",
+  "settings.autosave": "Save automatically",
 
   "dialog.open.title": "Open Document",
   "dialog.filter.markdown": "Markdown",
@@ -135,4 +136,12 @@ export const en = {
   "unsaved.save": "Save",
   "unsaved.discard": "Don't Save",
   "unsaved.cancel": "Cancel",
+
+  "recovery.title": "Restore Unsaved Changes",
+  "recovery.message":
+    "MINT did not quit normally last time. Do you want to restore the unsaved changes to {names}?",
+  "recovery.separator": ", ",
+  "recovery.restore": "Restore",
+  "recovery.discard": "Discard",
+  "recovery.later": "Decide Later",
 } as const;
