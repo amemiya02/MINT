@@ -8,6 +8,7 @@
 #   secret   TAURI_SIGNING_PRIVATE_KEY           updater private key
 #   secret   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  its password
 #   variable TAURI_UPDATER_PUBKEY                matching public key
+# Then distribute.yml updates the Homebrew tap and winget (optional tokens).
 name: Release
 
 on:
@@ -133,8 +134,27 @@ jobs:
     needs: build
     runs-on: ubuntu-22.04
     steps:
+      - uses: actions/checkout@v5
+      # The package managers and the README link to these exact file names
+      # (packaging/render.mjs): the macOS dmgs, the Windows NSIS setup, the
+      # Linux AppImage and deb.
+      - name: Check the distributed installers are attached
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --json assets --jq '.assets[].name' \
+            | node packaging/render.mjs check-assets "${GITHUB_REF_NAME#v}"
       # Publishing makes releases/latest (and so latest.json) point at this version.
       - name: Publish the draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --draft=false --latest
+
+  # Homebrew tap and winget; each channel no-ops until its token is configured.
+  distribute:
+    name: Update package managers
+    needs: publish
+    uses: ./.github/workflows/distribute.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets: inherit

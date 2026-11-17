@@ -38,6 +38,8 @@ jobs:
         run: pnpm exec biome ci .
       - name: Type check
         run: pnpm typecheck
+      - name: Package manager manifests (Homebrew cask, winget)
+        run: pnpm test:packaging
       - name: rustfmt
         run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check
 
