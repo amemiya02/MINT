@@ -53,6 +53,8 @@ export interface PreviewContext {
   touchesSelectedLines(from: number, to: number): boolean;
   /** Add a decoration. Empty ranges are ignored unless the decoration carries a widget. */
   add(from: number, to: number, decoration: Decoration): void;
+  /** Add a line decoration (`Decoration.line`) to the line containing `pos`. */
+  line(pos: number, decoration: Decoration): void;
   /**
    * Hide `from`–`to` (a Markdown marker) without changing the text. Line
    * breaks inside the range stay visible: only the text on each line is hidden.
@@ -89,6 +91,10 @@ function build(
     },
     add(from, to, decoration) {
       if (to > from || decoration.spec.widget) decorations.push(decoration.range(from, to));
+    },
+    line(pos, decoration) {
+      const start = state.doc.lineAt(pos).from;
+      decorations.push(decoration.range(start, start));
     },
     hide(from, to) {
       for (let pos = from; pos < to; ) {

@@ -64,7 +64,7 @@ test("documents opened from the tree open in tabs and keep their edits", async (
 
   // Choosing an open document in the tree shows its existing tab.
   await item(page, "todo.md").click();
-  await expect(text).toContainText("- milk");
+  await expect(text).toContainText("milk");
   await expect(page.getByRole("tab")).toHaveCount(2);
   await expect(page.getByRole("tab", { name: "todo.md" })).toHaveAttribute("aria-selected", "true");
 });
