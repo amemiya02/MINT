@@ -7,6 +7,7 @@ export const en = {
   "menu.app": "MINT",
   "menu.file": "File",
   "menu.edit": "Edit",
+  "menu.window": "Window",
   "menu.quit": "Quit MINT",
   "menu.cut": "Cut",
   "menu.copy": "Copy",
@@ -15,6 +16,10 @@ export const en = {
 
   "command.file.open": "Open…",
   "command.file.save": "Save",
+  "command.tab.close": "Close Tab",
+  "command.tab.next": "Show Next Tab",
+  "command.tab.previous": "Show Previous Tab",
+  "command.window.new": "New Window",
 
   "command.app.settings": "Settings…",
 
@@ -51,4 +56,14 @@ export const en = {
 
   "error.open": "Could not open {path}: {reason}",
   "error.save": "Could not save {path}: {reason}",
+
+  "tabs.label": "Open documents",
+  "tabs.close": "Close {name}",
+
+  "unsaved.title": "Unsaved Changes",
+  "unsaved.message":
+    "Do you want to save the changes you made to {name}? Your changes will be lost if you don't save them.",
+  "unsaved.save": "Save",
+  "unsaved.discard": "Don't Save",
+  "unsaved.cancel": "Cancel",
 } as const;

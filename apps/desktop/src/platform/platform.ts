@@ -22,10 +22,25 @@ export interface Platform {
   /** Ask the user to pick a document. Resolves to its path, or `null` if cancelled. */
   showOpenDialog(options: OpenDialogOptions): Promise<string | null>;
 
+  /** Ask a three-way question (e.g. save / don't save / cancel). Dismissing the dialog answers `cancel`. */
+  showQuestionDialog(options: QuestionDialogOptions): Promise<"yes" | "no" | "cancel">;
+
   setWindowTitle(title: string): Promise<void>;
 
-  /** Install the application menu. Item accelerators are active shortcuts. */
+  /** Install the application menu for this window. Item accelerators are active shortcuts. */
   setMenu(menu: readonly MenuSpec[]): Promise<void>;
+
+  /** Open a new, independent window of the shell. */
+  openWindow(): Promise<void>;
+
+  /** Ask to close this window; it goes through the close-request handler like a click on its close button. */
+  closeWindow(): Promise<void>;
+
+  /**
+   * Intercept requests to close this window. The window closes only if the
+   * handler resolves to `true`. Returns an unsubscribe function.
+   */
+  onCloseRequested(handler: () => Promise<boolean>): () => void;
 
   /** Absolute path of settings.json in the system configuration directory. */
   settingsPath(): Promise<string>;
@@ -41,6 +56,14 @@ export interface Platform {
    * whoever changed it. Returns a function that stops listening.
    */
   onSettingsChanged(listener: (file: SettingsFile) => void): () => void;
+}
+
+export interface QuestionDialogOptions {
+  readonly title: string;
+  readonly message: string;
+  readonly yes: string;
+  readonly no: string;
+  readonly cancel: string;
 }
 
 /** The raw key/value pairs of settings.json. */
