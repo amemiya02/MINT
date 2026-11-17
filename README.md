@@ -1,85 +1,46 @@
 # MINT
 
-MINT (MINT Is Not Typora) is an open-source, cross-platform desktop Markdown
-editor. It edits the `.md` files on your disk in place with live preview, and
-every part of a file you did not edit is saved back byte-for-byte unchanged.
+**MINT Is Not Typora.** An open-source, cross-platform Markdown editor with live preview.
+
+[简体中文](README.zh-CN.md)
+
+## Features
+
+- **Live preview:** Markdown renders as you type, and the syntax under the cursor is revealed for editing. A source mode is one shortcut away.
+- **Your files, untouched:** MINT edits plain `.md` files in place, and every part you didn't change is saved back byte-for-byte.
+- **Rich content:** GFM tables and task lists, math (KaTeX), Mermaid diagrams, front matter, footnotes and inline HTML.
+- **Folders and tabs:** a file tree, quick open, search across a folder, tabs and multiple windows.
+- **Writing tools:** outline, focus mode, typewriter mode, a command palette, and Typora-style shortcuts you can change.
+- **Safe by default:** autosave and crash recovery, image pasting into an assets folder, and export to HTML and PDF.
+- Light and dark modes, [custom CSS themes](docs/themes.md), and an interface in English and 简体中文.
 
 ## Install
 
-Every version is published on the
-[Releases page](https://github.com/amemiya02/MINT/releases/latest). MINT checks
-for new versions at startup and from **Check for Updates…**, and updates
-itself (except the Linux `.deb`, which is updated by reinstalling it).
+Download the installer for your system from [Releases](https://github.com/amemiya02/MINT/releases/latest):
 
-### macOS
+| System | File |
+|---|---|
+| macOS (Apple silicon / Intel) | `MINT_<version>_aarch64.dmg` / `MINT_<version>_x64.dmg` |
+| Windows | `MINT_<version>_x64-setup.exe` |
+| Linux | `.AppImage`, `.deb` or `.rpm` |
 
-With [Homebrew](https://brew.sh):
+The installers are not code-signed yet:
 
-```sh
-brew install --cask amemiya02/mint/mint
-```
+- **macOS:** if MINT "cannot be opened" or is "damaged", run `xattr -dr com.apple.quarantine /Applications/MINT.app`.
+- **Windows:** if SmartScreen blocks it, choose **More info › Run anyway**.
 
-Or download `MINT_<version>_aarch64.dmg` (Apple silicon) or
-`MINT_<version>_x64.dmg` (Intel) and drag MINT to Applications.
+MINT updates itself when a new version is out (except `.deb` and `.rpm` installs).
 
-MINT is not notarized by Apple yet. If macOS says the app cannot be opened or
-is damaged, right-click MINT in Applications and choose **Open**, or run:
+## Build from source
 
-```sh
-xattr -dr com.apple.quarantine /Applications/MINT.app
-```
-
-### Windows
-
-With [winget](https://learn.microsoft.com/windows/package-manager/winget/):
-
-```powershell
-winget install amemiya02.MINT
-```
-
-Or download and run `MINT_<version>_x64-setup.exe` (installs for the current
-user, no administrator rights needed). The `.msi` on the release page is for
-administrators who deploy machine-wide.
-
-The installer is not code-signed yet, so SmartScreen may show "Windows
-protected your PC": choose **More info › Run anyway**.
-
-### Linux (x64)
-
-**AppImage** (any distribution with glibc 2.35 or newer, e.g. Ubuntu 22.04+,
-Debian 12+, Fedora 36+):
+Requires Node 24+, pnpm 10+, Rust and the [Tauri prerequisites](https://tauri.app/start/prerequisites/).
 
 ```sh
-chmod +x MINT_<version>_amd64.AppImage
-./MINT_<version>_amd64.AppImage
+pnpm install
+pnpm dev
 ```
 
-On Ubuntu 24.04 and newer, AppImages need FUSE 2 first:
-`sudo apt install libfuse2t64`.
-
-**Debian / Ubuntu** (`.deb`):
-
-```sh
-sudo apt install ./MINT_<version>_amd64.deb
-```
-
-An `.rpm` for Fedora and openSUSE is also attached to each release.
-
-## Using MINT
-
-- Double-click a `.md` or `.markdown` file, or run `mint notes.md`, to open it
-  in MINT. If MINT is already running, the document opens there.
-- **New** (⌘N / Ctrl+N) starts an untitled document; the first save asks where
-  to put it. **Save As…** (⌘⇧S / Ctrl+Shift+S) saves a copy under a new name.
-- Links work like Typora's: a plain click places the cursor in the link so you
-  can edit it, and ⌘-click (Ctrl-click on Windows and Linux) follows it. Web
-  links open in your browser; links to local `.md` files open them in MINT.
-- MINT only reads and writes the documents and folders you opened (and their
-  folders), not the rest of your disk.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the project layout and tests.
 
 ## License
 
