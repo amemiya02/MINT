@@ -10,7 +10,7 @@ import {
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { message, open } from "@tauri-apps/plugin-dialog";
-import type { MenuItemSpec, Platform, SettingsFile } from "./platform.ts";
+import type { MenuItemSpec, Platform, RecoverySnapshot, SettingsFile } from "./platform.ts";
 
 const nativeItems = {
   cut: "Cut",
@@ -91,6 +91,10 @@ export function createTauriPlatform(): Platform {
       const unlisten = listen<SettingsFile>("settings-changed", (event) => listener(event.payload));
       return () => void unlisten.then((stop) => stop());
     },
+    takeRecoverySnapshots: () => invoke<RecoverySnapshot[]>("take_recovery_snapshots"),
+    writeRecoverySnapshot: (id, contents) =>
+      invoke<void>("write_recovery_snapshot", { id, contents }),
+    deleteRecoverySnapshot: (id) => invoke<void>("delete_recovery_snapshot", { id }),
   };
 }
 

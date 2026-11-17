@@ -5,7 +5,10 @@ import type { Platform } from "../platform/platform.ts";
 export interface Tab {
   readonly id: number;
   readonly path: string;
-  /** Text as read from disk; the tab's editor owns the live text. */
+  /**
+   * Text the tab's editor starts from: as read from disk, or unsaved work
+   * restored from the recovery area. The editor owns the live text.
+   */
   readonly text: string;
   readonly dirty: boolean;
 }
@@ -43,6 +46,12 @@ export interface TabStore {
   subscribe(listener: () => void): () => void;
 
   openDocument(path: string): Promise<void>;
+  /**
+   * Open a tab showing unsaved `text` for the document at `path` (e.g. work
+   * recovered after a crash), without reading the file. If the document is
+   * already open its tab is focused instead. Returns the tab's id.
+   */
+  restoreDocument(path: string, text: string): number;
   activate(id: number): void;
   activateNext(): void;
   activatePrevious(): void;
@@ -51,6 +60,8 @@ export interface TabStore {
   /** Close every tab (e.g. before the window closes). Resolves to false if the user cancelled. */
   closeAll(): Promise<boolean>;
   save(id: number): Promise<boolean>;
+  /** The live text of a tab, or `null` if it has no editor (yet). */
+  getText(id: number): string | null;
 
   /** Called by a tab's editor view as it mounts (`editor`) and unmounts (`null`). */
   attachEditor(id: number, editor: MintEditor | null): void;
@@ -122,6 +133,18 @@ export function createTabStore({ platform, askUnsaved }: TabStoreOptions): TabSt
       return pending;
     },
 
+    restoreDocument(path, text) {
+      const existing = state.tabs.find((t) => t.path === path);
+      if (existing) {
+        set({ activeId: existing.id });
+        return existing.id;
+      }
+      const tab: Tab = { id: nextId++, path, text, dirty: true };
+      versions.set(tab.id, 0);
+      set({ tabs: [...state.tabs, tab], activeId: tab.id });
+      return tab.id;
+    },
+
     activate(id) {
       if (state.tabs.some((t) => t.id === id)) set({ activeId: id });
     },
@@ -169,6 +192,8 @@ export function createTabStore({ platform, askUnsaved }: TabStoreOptions): TabSt
         return false;
       }
     },
+
+    getText: (id) => editors.get(id)?.getText() ?? null,
 
     attachEditor(id, editor) {
       if (editor) editors.set(id, editor);
