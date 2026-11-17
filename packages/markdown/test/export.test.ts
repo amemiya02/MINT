@@ -30,3 +30,25 @@ describe("renderHtml", () => {
     expect(renderHtml("~~gone~~\n", { ...defaultDialect, gfm: false })).toBe("<p>~~gone~~</p>");
   });
 });
+
+describe("math", () => {
+  const tex = (source: string) => `<annotation encoding="application/x-tex">${source}</annotation>`;
+
+  it("renders $…$ inline math and $$…$$ math blocks with KaTeX", () => {
+    const html = renderHtml("Euler: $e^{i\\pi}+1=0$\n\n$$\n\\int_0^1 x\\,dx\n$$\n", defaultDialect);
+    expect(html).toMatch(/^<p>Euler: <span class="katex">.*<\/span><\/p>/s);
+    expect(html).toContain('<span class="katex-display">');
+    expect(html).toContain(tex("e^{i\\pi}+1=0"));
+    expect(html).toContain(tex("\\int_0^1 x\\,dx"));
+  });
+
+  it("leaves dollar signs as text when the dialect disables math", () => {
+    expect(renderHtml("$x$\n", { ...defaultDialect, math: false })).toBe("<p>$x$</p>");
+  });
+
+  it("shows an error for a malformed formula instead of failing the export", () => {
+    const html = renderHtml("$\\frac{1}{$ and $y$\n", defaultDialect);
+    expect(html).toContain('class="katex-error"');
+    expect(html).toContain(tex("y"));
+  });
+});

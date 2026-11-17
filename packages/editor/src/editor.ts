@@ -14,6 +14,7 @@ import {
 } from "./find.ts";
 import { type LinkTarget, linkOpening } from "./links.ts";
 import { inlineSpans } from "./live-preview/inline-spans.ts";
+import { mathPreview } from "./live-preview/math.ts";
 import { livePreview, previewRenderer } from "./live-preview/preview.ts";
 
 /**
@@ -104,6 +105,7 @@ export function createEditor(options: EditorOptions): MintEditor {
         markdownSupport(dialect),
         syntaxHighlighting(defaultHighlightStyle),
         previewRenderer.of(inlineSpans),
+        mathPreview(),
         preview.of(modeExtension()),
         host.openLink ? linkOpening((link) => host.openLink?.(link)) : [],
         EditorView.lineWrapping,
