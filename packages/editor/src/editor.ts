@@ -101,7 +101,9 @@ export type EditorEvent =
   | { readonly type: "selection" }
   | { readonly type: "mode" }
   /** The headings returned by {@link MintEditor.getOutline} changed. */
-  | { readonly type: "outline" };
+  | { readonly type: "outline" }
+  /** The editor scrolled; {@link MintEditor.getVisibleRange} may have changed. */
+  | { readonly type: "scroll" };
 
 export interface MintEditor {
   /** The full file text, ready to be written to disk byte for byte. */
@@ -115,13 +117,26 @@ export interface MintEditor {
   getMode(): EditorMode;
   /** The outline: every heading in document order, with its level, text and position. */
   getOutline(): readonly OutlineHeading[];
-  /** Select a range; with `scrollIntoView`, also scroll it into view (e.g. when jumping to a search result). */
-  setSelection(selection: { anchor: number; head?: number; scrollIntoView?: boolean }): void;
+  /**
+   * Select a range; with `scrollIntoView`, also scroll it into view (e.g. when
+   * jumping to a search result). `"start"` scrolls its line to the top of the
+   * editor (e.g. when jumping to a heading of the outline).
+   */
+  setSelection(selection: {
+    anchor: number;
+    head?: number;
+    scrollIntoView?: boolean | "start";
+  }): void;
+  /**
+   * The text on screen: from the start of the first line visible at the top of
+   * the editor to the end of the last one visible at the bottom, in `getText()` offsets.
+   */
+  getVisibleRange(): { readonly from: number; readonly to: number };
   /** Matches of the find query set with the `setFindQuery` command. */
   getFindStatus(): FindStatus;
   /** Run a named command. Returns whether it did anything. */
   execute<C extends EditorCommand>(command: C, ...args: EditorCommands[C]): boolean;
-  /** Listen for text, selection, mode and outline changes. Returns an unsubscribe function. */
+  /** Listen for text, selection, mode, outline and scroll changes. Returns an unsubscribe function. */
   subscribe(listener: (event: EditorEvent) => void): () => void;
   focus(): void;
   destroy(): void;
@@ -177,6 +192,7 @@ export function createEditor(options: EditorOptions): MintEditor {
         preview.of(modeExtension()),
         host.openLink ? linkOpening((link) => host.openLink?.(link)) : [],
         EditorView.lineWrapping,
+        EditorView.domEventObservers({ scroll: () => emit({ type: "scroll" }) }),
         EditorView.updateListener.of((update) => {
           if (update.docChanged) emit({ type: "change" });
           if (update.selectionSet) emit({ type: "selection" });
@@ -235,13 +251,30 @@ export function createEditor(options: EditorOptions): MintEditor {
         from: toFileOffset(view.state, heading.from),
       })),
     setSelection({ anchor, head = anchor, scrollIntoView = false }) {
+      const selection = EditorSelection.single(
+        fromFileOffset(view.state, anchor),
+        fromFileOffset(view.state, head),
+      );
       view.dispatch({
-        selection: EditorSelection.single(
-          fromFileOffset(view.state, anchor),
-          fromFileOffset(view.state, head),
-        ),
-        scrollIntoView,
+        selection,
+        scrollIntoView: scrollIntoView === true,
+        effects:
+          scrollIntoView === "start"
+            ? EditorView.scrollIntoView(selection.main.head, { y: "start", yMargin: 0 })
+            : [],
       });
+    },
+    getVisibleRange() {
+      // The part of the scroller inside the window, in document coordinates.
+      const box = view.scrollDOM.getBoundingClientRect();
+      const top = Math.max(box.top, 0) - view.documentTop;
+      const bottom = Math.min(box.bottom, window.innerHeight) - view.documentTop;
+      const first = view.lineBlockAtHeight(Math.max(top, 0) + 1);
+      const last = view.lineBlockAtHeight(Math.max(bottom - 1, top + 1));
+      return {
+        from: toFileOffset(view.state, first.from),
+        to: toFileOffset(view.state, Math.max(first.to, last.to)),
+      };
     },
     getFindStatus: () => findStatus(view.state),
     execute: (command, ...args) => (commands[command] as (...a: typeof args) => boolean)(...args),

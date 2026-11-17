@@ -29,7 +29,7 @@ import { ThemeIssue } from "./theme/ThemeIssue.tsx";
 import { UpdateNotice, useUpdates } from "./updates/updates.tsx";
 import { documentExtensions } from "./workspace/paths.ts";
 import { type RecentList, useRecent } from "./workspace/recent.ts";
-import { Sidebar } from "./workspace/Sidebar.tsx";
+import { Sidebar, type SidebarView } from "./workspace/Sidebar.tsx";
 
 /** One window of the shell. Each window owns its own tabs; nothing is shared between windows. */
 export function App({ platform }: { readonly platform: Platform }) {
@@ -112,6 +112,11 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   const updates = useUpdates(platform);
   const [folder, setFolder] = useState<string | null>(null);
   const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [sidebarView, setSidebarView] = useState<SidebarView>("files");
+  // Without a folder the sidebar only has the outline, shown once asked for.
+  const sidebarShown = sidebarVisible && (folder !== null || sidebarView === "outline");
+  // Editors attach after their tab mounts; re-render so the outline finds the active one.
+  const [, editorsChanged] = useReducer((n: number) => n + 1, 0);
   /** Errors from folder actions; document errors live in the tab store. */
   const [folderError, setFolderError] = useState<string | null>(null);
   const { recent, add: addRecent } = useRecent(platform);
@@ -182,7 +187,19 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     },
     "tab.next": () => store.activateNext(),
     "tab.previous": () => store.activatePrevious(),
-    "view.toggleSidebar": () => setSidebarVisible((visible) => !visible),
+    "view.toggleSidebar": () => {
+      if (!sidebarShown && folder === null) setSidebarView("outline");
+      setSidebarVisible(!sidebarShown);
+    },
+    "view.outline": () => {
+      setFolderSearch(null);
+      if (sidebarShown && sidebarView === "outline") {
+        setSidebarVisible(false);
+      } else {
+        setSidebarView("outline");
+        setSidebarVisible(true);
+      }
+    },
     "window.new": () => void platform.openWindow(),
     "app.settings": () => setSettingsOpen(true),
     "app.checkForUpdates": () => updates.check(),
@@ -254,10 +271,13 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
             }}
           />
         )}
-        {folderSearch === null && folder && sidebarVisible && (
+        {folderSearch === null && sidebarShown && (
           <Sidebar
             platform={platform}
             root={folder}
+            view={sidebarView}
+            onViewChange={setSidebarView}
+            editor={activeId === null ? null : store.editor(activeId)}
             activePath={activePath}
             onOpenDocument={(path) => void store.openDocument(path)}
             onRenamed={(from, to) => store.pathRenamed(from, to)}
@@ -285,6 +305,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
                 active={tab.id === activeId}
                 platform={platform}
                 onModeChange={modeChanged}
+                onEditorChange={editorsChanged}
                 onEdited={onEdited}
               />
             ))}
@@ -339,19 +360,25 @@ function TabPanel({
   active,
   platform,
   onModeChange,
+  onEditorChange,
   onEdited,
 }: {
   readonly tab: Tab;
   readonly active: boolean;
   readonly platform: Platform;
   readonly onModeChange: () => void;
+  /** The tab's editor was created or destroyed. */
+  readonly onEditorChange: () => void;
   readonly onEdited: (id: number) => void;
 }) {
   const store = useTabStore();
   const { id, path } = tab;
   const onReady = useCallback(
-    (editor: Parameters<TabStore["attachEditor"]>[1]) => store.attachEditor(id, editor),
-    [store, id],
+    (editor: Parameters<TabStore["attachEditor"]>[1]) => {
+      store.attachEditor(id, editor);
+      onEditorChange();
+    },
+    [store, id, onEditorChange],
   );
   const onChange = useCallback(() => {
     store.markChanged(id);
