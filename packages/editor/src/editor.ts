@@ -20,6 +20,7 @@ import {
 import { type FormattingCommands, formattingCommands } from "./formatting.ts";
 import { type LinkTarget, linkOpening } from "./links.ts";
 import { inlineSpans } from "./live-preview/inline-spans.ts";
+import { mathPreview } from "./live-preview/math.ts";
 import { livePreview, previewRenderer } from "./live-preview/preview.ts";
 import { themeable } from "./theme.ts";
 
@@ -127,6 +128,7 @@ export function createEditor(options: EditorOptions): MintEditor {
         markdownSupport(dialect),
         themeable(),
         previewRenderer.of(inlineSpans),
+        mathPreview(),
         preview.of(modeExtension()),
         host.openLink ? linkOpening((link) => host.openLink?.(link)) : [],
         EditorView.lineWrapping,
