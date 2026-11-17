@@ -7,3 +7,4 @@ playwright-report/
 apps/desktop/src-tauri/gen/schemas/
 *.log
 .DS_Store
+.claude/worktrees/
