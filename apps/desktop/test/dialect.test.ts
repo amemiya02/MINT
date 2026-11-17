@@ -3,7 +3,14 @@
 import { defaultDialect, renderHtml } from "@mint/markdown";
 import { describe, expect, it } from "vitest";
 import { dialectOf } from "../src/settings/dialect.ts";
-import { defaultSettings } from "../src/settings/settings.ts";
+
+/** The extended syntax settings as they are by default. */
+const defaultSettings = {
+  extendedToc: false,
+  extendedHighlight: false,
+  extendedSuperscript: false,
+  extendedSubscript: false,
+};
 
 describe("dialectOf", () => {
   it("is the default dialect for the default settings", () => {

@@ -1,12 +1,12 @@
 import { type Dialect, defaultDialect } from "@mint/markdown";
-import { useMemo } from "react";
-import type { Settings } from "./schema.ts";
-import { useSettings } from "./useSettings.ts";
 
-type DialectSettings = Pick<
-  Settings,
-  "extendedToc" | "extendedHighlight" | "extendedSuperscript" | "extendedSubscript"
->;
+/** The settings that make up the dialect: the extended syntax switches (see schema.ts). */
+export interface DialectSettings {
+  readonly extendedToc: boolean;
+  readonly extendedHighlight: boolean;
+  readonly extendedSuperscript: boolean;
+  readonly extendedSubscript: boolean;
+}
 
 /**
  * The dialect the settings describe: the default dialect with the extended
@@ -22,14 +22,4 @@ export function dialectOf(settings: DialectSettings): Dialect {
       subscript: settings.extendedSubscript,
     },
   };
-}
-
-/** The current dialect; a new object only when one of its switches changes. */
-export function useDialect(): Dialect {
-  const { extendedToc, extendedHighlight, extendedSuperscript, extendedSubscript } =
-    useSettings().settings;
-  return useMemo(
-    () => dialectOf({ extendedToc, extendedHighlight, extendedSuperscript, extendedSubscript }),
-    [extendedToc, extendedHighlight, extendedSuperscript, extendedSubscript],
-  );
 }
