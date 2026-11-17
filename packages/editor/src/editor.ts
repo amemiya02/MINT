@@ -1,7 +1,14 @@
 import { defaultKeymap, history, historyKeymap, redo, undo } from "@codemirror/commands";
 import { syntaxTree } from "@codemirror/language";
+import { selectNextOccurrence } from "@codemirror/search";
 import { Compartment, EditorSelection, EditorState, type Extension } from "@codemirror/state";
-import { EditorView, keymap } from "@codemirror/view";
+import {
+  crosshairCursor,
+  drawSelection,
+  EditorView,
+  keymap,
+  rectangularSelection,
+} from "@codemirror/view";
 import { type Dialect, defaultDialect, renderHtml } from "@mint/markdown";
 import { markdownSupport } from "./dialect.ts";
 import {
@@ -138,6 +145,11 @@ export interface EditorCommands extends FindCommands, FormattingCommands, TableC
   toggleSourceMode: [];
   /** Set the language of the fenced code block at the cursor; only its info string changes. */
   setCodeBlockLanguage: [language: string];
+  /**
+   * Add a selection at the next occurrence of the main selection's text (after
+   * selecting the word at a bare cursor first), for editing several places at once.
+   */
+  selectNextOccurrence: [];
 }
 export type EditorCommand = keyof EditorCommands;
 
@@ -158,7 +170,12 @@ export interface MintEditor {
    * disk. The selection stays next to the text around it; undo restores the old text.
    */
   replaceText(text: string): void;
+  /** The main selection range. */
   getSelection(): TextSelection;
+  /** Every selection range (several when there are several cursors), in document order. */
+  getSelections(): TextSelection[];
+  /** Put a cursor or selection at each range; there must be at least one. The last range is the main one. */
+  setSelections(ranges: readonly { readonly anchor: number; readonly head?: number }[]): void;
   getMode(): EditorMode;
   getSettings(): EditorSettings;
   /** Change some settings; the others keep their value. Takes effect at once. */
@@ -242,6 +259,11 @@ export function createEditor(options: EditorOptions): MintEditor {
         options.phrases ? EditorState.phrases.of(options.phrases) : [],
         preferences.extension,
         history(),
+        // Several cursors: typed text goes to all of them. Alt-drag selects a rectangle.
+        EditorState.allowMultipleSelections.of(true),
+        drawSelection(),
+        rectangularSelection(),
+        crosshairCursor(),
         findReplace(),
         keymap.of([
           ...defaultKeymap.filter((b) => !b.key || !hostKeys.has(b.key)),
@@ -311,6 +333,7 @@ export function createEditor(options: EditorOptions): MintEditor {
       return true;
     },
     setCodeBlockLanguage: (language) => setCodeBlockLanguage(view, language),
+    selectNextOccurrence: () => selectNextOccurrence(view),
     toggleSourceMode: () => {
       mode = mode === "livePreview" ? "source" : "livePreview";
       view.dispatch({ effects: preview.reconfigure(modeExtension()) });
@@ -327,6 +350,24 @@ export function createEditor(options: EditorOptions): MintEditor {
     getSelection() {
       const { anchor, head } = view.state.selection.main;
       return { anchor: toFileOffset(view.state, anchor), head: toFileOffset(view.state, head) };
+    },
+    getSelections() {
+      return view.state.selection.ranges.map(({ anchor, head }) => ({
+        anchor: toFileOffset(view.state, anchor),
+        head: toFileOffset(view.state, head),
+      }));
+    },
+    setSelections(ranges) {
+      const selection = EditorSelection.create(
+        ranges.map(({ anchor, head = anchor }) =>
+          EditorSelection.range(
+            fromFileOffset(view.state, anchor),
+            fromFileOffset(view.state, head),
+          ),
+        ),
+        ranges.length - 1,
+      );
+      view.dispatch({ selection });
     },
     getMode: () => mode,
     getSettings: () => settings,

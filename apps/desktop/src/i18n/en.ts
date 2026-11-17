@@ -18,6 +18,7 @@ export const en = {
   "command.file.open": "Open…",
   "command.file.save": "Save",
   "command.file.new": "New",
+  "command.edit.selectNextOccurrence": "Select Next Occurrence",
   "command.file.saveAs": "Save As…",
   "command.file.exportHtml": "Export as HTML…",
   "command.file.exportPdf": "Export as PDF…",

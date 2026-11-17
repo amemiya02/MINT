@@ -19,6 +19,7 @@ export const zhCN: Messages = {
   "command.file.open": "打开…",
   "command.file.save": "保存",
   "command.file.new": "新建",
+  "command.edit.selectNextOccurrence": "选择下一个相同项",
   "command.file.saveAs": "另存为…",
   "command.file.exportHtml": "导出为 HTML…",
   "command.file.exportPdf": "导出为 PDF…",

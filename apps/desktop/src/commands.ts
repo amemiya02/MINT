@@ -114,6 +114,15 @@ export const commands = [
     accelerator: "CmdOrCtrl+Shift+F",
     menu: "edit",
   },
+  // ⌘D as in VS Code and Sublime Text: add a cursor at the next occurrence.
+  {
+    id: "edit.selectNextOccurrence",
+    title: "command.edit.selectNextOccurrence",
+    accelerator: "CmdOrCtrl+D",
+    menu: "edit",
+    group: "selection",
+    editor: ["selectNextOccurrence"],
+  },
   {
     id: "edit.toggleSpellcheck",
     title: "command.edit.toggleSpellcheck",
