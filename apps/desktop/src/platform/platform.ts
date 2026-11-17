@@ -22,14 +22,62 @@ export interface Platform {
   /** Ask the user to pick a document. Resolves to its path, or `null` if cancelled. */
   showOpenDialog(options: OpenDialogOptions): Promise<string | null>;
 
+  /** Ask a three-way question (e.g. save / don't save / cancel). Dismissing the dialog answers `cancel`. */
+  showQuestionDialog(options: QuestionDialogOptions): Promise<"yes" | "no" | "cancel">;
+
   /** Open a URL (`https:`, `mailto:`, ...) in the user's default browser or handler. */
   openExternal(url: string): Promise<void>;
 
   setWindowTitle(title: string): Promise<void>;
 
-  /** Install the application menu. Item accelerators are active shortcuts. */
+  /** Install the application menu for this window. Item accelerators are active shortcuts. */
   setMenu(menu: readonly MenuSpec[]): Promise<void>;
+
+  /** Open a new, independent window of the shell. */
+  openWindow(): Promise<void>;
+
+  /** Ask to close this window; it goes through the close-request handler like a click on its close button. */
+  closeWindow(): Promise<void>;
+
+  /**
+   * Intercept requests to close this window. The window closes only if the
+   * handler resolves to `true`. Returns an unsubscribe function.
+   */
+  onCloseRequested(handler: () => Promise<boolean>): () => void;
+
+  /** Absolute path of settings.json in the system configuration directory. */
+  settingsPath(): Promise<string>;
+
+  /** Read and parse settings.json. Values are not validated; that is the shell's job. */
+  readSettings(): Promise<SettingsFile>;
+
+  /** Replace settings.json with `values`, pretty-printed, atomically. */
+  writeSettings(values: SettingsValues): Promise<void>;
+
+  /**
+   * Call `listener` with the reloaded file whenever settings.json changes on disk,
+   * whoever changed it. Returns a function that stops listening.
+   */
+  onSettingsChanged(listener: (file: SettingsFile) => void): () => void;
 }
+
+export interface QuestionDialogOptions {
+  readonly title: string;
+  readonly message: string;
+  readonly yes: string;
+  readonly no: string;
+  readonly cancel: string;
+}
+
+/** The raw key/value pairs of settings.json. */
+export type SettingsValues = Readonly<Record<string, unknown>>;
+
+/** What settings.json currently holds. */
+export type SettingsFile =
+  | { readonly status: "missing" }
+  | { readonly status: "ok"; readonly values: SettingsValues }
+  /** Unreadable or not a JSON object; `message` says why (e.g. a syntax error and its line). */
+  | { readonly status: "invalid"; readonly message: string };
 
 export interface OpenDialogOptions {
   readonly title: string;

@@ -4,6 +4,8 @@ import { useEffect, useRef } from "react";
 interface EditorPaneProps {
   /** Initial file text. The editor is recreated only when the pane is remounted (use a `key`). */
   readonly text: string;
+  /** Whether the pane is the one on screen; it takes focus when it becomes active. */
+  readonly active: boolean;
   readonly onReady: (editor: MintEditor | null) => void;
   readonly onChange: () => void;
   readonly onModeChange: () => void;
@@ -12,30 +14,43 @@ interface EditorPaneProps {
 }
 
 /** Mounts the framework-agnostic editor core into React. */
-export function EditorPane({ text, onReady, onChange, onModeChange, onOpenLink }: EditorPaneProps) {
+export function EditorPane({
+  text,
+  active,
+  onReady,
+  onChange,
+  onModeChange,
+  onOpenLink,
+}: EditorPaneProps) {
   const parent = useRef<HTMLDivElement>(null);
+  const editor = useRef<MintEditor | null>(null);
   const callbacks = useRef({ onReady, onChange, onModeChange, onOpenLink });
   callbacks.current = { onReady, onChange, onModeChange, onOpenLink };
 
   useEffect(() => {
     if (!parent.current) return;
-    const editor = createEditor({
+    const instance = createEditor({
       parent: parent.current,
       text,
       host: { openLink: (link) => callbacks.current.onOpenLink(link) },
     });
-    const unsubscribe = editor.subscribe((event) => {
+    const unsubscribe = instance.subscribe((event) => {
       if (event.type === "change") callbacks.current.onChange();
       if (event.type === "mode") callbacks.current.onModeChange();
     });
-    callbacks.current.onReady(editor);
-    editor.focus();
+    editor.current = instance;
+    callbacks.current.onReady(instance);
     return () => {
       unsubscribe();
       callbacks.current.onReady(null);
-      editor.destroy();
+      editor.current = null;
+      instance.destroy();
     };
   }, [text]);
+
+  useEffect(() => {
+    if (active) editor.current?.focus();
+  }, [active]);
 
   return <div ref={parent} className="mint-editor h-full" />;
 }

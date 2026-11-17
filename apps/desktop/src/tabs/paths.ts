@@ -1,3 +1,8 @@
+/** The file name part of a path, for tab labels and window titles. */
+export function baseName(path: string): string {
+  return path.split(/[\\/]/).pop() || path;
+}
+
 /**
  * Resolve `target` (a path as written in a Markdown link) against the
  * document at `from`. Absolute targets are returned as they are; relative

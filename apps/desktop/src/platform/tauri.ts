@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import {
   Menu,
   MenuItem,
@@ -6,10 +7,11 @@ import {
   type PredefinedMenuItemOptions,
   Submenu,
 } from "@tauri-apps/api/menu";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { open } from "@tauri-apps/plugin-dialog";
+import { message, open } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { MenuItemSpec, Platform } from "./platform.ts";
+import type { MenuItemSpec, Platform, SettingsFile } from "./platform.ts";
 
 const nativeItems = {
   cut: "Cut",
@@ -35,6 +37,17 @@ export function createTauriPlatform(): Platform {
       return picked ?? null;
     },
     openExternal: (url) => openUrl(url),
+    async showQuestionDialog({ title, message: text, yes, no, cancel }) {
+      const answer = await message(text, {
+        title,
+        kind: "warning",
+        buttons: { yes, no, cancel },
+      });
+      // Custom buttons answer with their label on some platforms, the button kind on others.
+      if (answer === yes || answer === "Yes") return "yes";
+      if (answer === no || answer === "No") return "no";
+      return "cancel";
+    },
     setWindowTitle: (title) => getCurrentWindow().setTitle(title),
     async setMenu(menu) {
       const submenus = await Promise.all(
@@ -42,10 +55,57 @@ export function createTauriPlatform(): Platform {
           Submenu.new({ text: m.label, items: await Promise.all(m.items.map(toNativeItem)) }),
         ),
       );
-      const appMenu = await Menu.new({ items: submenus });
-      await appMenu.setAsAppMenu();
+      windowMenu = await Menu.new({ items: submenus });
+      if (isMac) {
+        // macOS has one menu bar for the whole app: it must belong to the focused window.
+        if (await getCurrentWindow().isFocused()) await windowMenu.setAsAppMenu();
+        ensureMenuFollowsFocus();
+      } else {
+        await windowMenu.setAsWindowMenu(getCurrentWindow());
+      }
+    },
+    async openWindow() {
+      const window = new WebviewWindow(`window-${crypto.randomUUID()}`, {
+        url: "/",
+        title: "MINT",
+        width: 1000,
+        height: 720,
+        minWidth: 480,
+        minHeight: 320,
+      });
+      await new Promise<void>((resolve, reject) => {
+        void window.once("tauri://created", () => resolve());
+        void window.once("tauri://error", (e) => reject(new Error(String(e.payload))));
+      });
+    },
+    closeWindow: () => getCurrentWindow().close(),
+    onCloseRequested(handler) {
+      // Tauri destroys the window after the listener unless it calls preventDefault().
+      const unlisten = getCurrentWindow().onCloseRequested(async (event) => {
+        if (!(await handler())) event.preventDefault();
+      });
+      return () => void unlisten.then((stop) => stop());
+    },
+    settingsPath: () => invoke<string>("settings_path"),
+    readSettings: () => invoke<SettingsFile>("read_settings"),
+    writeSettings: (values) => invoke<void>("write_settings", { values }),
+    onSettingsChanged(listener) {
+      const unlisten = listen<SettingsFile>("settings-changed", (event) => listener(event.payload));
+      return () => void unlisten.then((stop) => stop());
     },
   };
+}
+
+const isMac = /Mac/.test(navigator.userAgent);
+let windowMenu: Menu | null = null;
+let followingFocus = false;
+
+function ensureMenuFollowsFocus() {
+  if (followingFocus) return;
+  followingFocus = true;
+  void getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+    if (focused && windowMenu) void windowMenu.setAsAppMenu();
+  });
 }
 
 function toNativeItem(item: MenuItemSpec) {

@@ -8,6 +8,7 @@ export const zhCN: Messages = {
   "menu.app": "MINT",
   "menu.file": "文件",
   "menu.edit": "编辑",
+  "menu.window": "窗口",
   "menu.view": "显示",
   "menu.quit": "退出 MINT",
   "menu.cut": "剪切",
@@ -18,6 +19,32 @@ export const zhCN: Messages = {
   "command.file.open": "打开…",
   "command.file.save": "保存",
   "command.view.toggleSourceMode": "切换源码模式",
+
+  "command.tab.close": "关闭标签页",
+  "command.tab.next": "显示下一个标签页",
+  "command.tab.previous": "显示上一个标签页",
+  "command.window.new": "新建窗口",
+
+  "command.app.settings": "设置…",
+
+  "settings.title": "设置",
+  "settings.close": "关闭",
+  "settings.storedIn": "保存在 {path}",
+  "settings.openFile": "打开 settings.json",
+  "settings.dismiss": "关闭提示",
+  "settings.issue.unreadable": "settings.json 无法使用（{reason}），继续使用上一次的有效设置。",
+  "settings.issue.invalidValue":
+    "settings.json 中的“{key}”必须是{expected}，该项继续使用上一次的有效设置。",
+  "settings.issue.unknownKey": "settings.json 中有未知的设置项“{key}”，已忽略。",
+  "settings.issue.writeFailed": "无法保存 settings.json：{reason}",
+  "settings.expected.oneOf": "以下之一：{values}",
+  "settings.expected.toggle": " true 或 false ",
+  "settings.expected.number": " {min} 到 {max} 之间的数字",
+
+  "settings.language": "界面语言",
+  "settings.language.system": "跟随系统",
+  "settings.language.zh-CN": "简体中文",
+  "settings.language.en": "English",
 
   "dialog.open.title": "打开文档",
   "dialog.filter.markdown": "Markdown",
@@ -33,4 +60,13 @@ export const zhCN: Messages = {
 
   "error.open": "无法打开 {path}：{reason}",
   "error.save": "无法保存 {path}：{reason}",
+
+  "tabs.label": "已打开的文档",
+  "tabs.close": "关闭 {name}",
+
+  "unsaved.title": "未保存的改动",
+  "unsaved.message": "是否保存对 {name} 的改动？如果不保存，改动将会丢失。",
+  "unsaved.save": "保存",
+  "unsaved.discard": "不保存",
+  "unsaved.cancel": "取消",
 };

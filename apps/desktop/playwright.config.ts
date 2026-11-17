@@ -1,7 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
-// Override when several checkouts run E2E tests at once.
-const port = Number(process.env.MINT_E2E_PORT) || 4319;
+// Override with MINT_E2E_PORT when several checkouts run E2E tests at once.
+const port = Number(process.env.MINT_E2E_PORT ?? 4319);
 
 // Seam 3: the shell runs in a plain browser with the in-memory platform injected.
 export default defineConfig({

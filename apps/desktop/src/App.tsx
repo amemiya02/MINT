@@ -1,78 +1,79 @@
-import type { EditorMode, LinkTarget, MintEditor } from "@mint/editor";
-import { useCallback, useEffect, useRef, useState } from "react";
+import type { LinkTarget } from "@mint/editor";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { buildMenu, type CommandId } from "./commands.ts";
 import { EditorPane } from "./EditorPane.tsx";
-import { useT } from "./i18n/index.ts";
-import { resolveFrom } from "./paths.ts";
+import { type Translate, useT } from "./i18n/index.ts";
 import type { Platform } from "./platform/platform.ts";
+import { SettingsDialog } from "./settings/SettingsDialog.tsx";
+import { SettingsIssues } from "./settings/SettingsIssues.tsx";
+import { TabStoreContext, useTabStore, useTabsState } from "./tabs/context.ts";
+import { baseName, resolveFrom } from "./tabs/paths.ts";
+import { TabBar } from "./tabs/TabBar.tsx";
+import { createTabStore, type Tab, type TabError, type TabStore } from "./tabs/tab-store.ts";
 
-interface OpenDocument {
-  readonly path: string;
-  /** Text as read from disk; the editor owns the live text. */
-  readonly text: string;
-  /** Distinguishes reopening the same path, so the editor is recreated. */
-  readonly session: number;
-}
-
-let nextSession = 1;
-
+/** One window of the shell. Each window owns its own tabs; nothing is shared between windows. */
 export function App({ platform }: { readonly platform: Platform }) {
   const t = useT();
-  const [document, setDocument] = useState<OpenDocument | null>(null);
-  const [dirty, setDirty] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [mode, setMode] = useState<EditorMode>("livePreview");
-  const editor = useRef<MintEditor | null>(null);
-  const version = useRef(0);
-
-  const openPath = useCallback(
-    async (path: string) => {
-      try {
-        const text = await platform.readTextFile(path);
-        setDocument({ path, text, session: nextSession++ });
-        setDirty(false);
-        setError(null);
-      } catch (e) {
-        setError(t("error.open", { path, reason: reasonOf(e) }));
-      }
-    },
-    [platform, t],
+  const translate = useRef(t);
+  translate.current = t;
+  const [store] = useState(() =>
+    createTabStore({
+      platform,
+      askUnsaved: (tab) => askUnsaved(platform, translate.current, tab),
+    }),
   );
 
-  const openDocument = useCallback(async () => {
+  return (
+    <TabStoreContext value={store}>
+      <Window platform={platform} store={store} />
+    </TabStoreContext>
+  );
+}
+
+async function askUnsaved(platform: Platform, t: Translate, tab: Tab) {
+  const answer = await platform.showQuestionDialog({
+    title: t("unsaved.title"),
+    message: t("unsaved.message", { name: baseName(tab.path) }),
+    yes: t("unsaved.save"),
+    no: t("unsaved.discard"),
+    cancel: t("unsaved.cancel"),
+  });
+  return answer === "yes" ? "save" : answer === "no" ? "discard" : "cancel";
+}
+
+function Window({ platform, store }: { readonly platform: Platform; readonly store: TabStore }) {
+  const t = useT();
+  const { tabs, activeId, error } = useTabsState();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const active = tabs.find((tab) => tab.id === activeId) ?? null;
+  // The editor owns its mode; re-render when it reports a change.
+  const [, modeChanged] = useReducer((n: number) => n + 1, 0);
+  const mode = (activeId !== null && store.editorOf(activeId)?.getMode()) || "livePreview";
+
+  const open = useCallback(async () => {
     const path = await platform.showOpenDialog({
       title: t("dialog.open.title"),
       filters: [{ name: t("dialog.filter.markdown"), extensions: ["md", "markdown"] }],
     });
-    if (path) await openPath(path);
-  }, [platform, t, openPath]);
-
-  const onOpenLink = useCallback(
-    (link: LinkTarget) => {
-      if (link.kind === "external") void platform.openExternal(link.url);
-      else if (document) void openPath(resolveFrom(document.path, link.path));
-    },
-    [document, platform, openPath],
-  );
-
-  const saveDocument = useCallback(async () => {
-    if (!document || !editor.current) return;
-    const savedVersion = version.current;
-    try {
-      await platform.writeTextFile(document.path, editor.current.getText());
-      setDirty(version.current !== savedVersion);
-      setError(null);
-    } catch (e) {
-      setError(t("error.save", { path: document.path, reason: reasonOf(e) }));
-    }
-  }, [document, platform, t]);
+    if (path) await store.openDocument(path);
+  }, [platform, store, t]);
 
   const handlers = useRef<Record<CommandId, () => void>>({} as Record<CommandId, () => void>);
   handlers.current = {
-    "file.open": () => void openDocument(),
-    "file.save": () => void saveDocument(),
+    "file.open": () => void open(),
+    "file.save": () => {
+      if (activeId !== null) void store.save(activeId);
+    },
+    "tab.close": () => {
+      if (activeId !== null) void store.close(activeId);
+      else void platform.closeWindow();
+    },
+    "tab.next": () => store.activateNext(),
+    "tab.previous": () => store.activatePrevious(),
+    "window.new": () => void platform.openWindow(),
+    "app.settings": () => setSettingsOpen(true),
     "view.toggleSourceMode": () => {
-      editor.current?.execute("toggleSourceMode");
+      if (activeId !== null) store.editorOf(activeId)?.execute("toggleSourceMode");
     },
   };
 
@@ -80,7 +81,10 @@ export function App({ platform }: { readonly platform: Platform }) {
     void platform.setMenu(buildMenu(t, (id) => handlers.current[id]()));
   }, [platform, t]);
 
-  const name = document ? baseName(document.path) : null;
+  useEffect(() => platform.onCloseRequested(() => store.closeAll()), [platform, store]);
+
+  const name = active ? baseName(active.path) : null;
+  const dirty = active?.dirty ?? false;
   useEffect(() => {
     const title = name
       ? t(dirty ? "window.titleUnsaved" : "window.title", { name })
@@ -88,45 +92,35 @@ export function App({ platform }: { readonly platform: Platform }) {
     void platform.setWindowTitle(title);
   }, [name, dirty, platform, t]);
 
-  const onChange = useCallback(() => {
-    version.current++;
-    setDirty(true);
-  }, []);
-  const onReady = useCallback((instance: MintEditor | null) => {
-    editor.current = instance;
-    if (instance) setMode(instance.getMode());
-  }, []);
-  const onModeChange = useCallback(() => {
-    if (editor.current) setMode(editor.current.getMode());
-  }, []);
-
   return (
     <div className="flex h-full flex-col bg-(--mint-bg) text-(--mint-fg)">
+      <SettingsIssues />
       {error && (
         <div
           role="alert"
           className="border-b border-(--mint-border) bg-(--mint-error-bg) px-4 py-2 text-sm text-(--mint-error-fg)"
         >
-          {error}
+          {errorMessage(t, error)}
         </div>
       )}
+      {tabs.length > 0 && <TabBar />}
       <main className="min-h-0 flex-1">
-        {document ? (
-          <EditorPane
-            key={document.session}
-            text={document.text}
-            onReady={onReady}
-            onChange={onChange}
-            onModeChange={onModeChange}
-            onOpenLink={onOpenLink}
+        {tabs.map((tab) => (
+          <TabPanel
+            key={tab.id}
+            tab={tab}
+            active={tab.id === activeId}
+            platform={platform}
+            onModeChange={modeChanged}
           />
-        ) : (
+        ))}
+        {tabs.length === 0 && (
           <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
             <h1 className="text-lg font-medium">{t("welcome.title")}</h1>
             <p className="text-sm text-(--mint-muted)">{t("welcome.body")}</p>
             <button
               type="button"
-              onClick={() => void openDocument()}
+              onClick={() => void open()}
               className="mt-2 rounded-md border border-(--mint-border) px-4 py-1.5 text-sm hover:bg-(--mint-hover) focus-visible:outline-2 focus-visible:outline-(--mint-accent)"
             >
               {t("welcome.open")}
@@ -134,23 +128,72 @@ export function App({ platform }: { readonly platform: Platform }) {
           </div>
         )}
       </main>
-      {document && (
+      {active && (
         <footer className="flex items-center justify-between border-t border-(--mint-border) px-4 py-1 text-xs text-(--mint-muted)">
-          <span title={document.path}>{name}</span>
+          <span title={active.path}>{name}</span>
           <span className="flex gap-4">
             <span>{t(mode === "source" ? "status.mode.source" : "status.mode.livePreview")}</span>
             <span>{t(dirty ? "status.unsaved" : "status.saved")}</span>
           </span>
         </footer>
       )}
+      {settingsOpen && (
+        <SettingsDialog
+          onClose={() => setSettingsOpen(false)}
+          onOpenFile={(path) => void store.openDocument(path)}
+        />
+      )}
     </div>
   );
 }
 
-function baseName(path: string): string {
-  return path.split(/[\\/]/).pop() || path;
+/** Every open tab keeps its editor mounted, so undo history and selection survive switching. */
+function TabPanel({
+  tab,
+  active,
+  platform,
+  onModeChange,
+}: {
+  readonly tab: Tab;
+  readonly active: boolean;
+  readonly platform: Platform;
+  readonly onModeChange: () => void;
+}) {
+  const store = useTabStore();
+  const { id, path } = tab;
+  const onReady = useCallback(
+    (editor: Parameters<TabStore["attachEditor"]>[1]) => store.attachEditor(id, editor),
+    [store, id],
+  );
+  const onChange = useCallback(() => store.markChanged(id), [store, id]);
+  const onOpenLink = useCallback(
+    (link: LinkTarget) => {
+      if (link.kind === "external") void platform.openExternal(link.url);
+      else void store.openDocument(resolveFrom(path, link.path));
+    },
+    [platform, store, path],
+  );
+  return (
+    <div
+      role="tabpanel"
+      id={`tabpanel-${id}`}
+      aria-labelledby={`tab-${id}`}
+      hidden={!active}
+      className="h-full"
+    >
+      <EditorPane
+        text={tab.text}
+        active={active}
+        onReady={onReady}
+        onChange={onChange}
+        onModeChange={onModeChange}
+        onOpenLink={onOpenLink}
+      />
+    </div>
+  );
 }
 
-function reasonOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+function errorMessage(t: Translate, error: TabError): string {
+  const params = { path: error.path, reason: error.reason };
+  return error.kind === "open" ? t("error.open", params) : t("error.save", params);
 }

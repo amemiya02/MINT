@@ -6,7 +6,15 @@ import type { MenuSpec } from "./platform/platform.ts";
  * an i18n title and an optional default shortcut; the native menu (and later
  * the command palette and shortcut overrides) are derived from this list.
  */
-export type CommandId = "file.open" | "file.save" | "view.toggleSourceMode";
+export type CommandId =
+  | "file.open"
+  | "file.save"
+  | "tab.close"
+  | "tab.next"
+  | "tab.previous"
+  | "window.new"
+  | "app.settings"
+  | "view.toggleSourceMode";
 
 export interface Command {
   readonly id: CommandId;
@@ -18,6 +26,11 @@ export interface Command {
 export const commands: readonly Command[] = [
   { id: "file.open", title: "command.file.open", accelerator: "CmdOrCtrl+O" },
   { id: "file.save", title: "command.file.save", accelerator: "CmdOrCtrl+S" },
+  { id: "tab.close", title: "command.tab.close", accelerator: "CmdOrCtrl+W" },
+  { id: "tab.next", title: "command.tab.next", accelerator: "Ctrl+Tab" },
+  { id: "tab.previous", title: "command.tab.previous", accelerator: "Ctrl+Shift+Tab" },
+  { id: "window.new", title: "command.window.new", accelerator: "CmdOrCtrl+Shift+N" },
+  { id: "app.settings", title: "command.app.settings", accelerator: "CmdOrCtrl+," },
   {
     id: "view.toggleSourceMode",
     title: "command.view.toggleSourceMode",
@@ -38,8 +51,18 @@ export function buildMenu(t: Translate, run: (id: CommandId) => void): MenuSpec[
     };
   };
   return [
-    { label: t("menu.app"), items: [{ kind: "native", action: "quit", label: t("menu.quit") }] },
-    { label: t("menu.file"), items: [item("file.open"), item("file.save")] },
+    {
+      label: t("menu.app"),
+      items: [
+        item("app.settings"),
+        { kind: "separator" },
+        { kind: "native", action: "quit", label: t("menu.quit") },
+      ],
+    },
+    {
+      label: t("menu.file"),
+      items: [item("file.open"), item("file.save"), { kind: "separator" }, item("tab.close")],
+    },
     {
       label: t("menu.edit"),
       items: [
@@ -51,5 +74,9 @@ export function buildMenu(t: Translate, run: (id: CommandId) => void): MenuSpec[
       ],
     },
     { label: t("menu.view"), items: [item("view.toggleSourceMode")] },
+    {
+      label: t("menu.window"),
+      items: [item("window.new"), { kind: "separator" }, item("tab.next"), item("tab.previous")],
+    },
   ];
 }
