@@ -189,7 +189,7 @@ const field =
 const button =
   "rounded px-1.5 py-0.5 text-(--mint-muted) hover:bg-(--mint-border) hover:text-(--mint-fg) focus-visible:outline-2 focus-visible:outline-(--mint-accent) disabled:opacity-40";
 
-function Toggle(props: {
+export function Toggle(props: {
   pressed: boolean;
   onChange: (pressed: boolean) => void;
   label: string;
@@ -209,7 +209,7 @@ function Toggle(props: {
   );
 }
 
-function IconButton(props: { label: string; onClick: () => void; children: ReactNode }) {
+export function IconButton(props: { label: string; onClick: () => void; children: ReactNode }) {
   return (
     <button
       type="button"

@@ -42,6 +42,19 @@ export const en = {
   "find.noResults": "No results",
   "find.invalid": "Invalid regular expression",
 
+  "command.edit.searchFolder": "Search in Folder…",
+  "search.label": "Search in Folder",
+  "search.close": "Close Search",
+  "search.searching": "Searching…",
+  "search.summary": "{matches} in {documents}",
+  "search.matches.one": "1 result",
+  "search.matches.other": "{count} results",
+  "search.documents.one": "1 document",
+  "search.documents.other": "{count} documents",
+  "search.truncated":
+    "Showing the first {count} matching lines. Refine the search to see the rest.",
+  "search.noFolder": "Open a folder to search its documents.",
+
   "command.app.settings": "Settings…",
 
   "settings.title": "Settings",

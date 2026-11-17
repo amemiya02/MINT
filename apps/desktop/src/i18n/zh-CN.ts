@@ -43,6 +43,18 @@ export const zhCN: Messages = {
   "find.noResults": "无结果",
   "find.invalid": "正则表达式无效",
 
+  "command.edit.searchFolder": "在工作文件夹中搜索…",
+  "search.label": "在工作文件夹中搜索",
+  "search.close": "关闭搜索",
+  "search.searching": "正在搜索…",
+  "search.summary": "{documents}中有 {matches}",
+  "search.matches.one": "1 个结果",
+  "search.matches.other": "{count} 个结果",
+  "search.documents.one": "1 个文档",
+  "search.documents.other": "{count} 个文档",
+  "search.truncated": "仅显示前 {count} 个匹配行，请缩小搜索范围以查看其余结果。",
+  "search.noFolder": "打开一个工作文件夹以搜索其中的文档。",
+
   "command.app.settings": "设置…",
 
   "settings.title": "设置",

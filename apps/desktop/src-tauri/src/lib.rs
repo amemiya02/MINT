@@ -5,13 +5,14 @@
 mod app_data;
 mod folder;
 mod fs;
+mod search;
 mod settings;
 mod walk;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 
 use serde_json::{Map, Value};
 use tauri::ipc::Channel;
@@ -88,6 +89,65 @@ fn list_folder_files(path: PathBuf, extensions: Vec<String>) -> Vec<PathBuf> {
     walk::list_files(&path, &extensions)
 }
 
+/// Running global searches, by id, each with its cancel flag.
+#[derive(Default)]
+struct Searches {
+    next_id: AtomicU32,
+    running: Mutex<HashMap<u32, Arc<AtomicBool>>>,
+}
+
+/// What a running search sends on its channel: each file with matches, then `done`.
+#[derive(Clone, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+enum SearchEvent {
+    File(search::FileMatches),
+    Done(search::SearchSummary),
+}
+
+/// Start searching the documents of a folder in the background. Results stream
+/// on `on_event`; resolves to an id for `cancel_search`. Rejects at once if the
+/// regular expression is invalid.
+#[tauri::command]
+fn search_folder(
+    path: PathBuf,
+    query: search::SearchQuery,
+    extensions: Vec<String>,
+    on_event: Channel<SearchEvent>,
+    searches: State<'_, Searches>,
+) -> Result<u32, String> {
+    let compiled = search::Search::new(&query)?;
+    let id = searches.next_id.fetch_add(1, Ordering::Relaxed);
+    let cancelled = Arc::new(AtomicBool::new(false));
+    searches
+        .running
+        .lock()
+        .map_err(|e| e.to_string())?
+        .insert(id, cancelled.clone());
+    std::thread::spawn(move || {
+        let summary = compiled.run(&path, &extensions, &cancelled, |file| {
+            if on_event.send(SearchEvent::File(file)).is_err() {
+                cancelled.store(true, Ordering::Relaxed);
+            }
+        });
+        let _ = on_event.send(SearchEvent::Done(summary));
+    });
+    Ok(id)
+}
+
+/// Stop a running search; nothing more is sent for it except `done`.
+#[tauri::command]
+fn cancel_search(id: u32, searches: State<'_, Searches>) -> Result<(), String> {
+    if let Some(cancelled) = searches
+        .running
+        .lock()
+        .map_err(|e| e.to_string())?
+        .remove(&id)
+    {
+        cancelled.store(true, Ordering::Relaxed);
+    }
+    Ok(())
+}
+
 /// Live folder watchers, by id. Dropping a watcher stops it.
 #[derive(Default)]
 struct Watchers {
@@ -144,6 +204,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(Watchers::default())
+        .manage(Searches::default())
         .setup(|app| {
             let path = app.path().app_config_dir()?.join(settings::FILE_NAME);
             let handle = app.handle().clone();
@@ -170,6 +231,8 @@ pub fn run() {
             rename_path,
             move_to_trash,
             list_folder_files,
+            search_folder,
+            cancel_search,
             watch_folder,
             unwatch_folder,
             read_app_data,

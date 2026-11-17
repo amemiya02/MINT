@@ -33,7 +33,8 @@ apps/desktop/            Tauri app
     i18n/                UI strings (en is the reference, zh-CN must match it)
     workspace/           Folder sidebar: file tree, recent list; opens documents via the tab store
     quick-open/          Quick open (⌘P): fuzzy file-name search over the folder's documents
-    tabs/                Tab store of one window; show a document with useTabStore().openDocument(path)
+    search/              Global search (⌘⇧F): text search over the folder's documents, streamed from the Rust backend
+    tabs/                Tab store of one window; show a document with useTabStore().openDocument(path[, range])
     commands.ts          Command registry (menus and shortcuts derive from it)
     settings/            Settings schema, store synced with settings.json, settings window
   src-tauri/             Rust backend (kept thin, see ADR-0005)

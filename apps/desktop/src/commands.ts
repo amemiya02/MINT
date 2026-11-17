@@ -13,6 +13,7 @@ export type CommandId =
   | "file.save"
   | "edit.find"
   | "edit.replace"
+  | "edit.searchFolder"
   | "tab.close"
   | "tab.next"
   | "tab.previous"
@@ -45,6 +46,11 @@ export const commands: readonly Command[] = [
     id: "edit.replace",
     title: "command.edit.replace",
     accelerator: isMac ? "Cmd+Alt+F" : "Ctrl+H",
+  },
+  {
+    id: "edit.searchFolder",
+    title: "command.edit.searchFolder",
+    accelerator: "CmdOrCtrl+Shift+F",
   },
   { id: "tab.close", title: "command.tab.close", accelerator: "CmdOrCtrl+W" },
   { id: "tab.next", title: "command.tab.next", accelerator: "Ctrl+Tab" },
@@ -96,6 +102,7 @@ export function buildMenu(t: Translate, run: (id: CommandId) => void): MenuSpec[
         { kind: "separator" },
         item("edit.find"),
         item("edit.replace"),
+        item("edit.searchFolder"),
       ],
     },
     { label: t("menu.view"), items: [item("view.toggleSidebar")] },
