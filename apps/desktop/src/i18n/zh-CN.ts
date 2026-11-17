@@ -65,6 +65,7 @@ export const zhCN: Messages = {
   "settings.language.system": "跟随系统",
   "settings.language.zh-CN": "简体中文",
   "settings.language.en": "English",
+  "settings.autosave": "自动保存",
 
   "dialog.open.title": "打开文档",
   "dialog.filter.markdown": "Markdown",
@@ -114,4 +115,11 @@ export const zhCN: Messages = {
   "unsaved.save": "保存",
   "unsaved.discard": "不保存",
   "unsaved.cancel": "取消",
+
+  "recovery.title": "恢复未保存的改动",
+  "recovery.message": "MINT 上次没有正常退出。是否恢复对 {names} 的未保存改动？",
+  "recovery.separator": "、",
+  "recovery.restore": "恢复",
+  "recovery.discard": "丢弃",
+  "recovery.later": "稍后再说",
 };
