@@ -1,7 +1,8 @@
 import type { EditorCommand, EditorCommands } from "@mint/editor";
 import type { MessageKey, Translate } from "./i18n/index.ts";
-import { isMac } from "./keys.ts";
+import { isMac, sameShortcut } from "./keys.ts";
 import type { MenuItemSpec, MenuSpec } from "./platform/platform.ts";
+import type { ShortcutOverrides } from "./settings/schema.ts";
 
 /**
  * The command registry. Every user-invocable action is a command with an id,
@@ -218,6 +219,32 @@ export function findCommand(id: CommandId): Command {
   return command;
 }
 
+export function isCommandId(id: string): id is CommandId {
+  return (commands as readonly Command[]).some((c) => c.id === id);
+}
+
+/**
+ * The shortcut a command has with the user's overrides (the `shortcuts` setting)
+ * applied: the override if there is one (`null` for none), else the default.
+ */
+export function shortcutOf(command: Command, overrides: ShortcutOverrides): string | undefined {
+  const override = Object.hasOwn(overrides, command.id) ? overrides[command.id] : undefined;
+  if (override === null) return undefined;
+  return override ?? command.accelerator;
+}
+
+/** The commands other than `except` whose shortcut is `accelerator`, in registry order. */
+export function commandsWithShortcut(
+  accelerator: string,
+  overrides: ShortcutOverrides,
+  except?: CommandId,
+): Command[] {
+  return (commands as readonly Command[]).filter((command) => {
+    const shortcut = shortcutOf(command, overrides);
+    return command.id !== except && shortcut !== undefined && sameShortcut(shortcut, accelerator);
+  });
+}
+
 /** Menu bar layout: native items around the registry's commands. */
 const menus: readonly {
   readonly id: MenuId;
@@ -240,7 +267,17 @@ const menus: readonly {
 
 type NativeItem = "separator" | "cut" | "copy" | "paste" | "selectAll" | "quit";
 
-export function buildMenu(t: Translate, run: (id: CommandId) => void): MenuSpec[] {
+/**
+ * The menu bar. Item accelerators are the active shortcuts: the defaults with the
+ * user's `overrides` applied, or none at all while `shortcutsActive` is false
+ * (e.g. while a new shortcut is being recorded, so pressing it runs nothing).
+ */
+export function buildMenu(
+  t: Translate,
+  run: (id: CommandId) => void,
+  overrides: ShortcutOverrides = {},
+  shortcutsActive = true,
+): MenuSpec[] {
   const native = (item: NativeItem): MenuItemSpec =>
     item === "separator"
       ? { kind: "separator" }
@@ -253,11 +290,12 @@ export function buildMenu(t: Translate, run: (id: CommandId) => void): MenuSpec[
       .forEach((command, index) => {
         if (index > 0 && command.group !== group) items.push({ kind: "separator" });
         group = command.group;
+        const accelerator = shortcutsActive ? shortcutOf(command, overrides) : undefined;
         items.push({
           kind: "command",
           id: command.id,
           label: t(command.title),
-          ...(command.accelerator ? { accelerator: command.accelerator } : {}),
+          ...(accelerator ? { accelerator } : {}),
           run: () => run(command.id),
         });
       });

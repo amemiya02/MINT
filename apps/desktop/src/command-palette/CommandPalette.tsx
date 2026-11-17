@@ -1,8 +1,9 @@
 import { type KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from "react";
-import { type Command, type CommandId, commands } from "../commands.ts";
+import { type Command, type CommandId, commands, shortcutOf } from "../commands.ts";
 import { useT } from "../i18n/index.ts";
 import { ariaKeyShortcut, formatAccelerator } from "../keys.ts";
 import { type FuzzyMatch, fuzzyMatch } from "../quick-open/fuzzy.ts";
+import { useSettings } from "../settings/useSettings.ts";
 
 export interface CommandPaletteProps {
   /** Run the chosen command; called after the palette has closed. */
@@ -19,6 +20,7 @@ interface Result {
 /** Command palette: fuzzy-search every registered command by name and run one. */
 export function CommandPalette({ onRun, onClose }: CommandPaletteProps) {
   const t = useT();
+  const { shortcuts } = useSettings().settings;
   const dialog = useRef<HTMLDialogElement>(null);
   const listId = useId();
   const [query, setQuery] = useState("");
@@ -96,7 +98,7 @@ export function CommandPalette({ onRun, onClose }: CommandPaletteProps) {
       />
       <div id={listId} role="listbox" className="max-h-[50vh] overflow-y-auto py-1">
         {results.map((result, index) => {
-          const { accelerator } = result.command;
+          const accelerator = shortcutOf(result.command, shortcuts);
           return (
             <div
               key={result.command.id}

@@ -1,3 +1,5 @@
+import { isCommandId } from "../commands.ts";
+import { isAccelerator } from "../keys.ts";
 import type { Platform, SettingsFile, SettingsValues } from "../platform/platform.ts";
 import {
   type SettingDefinition,
@@ -131,5 +133,17 @@ function isValid(definition: SettingDefinition, value: unknown): boolean {
       );
     case "text":
       return typeof value === "string" && value.length <= definition.maxLength;
+    case "shortcuts":
+      return (
+        typeof value === "object" &&
+        value !== null &&
+        !Array.isArray(value) &&
+        Object.entries(value).every(
+          ([id, accelerator]) =>
+            isCommandId(id) &&
+            (accelerator === null ||
+              (typeof accelerator === "string" && isAccelerator(accelerator))),
+        )
+      );
   }
 }

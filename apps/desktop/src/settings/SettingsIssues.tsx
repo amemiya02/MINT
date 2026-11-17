@@ -65,5 +65,7 @@ function describeExpected(definition: SettingDefinition, t: Translate): string {
       });
     case "text":
       return t("settings.expected.text", { max: String(definition.maxLength) });
+    case "shortcuts":
+      return t("settings.expected.shortcuts");
   }
 }

@@ -104,6 +104,8 @@ export const zhCN: Messages = {
   "settings.expected.toggle": " true 或 false ",
   "settings.expected.number": " {min} 到 {max} 之间的数字",
   "settings.expected.text": "不超过 {max} 个字符的文本",
+  "settings.expected.shortcuts":
+    '从命令 ID 到快捷键（如 "CmdOrCtrl+Shift+B"，null 表示无快捷键）的对象',
 
   "settings.language": "界面语言",
   "settings.language.system": "跟随系统",
@@ -127,6 +129,24 @@ export const zhCN: Messages = {
   "settings.contentWidth": "内容宽度（px）",
   "settings.focusMode": "专注模式",
   "settings.typewriterMode": "打字机模式",
+  "settings.assetFolder": "资源目录",
+  "settings.assetFolder.document": "与文档同目录",
+  "settings.assetFolder.assets": "assets/",
+  "settings.assetFolder.documentName": "<文档名>.assets/",
+  "settings.assetFolder.custom": "自定义目录",
+  "settings.assetFolderPath": "自定义资源目录",
+  "settings.assetFolderPath.placeholder": "相对于文档的路径，或绝对路径",
+
+  "settings.shortcuts": "快捷键",
+  "settings.shortcuts.record": "录制",
+  "settings.shortcuts.recording": "请按下新的快捷键（Esc 取消）",
+  "settings.shortcuts.none": "无",
+  "settings.shortcuts.reset": "恢复默认",
+  "settings.shortcuts.remove": "移除",
+  "settings.shortcuts.conflict": "{shortcut} 已被「{commands}」使用。",
+  "settings.shortcuts.useAnyway": "仍然使用",
+  "settings.shortcuts.cancel": "取消",
+  "settings.shortcuts.alsoUsedBy": "与「{commands}」冲突",
 
   "theme.issue.missing": "在 {path} 中找不到主题“{name}”，正在使用内置主题。",
   "theme.issue.unreadable": "无法读取主题“{name}”（{reason}），正在使用内置主题。",
@@ -175,6 +195,8 @@ export const zhCN: Messages = {
   "error.create": "无法创建 {name}：{reason}",
   "error.rename": "无法重命名为 {name}：{reason}",
   "error.trash": "无法将 {name} 移到废纸篓：{reason}",
+  "error.saveImage": "无法将图片 {name} 保存到 {folder}：{reason}",
+  "error.dismiss": "关闭提示",
 
   "tabs.label": "已打开的文档",
   "tabs.close": "关闭 {name}",
