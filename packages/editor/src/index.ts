@@ -4,6 +4,7 @@ export type {
   EditorEvent,
   EditorMode,
   EditorOptions,
+  EditorSettings,
   HostAdapter,
   MintEditor,
   TextSelection,
@@ -16,3 +17,4 @@ export type { LinkTarget } from "./links.ts";
 export type { PreviewContext, PreviewRenderer } from "./live-preview/preview.ts";
 export { previewRenderer } from "./live-preview/preview.ts";
 export type { OutlineHeading } from "./outline.ts";
+export type { WordCount } from "./word-count.ts";

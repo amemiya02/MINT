@@ -85,6 +85,7 @@ MINT 会在 `<html>` 上设置 `data-appearance="light"` 或 `data-appearance="d
 | `--mint-marker` | Markdown 标记（`#`、`**`、`>` 等）在显示时的颜色 | `#8a9099` |
 | `--mint-find-match` | 查找时所有匹配项的背景 | `#ffe58a99` |
 | `--mint-find-current` | 查找时当前匹配项的背景 | `#ffb84d` |
+| `--mint-focus-dimmed-opacity` | 专注模式下当前段落以外内容的不透明度 | `0.35` |
 
 暗色主题的取值见 `apps/desktop/src/theme/builtin.css`。
 
@@ -104,6 +105,8 @@ MINT 会在 `<html>` 上设置 `data-appearance="light"` 或 `data-appearance="d
 | `.cm-mint-code`，`.cm-mint-link` | 实时预览中渲染后的行内代码、链接文字 |
 | `.cm-mint-marker` | 实时预览中因片段显露而可见的 Markdown 标记 |
 | `.mint-find-match`，`.mint-find-match-current` | 查找匹配项、当前匹配项 |
+| `.cm-mint-focus-mode`，`.cm-mint-focused` | 开启专注模式的编辑器；专注模式下当前段落的各行 |
+| `.cm-mint-typewriter-mode` | 开启打字机模式的编辑器 |
 | `.mint-editor .cm-content` | 文档正文区域 |
 
 编辑区是 CodeMirror 6 的 DOM。除上表外的 `.cm-*` 类名属于实现细节，可能随版本变化。

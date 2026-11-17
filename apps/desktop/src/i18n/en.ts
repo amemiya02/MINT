@@ -21,6 +21,8 @@ export const en = {
   "command.file.quickOpen": "Quick Open…",
   "command.view.toggleSidebar": "Toggle Sidebar",
   "command.view.toggleSourceMode": "Toggle Source Mode",
+  "command.view.toggleFocusMode": "Toggle Focus Mode",
+  "command.view.toggleTypewriterMode": "Toggle Typewriter Mode",
 
   "command.tab.close": "Close Tab",
   "command.tab.next": "Show Next Tab",
@@ -126,6 +128,8 @@ export const en = {
   "settings.fontSize": "Font size (px)",
   "settings.lineHeight": "Line height",
   "settings.contentWidth": "Content width (px)",
+  "settings.focusMode": "Focus mode",
+  "settings.typewriterMode": "Typewriter mode",
 
   "theme.issue.missing":
     "The theme “{name}” was not found in {path}. The built-in theme is in use.",
@@ -163,6 +167,11 @@ export const en = {
   "status.unsaved": "Unsaved changes",
   "status.mode.livePreview": "Live Preview",
   "status.mode.source": "Source Mode",
+  "status.words.one": "1 word",
+  "status.words.other": "{count} words",
+  "status.characters.one": "1 character",
+  "status.characters.other": "{count} characters",
+  "status.readingTime": "{minutes} min read",
 
   "error.open": "Could not open {path}: {reason}",
   "error.save": "Could not save {path}: {reason}",

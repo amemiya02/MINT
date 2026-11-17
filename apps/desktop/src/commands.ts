@@ -166,6 +166,21 @@ export const commands = [
     group: "layout",
     editor: ["toggleSourceMode"],
   },
+  // Typora's shortcuts. Both flip a setting, so they apply to every document and window.
+  {
+    id: "view.toggleFocusMode",
+    title: "command.view.toggleFocusMode",
+    accelerator: "F8",
+    menu: "view",
+    group: "writing",
+  },
+  {
+    id: "view.toggleTypewriterMode",
+    title: "command.view.toggleTypewriterMode",
+    accelerator: "F9",
+    menu: "view",
+    group: "writing",
+  },
 
   {
     id: "window.new",

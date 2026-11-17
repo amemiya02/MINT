@@ -22,6 +22,8 @@ export const zhCN: Messages = {
   "command.file.quickOpen": "快速打开…",
   "command.view.toggleSidebar": "显示/隐藏侧边栏",
   "command.view.toggleSourceMode": "切换源码模式",
+  "command.view.toggleFocusMode": "切换专注模式",
+  "command.view.toggleTypewriterMode": "切换打字机模式",
 
   "command.tab.close": "关闭标签页",
   "command.tab.next": "显示下一个标签页",
@@ -123,6 +125,8 @@ export const zhCN: Messages = {
   "settings.fontSize": "字号（px）",
   "settings.lineHeight": "行高",
   "settings.contentWidth": "内容宽度（px）",
+  "settings.focusMode": "专注模式",
+  "settings.typewriterMode": "打字机模式",
 
   "theme.issue.missing": "在 {path} 中找不到主题“{name}”，正在使用内置主题。",
   "theme.issue.unreadable": "无法读取主题“{name}”（{reason}），正在使用内置主题。",
@@ -158,6 +162,11 @@ export const zhCN: Messages = {
   "status.unsaved": "有未保存的改动",
   "status.mode.livePreview": "实时预览",
   "status.mode.source": "源码模式",
+  "status.words.one": "1 字",
+  "status.words.other": "{count} 字",
+  "status.characters.one": "1 字符",
+  "status.characters.other": "{count} 字符",
+  "status.readingTime": "阅读约 {minutes} 分钟",
 
   "error.open": "无法打开 {path}：{reason}",
   "error.save": "无法保存 {path}：{reason}",

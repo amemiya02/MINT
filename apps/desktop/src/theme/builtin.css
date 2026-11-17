@@ -56,6 +56,7 @@
   --mint-marker: #8a9099;
   --mint-find-match: #ffe58a99;
   --mint-find-current: #ffb84d;
+  --mint-focus-dimmed-opacity: 0.35;
 }
 
 :where(:root[data-appearance="dark"]) {
