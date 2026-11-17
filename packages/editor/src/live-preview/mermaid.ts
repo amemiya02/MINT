@@ -56,6 +56,16 @@ function diagramFor(source: string): Promise<Diagram> {
   return diagram;
 }
 
+/**
+ * Render a Mermaid diagram's source to SVG, as the Mermaid block widget shows
+ * it (for exporting documents). Rejects with the syntax error.
+ */
+export async function renderMermaid(source: string): Promise<string> {
+  const diagram = await diagramFor(source);
+  if ("error" in diagram) throw new Error(diagram.error);
+  return diagram.svg;
+}
+
 function show(dom: HTMLElement, diagram: Diagram) {
   if ("svg" in diagram) {
     dom.dataset.state = "rendered";

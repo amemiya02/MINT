@@ -178,6 +178,9 @@ importers:
       '@mint/editor':
         specifier: workspace:*
         version: link:../../packages/editor
+      '@mint/markdown':
+        specifier: workspace:*
+        version: link:../../packages/markdown
       '@tauri-apps/api':
         specifier: 2.12.4
         version: 2.12.4
@@ -285,12 +288,27 @@ importers:
 
   packages/markdown:
     dependencies:
+      '@codemirror/language':
+        specifier: 6.13.1
+        version: 6.13.1
+      '@codemirror/language-data':
+        specifier: 6.5.2
+        version: 6.5.2
+      '@lezer/common':
+        specifier: 1.5.5
+        version: 1.5.5
+      '@lezer/highlight':
+        specifier: 1.2.5
+        version: 1.2.5
       katex:
         specifier: 0.16.25
         version: 0.16.25
       rehype-katex:
         specifier: 7.0.1
         version: 7.0.1
+      rehype-parse:
+        specifier: 9.0.1
+        version: 9.0.1
       rehype-stringify:
         specifier: 10.0.1
         version: 10.0.1
@@ -312,7 +330,16 @@ importers:
       unified:
         specifier: 11.0.5
         version: 11.0.5
+      unist-util-visit:
+        specifier: 5.2.0
+        version: 5.2.0
     devDependencies:
+      '@types/hast':
+        specifier: 3.0.5
+        version: 3.0.5
+      jsdom:
+        specifier: 31.0.1
+        version: 31.0.1
       vitest:
         specifier: 5.1.0
         version: 5.1.0(@types/node@24.19.2)(jsdom@31.0.1)(vite@8.3.8(@types/node@24.19.2))
@@ -1916,6 +1943,9 @@ packages:
 
   rehype-katex@7.0.1:
     resolution: {integrity: sha512-OiM2wrZ/wuhKkigASodFoo8wimG3H12LWQaH8qSPVJn9apWKFSH3YOCtbKpBorTVw/eI7cuT21XBbvwEswbIOA==}
+
+  rehype-parse@9.0.1:
+    resolution: {integrity: sha512-ksCzCD0Fgfh7trPDxr2rSylbwq9iYDkSn8TCDmEJ49ljEUBxDVCzCHv7QNzZOfODanX4+bWQ4WZqLCRWYLfhag==}
 
   rehype-stringify@10.0.1:
     resolution: {integrity: sha512-k9ecfXHmIPuFVI61B9DeLPN0qFHfawM6RsuX48hoqlaKSF61RskNjSm1lI8PhBEM0MRdLxVVm4WmTqJQccH9mA==}
@@ -4062,6 +4092,12 @@ snapshots:
       katex: 0.16.25
       unist-util-visit-parents: 6.1.0
       vfile: 6.0.3
+
+  rehype-parse@9.0.1:
+    dependencies:
+      '@types/hast': 3.0.5
+      hast-util-from-html: 2.1.0
+      unified: 11.0.5
 
   rehype-stringify@10.0.1:
     dependencies:

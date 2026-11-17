@@ -30,6 +30,8 @@ export interface MemoryPlatformOptions {
   readonly directories?: readonly string[];
   /** Paths the open dialog returns, in order; `null` simulates cancelling. */
   readonly openDialogResults?: readonly (string | null)[];
+  /** Paths the save dialog returns, in order; `null` simulates cancelling. */
+  readonly saveDialogResults?: readonly (string | null)[];
   /** Paths the open folder dialog returns, in order; `null` simulates cancelling. */
   readonly openFolderDialogResults?: readonly (string | null)[];
   /** Initial binary files (images...), keyed by absolute path, as base64. */
@@ -73,6 +75,8 @@ export interface MemoryPlatform extends Platform {
   externalRename(from: string, to: string): void;
   /** Messages of the question dialogs shown so far. */
   readonly questions: readonly string[];
+  /** The paths each save dialog suggested, in order. */
+  readonly saveDialogs: readonly string[];
   /** Whether this window has closed. */
   readonly closed: boolean;
   /** Versions installed (and restarted into) so far. */
@@ -101,6 +105,8 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
   const appData = new Map(Object.entries(options.appData ?? {}));
   const trash: string[] = [];
   const dialogResults = [...(options.openDialogResults ?? [])];
+  const saveDialogResults = [...(options.saveDialogResults ?? [])];
+  const saveDialogs: string[] = [];
   const folderDialogResults = [...(options.openFolderDialogResults ?? [])];
   const watchers = new Set<{ root: string; onChange: (paths: readonly string[]) => void }>();
   const questionResults = [...(options.questionDialogResults ?? [])];
@@ -237,6 +243,13 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     },
     async showOpenDialog() {
       return dialogResults.shift() ?? null;
+    },
+    get saveDialogs() {
+      return saveDialogs;
+    },
+    async showSaveDialog({ defaultPath }) {
+      saveDialogs.push(defaultPath);
+      return saveDialogResults.shift() ?? null;
     },
     async showOpenFolderDialog() {
       return folderDialogResults.shift() ?? null;

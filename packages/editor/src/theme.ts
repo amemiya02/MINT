@@ -2,6 +2,7 @@ import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import type { Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
+import { codeTokens } from "@mint/markdown";
 
 /**
  * How the editor core looks. Every color, font and size comes from a MINT CSS
@@ -33,17 +34,10 @@ const markdownClasses = HighlightStyle.define([
   { tag: tags.contentSeparator, class: "cm-mint-md-rule" },
 ]);
 
-/** Tokens of the code in fenced code blocks, colored from the shared theme variables. */
-const codeClasses = HighlightStyle.define([
-  { tag: [tags.keyword, tags.modifier, tags.operatorKeyword], class: "cm-mint-code-keyword" },
-  { tag: [tags.string, tags.regexp, tags.special(tags.string)], class: "cm-mint-code-string" },
-  { tag: [tags.number, tags.bool, tags.null, tags.atom], class: "cm-mint-code-number" },
-  { tag: [tags.comment, tags.docComment], class: "cm-mint-code-comment" },
-  {
-    tag: [tags.function(tags.variableName), tags.function(tags.propertyName), tags.typeName],
-    class: "cm-mint-code-name",
-  },
-]);
+/** Tokens of the code in fenced code blocks, styled as in exported documents. */
+const codeClasses = HighlightStyle.define(
+  codeTokens.map(({ tag, className }) => ({ tag, class: className })),
+);
 
 const headingSizes = ["1.75em", "1.5em", "1.3em", "1.15em", "1em", "0.95em"];
 
@@ -69,11 +63,7 @@ const markdownTheme = EditorView.baseTheme({
     fontFamily: "var(--mint-font-code, monospace)",
     color: "var(--mint-code-fg, inherit)",
   },
-  ".cm-mint-code-keyword": { color: "var(--mint-accent, #2f7d6d)", fontWeight: "600" },
-  ".cm-mint-code-string": { color: "var(--mint-link, #2f7d6d)" },
-  ".cm-mint-code-number": { color: "var(--mint-accent, #2f7d6d)" },
-  ".cm-mint-code-comment": { color: "var(--mint-muted, #6b717a)", fontStyle: "italic" },
-  ".cm-mint-code-name": { color: "var(--mint-heading-fg, inherit)" },
+  ...Object.fromEntries(codeTokens.map(({ className, style }) => [`.${className}`, style])),
   ".cm-mint-md-mark": { color: "var(--mint-marker, #8a9099)" },
   ".cm-mint-md-rule": { color: "var(--mint-marker, #8a9099)" },
 });

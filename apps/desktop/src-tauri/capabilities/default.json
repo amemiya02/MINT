@@ -10,6 +10,7 @@
     "core:window:allow-destroy",
     "core:webview:allow-create-webview-window",
     "dialog:allow-open",
+    "dialog:allow-save",
     "dialog:allow-message",
     "opener:allow-open-url",
     "updater:default",

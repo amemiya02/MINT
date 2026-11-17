@@ -30,6 +30,12 @@ export interface Platform {
   /** Ask the user to pick a document. Resolves to its path, or `null` if cancelled. */
   showOpenDialog(options: OpenDialogOptions): Promise<string | null>;
 
+  /**
+   * Ask the user where to save a file. `defaultPath` is the suggested file
+   * (folder and name). Resolves to the chosen path, or `null` if cancelled.
+   */
+  showSaveDialog(options: SaveDialogOptions): Promise<string | null>;
+
   /** Ask the user to pick a folder. Resolves to its path, or `null` if cancelled. */
   showOpenFolderDialog(options: { readonly title: string }): Promise<string | null>;
 
@@ -250,6 +256,12 @@ export interface DirectoryEntry {
 
 export interface OpenDialogOptions {
   readonly title: string;
+  readonly filters: readonly { readonly name: string; readonly extensions: readonly string[] }[];
+}
+
+export interface SaveDialogOptions {
+  readonly title: string;
+  readonly defaultPath: string;
   readonly filters: readonly { readonly name: string; readonly extensions: readonly string[] }[];
 }
 
