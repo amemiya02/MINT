@@ -233,9 +233,11 @@ describe("table widget source fidelity", () => {
     }
     return i === before.length;
   };
+  /** Whether a row ends in a pipe that is not escaped (`x|\|` ends in cell content). */
+  const endsWithPipe = (row: string) => /(^|[^\\])(\\\\)*\|$/.test(row);
   /** `after` is `before` without one contiguous piece (and maybe a pipe appended). */
   const oneCut = (before: string, after: string) => {
-    const target = after.endsWith("|") && !before.endsWith("|") ? after.slice(0, -1) : after;
+    const target = endsWithPipe(after) && !endsWithPipe(before) ? after.slice(0, -1) : after;
     for (let from = 0; from <= target.length; from++) {
       const cut = before.length - target.length;
       if (
@@ -246,6 +248,20 @@ describe("table widget source fidelity", () => {
     }
     return false;
   };
+
+  it("deleting a column next to a cell that ends in an escaped pipe keeps that pipe escaped", () => {
+    // Found by the property below (seed -1023156161): the `\|` that ends the body
+    // row is cell content, not the row's trailing pipe, so the row gains one.
+    const view = open("before\n\nx||y\n---|-|-\nx|\\|\n\nafter\n");
+    view.cell(0, 0).focus();
+    view.action("deleteColumn");
+    const after = view.editor.getText();
+    expect(after).toBe("before\n\n||y\n|-|-\n|\\||\n\nafter\n");
+    expect(gridOf(after)).toEqual([
+      ["", "y"],
+      ["\\|", ""],
+    ]);
+  });
 
   it("row, column and alignment operations change only what they must", () => {
     const actions = [
