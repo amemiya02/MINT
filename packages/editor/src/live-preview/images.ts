@@ -32,7 +32,11 @@ export function imagePath(destination: string): string {
   }
 }
 
-function resolveUrl(state: EditorState, destination: string): string | null {
+/**
+ * A URL the page can load for an image source as written: web URLs as they
+ * are, local paths through the host's resolver; `null` if it cannot be shown.
+ */
+export function resolveImageSource(state: EditorState, destination: string): string | null {
   if (webUrl.test(destination)) return destination;
   return state.facet(imageUrlResolver)(imagePath(destination));
 }
@@ -43,6 +47,17 @@ function altText(state: EditorState, node: SyntaxNode): string {
   const open = marks[0];
   const close = marks[1];
   return open && close ? state.sliceDoc(open.to, close.from) : "";
+}
+
+/** What stands in for an image that cannot be shown: its alt text (or else `title`) in a dashed box. */
+export function imagePlaceholder(alt: string, title: string): HTMLElement {
+  const missing = document.createElement("span");
+  missing.className = "cm-mint-image-missing";
+  missing.setAttribute("role", "img");
+  missing.setAttribute("aria-label", alt || title);
+  missing.title = title;
+  missing.textContent = alt || title;
+  return missing;
 }
 
 class ImageWidget extends WidgetType {
@@ -68,13 +83,7 @@ class ImageWidget extends WidgetType {
     const wrapper = document.createElement(this.block ? "div" : "span");
     wrapper.className = this.block ? "cm-mint-image cm-mint-image-block" : "cm-mint-image";
     const placeholder = () => {
-      const missing = document.createElement("span");
-      missing.className = "cm-mint-image-missing";
-      missing.setAttribute("role", "img");
-      missing.setAttribute("aria-label", this.alt || this.title);
-      missing.title = this.title;
-      missing.textContent = this.alt || this.title;
-      wrapper.replaceChildren(missing);
+      wrapper.replaceChildren(imagePlaceholder(this.alt, this.title));
       view.requestMeasure();
     };
     if (this.url === null) {
@@ -104,7 +113,7 @@ function widgetFor(state: EditorState, node: SyntaxNode, block: boolean): ImageW
   const destination = state.sliceDoc(url.from, url.to);
   const title = node.getChild("LinkTitle");
   return new ImageWidget(
-    resolveUrl(state, destination),
+    resolveImageSource(state, destination),
     altText(state, node),
     // The tooltip: the Markdown title if there is one, otherwise the path.
     title ? state.sliceDoc(title.from + 1, title.to - 1) : imagePath(destination),

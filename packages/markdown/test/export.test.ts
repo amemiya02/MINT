@@ -160,6 +160,35 @@ describe("untrusted HTML (rendered into the app)", () => {
     expect(html).toContain("link");
   });
 
+  it("keeps presentational HTML of a README: alignment, sizes, details, kbd, sub/sup, picture", () => {
+    const html = render(
+      [
+        '<p align="center">\n<img alt="" src="docs/banner.png" width="400" height="100"/>\n</p>',
+        '<div align="right"><img src="data:image/png;base64,iVBORw0KGgo=" alt="dot"></div>',
+        "<details open>\n<summary>More</summary>\n<kbd>⌘</kbd><br>H<sub>2</sub>O x<sup>2</sup>\n</details>",
+        '<picture>\n<source media="(prefers-color-scheme: dark)" srcset="https://e.com/d.png">\n<img src="https://e.com/l.png" alt="logo">\n</picture>',
+        '<table><tr><td align="center" width="50%">cell</td></tr></table>',
+      ].join("\n\n"),
+    );
+    expect(html).toContain('<p align="center">');
+    expect(html).toContain('<img alt="" src="docs/banner.png" width="400" height="100">');
+    expect(html).toContain('<div align="right"><img src="data:image/png;base64,iVBORw0KGgo="');
+    expect(html).toContain("<details open>");
+    expect(html).toContain("<summary>More</summary>");
+    expect(html).toContain("<kbd>⌘</kbd><br>H<sub>2</sub>O x<sup>2</sup>");
+    expect(html).toContain(
+      '<source media="(prefers-color-scheme: dark)" srcset="https://e.com/d.png">',
+    );
+    expect(html).toContain('<td align="center" width="50%">cell</td>');
+  });
+
+  it("drops style elements with their content, and data: URLs outside images", () => {
+    const html = render(
+      '<style>body { display: none }</style>\n\n<a href="data:text/html,<b>x</b>">d</a>\n\n<iframe srcdoc="<b>x</b>"></iframe>',
+    );
+    expect(html).not.toMatch(/<style|display: none|data:|<iframe|srcdoc/);
+  });
+
   it("keeps what MINT renders itself: math, highlights, sub/superscript, code classes, task lists, footnotes", () => {
     const html = renderHtml(
       "$x^2$ ==hi== ^up^ ~down~\n\n- [x] done\n\n```js\nlet a\n```\n\nNote[^1]\n\n[^1]: Footnote.\n",
