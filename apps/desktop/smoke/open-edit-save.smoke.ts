@@ -69,7 +69,8 @@ async function keyActions(actions: KeyAction[]): Promise<void> {
 /** Fail with what the window shows, which says which step went missing. */
 async function explain(e: unknown): Promise<never> {
   const page = await command<string>("POST", `/session/${session}/execute/sync`, {
-    script: 'return document.body.innerText + "\\n(focus: " + document.activeElement?.className + ")"',
+    script:
+      'return document.body.innerText + "\\n(focus: " + document.activeElement?.className + ")"',
     args: [],
   }).catch((err: unknown) => `(cannot read the page: ${String(err)})`);
   throw new Error(`${String(e)}\n--- the window shows ---\n${page}`);
