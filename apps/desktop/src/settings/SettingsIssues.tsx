@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { type Translate, useT } from "../i18n/index.ts";
+import { rulesOf } from "./kinds.ts";
 import { type SettingDefinition, settingsSchema } from "./schema.ts";
 import type { SettingsIssue } from "./settings.ts";
 import { useSettings } from "./useSettings.ts";
@@ -51,21 +52,5 @@ function describeIssue(issue: SettingsIssue, t: Translate): string {
 }
 
 function describeExpected(definition: SettingDefinition, t: Translate): string {
-  switch (definition.kind) {
-    case "choice":
-      return t("settings.expected.oneOf", {
-        values: definition.options.map((o) => JSON.stringify(o.value)).join(", "),
-      });
-    case "toggle":
-      return t("settings.expected.toggle");
-    case "number":
-      return t("settings.expected.number", {
-        min: String(definition.min),
-        max: String(definition.max),
-      });
-    case "text":
-      return t("settings.expected.text", { max: String(definition.maxLength) });
-    case "shortcuts":
-      return t("settings.expected.shortcuts");
-  }
+  return rulesOf(definition).expected(definition, t);
 }

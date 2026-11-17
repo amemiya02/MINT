@@ -101,7 +101,7 @@ export type Settings = {
   readonly [K in SettingKey]: ValueOf<(typeof settingsSchema)[K]>;
 };
 
-// --- Setting kinds. Each kind has one validator (settings.ts) and one control (SettingsDialog.tsx).
+// --- Setting kinds. Each kind has one entry in `kinds.ts` (validation, description) and one control (SettingsDialog.tsx).
 
 interface BaseSetting<T> {
   /** Label of the control in the settings window. */

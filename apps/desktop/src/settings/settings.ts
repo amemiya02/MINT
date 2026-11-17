@@ -1,6 +1,5 @@
-import { isCommandId } from "../commands.ts";
-import { isAccelerator } from "../keys.ts";
 import type { Platform, SettingsFile, SettingsValues } from "../platform/platform.ts";
+import { rulesOf } from "./kinds.ts";
 import {
   type SettingDefinition,
   type SettingKey,
@@ -119,31 +118,5 @@ function validate(values: SettingsValues, previous: Settings) {
 }
 
 function isValid(definition: SettingDefinition, value: unknown): boolean {
-  switch (definition.kind) {
-    case "choice":
-      return definition.options.some((option) => option.value === value);
-    case "toggle":
-      return typeof value === "boolean";
-    case "number":
-      return (
-        typeof value === "number" &&
-        Number.isFinite(value) &&
-        value >= definition.min &&
-        value <= definition.max
-      );
-    case "text":
-      return typeof value === "string" && value.length <= definition.maxLength;
-    case "shortcuts":
-      return (
-        typeof value === "object" &&
-        value !== null &&
-        !Array.isArray(value) &&
-        Object.entries(value).every(
-          ([id, accelerator]) =>
-            isCommandId(id) &&
-            (accelerator === null ||
-              (typeof accelerator === "string" && isAccelerator(accelerator))),
-        )
-      );
-  }
+  return rulesOf(definition).isValid(definition, value);
 }
