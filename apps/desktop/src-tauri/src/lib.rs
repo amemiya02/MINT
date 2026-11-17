@@ -7,6 +7,7 @@ mod folder;
 mod fs;
 mod recovery;
 mod settings;
+mod updates;
 mod walk;
 
 use std::collections::HashMap;
@@ -77,6 +78,15 @@ fn delete_recovery_snapshot(
     area.remove(&id).map_err(|e| e.to_string())
 }
 
+/// Whether this copy of MINT can check for and install new versions itself.
+#[tauri::command]
+fn updates_supported(app: tauri::AppHandle) -> bool {
+    updates::supported(
+        app.config().plugins.0.get("updater"),
+        updates::Build::current(),
+    )
+}
+
 /// Event sent to every window with the reloaded `SettingsFile` whenever the file changes on disk.
 const SETTINGS_CHANGED: &str = "settings-changed";
 
@@ -112,7 +122,7 @@ fn list_folder_files(path: PathBuf, extensions: Vec<String>) -> Vec<PathBuf> {
     walk::list_files(&path, &extensions)
 }
 
-/// Live folder watchers, by id. Dropping a watcher stops it.
+/// Live folder and document watchers, by id. Dropping a watcher stops it.
 #[derive(Default)]
 struct Watchers {
     next_id: AtomicU32,
@@ -128,6 +138,27 @@ fn watch_folder(
 ) -> Result<u32, String> {
     let watcher = folder::FolderWatcher::new(&path, move |paths| {
         let _ = on_change.send(paths);
+    })
+    .map_err(|e| e.to_string())?;
+    let id = watchers.next_id.fetch_add(1, Ordering::Relaxed);
+    watchers
+        .active
+        .lock()
+        .map_err(|e| e.to_string())?
+        .insert(id, watcher);
+    Ok(id)
+}
+
+/// Watch one document for changes on disk; `on_change` is signalled after each debounced batch.
+/// Stop with `unwatch_folder`, which ends any watcher by id.
+#[tauri::command]
+fn watch_file(
+    path: PathBuf,
+    on_change: Channel<()>,
+    watchers: State<'_, Watchers>,
+) -> Result<u32, String> {
+    let watcher = folder::FolderWatcher::document(&path, move || {
+        let _ = on_change.send(());
     })
     .map_err(|e| e.to_string())?;
     let id = watchers.next_id.fetch_add(1, Ordering::Relaxed);
@@ -170,6 +201,12 @@ pub fn run() {
         .manage(Watchers::default())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            #[cfg(desktop)]
+            {
+                app.handle()
+                    .plugin(tauri_plugin_updater::Builder::new().build())?;
+                app.handle().plugin(tauri_plugin_process::init())?;
+            }
             let path = app.path().app_config_dir()?.join(settings::FILE_NAME);
             let handle = app.handle().clone();
             let watcher = settings::watch(path.clone(), move |file| {
@@ -191,6 +228,7 @@ pub fn run() {
             settings_path,
             read_settings,
             write_settings,
+            updates_supported,
             read_directory,
             create_file,
             create_directory,
@@ -198,6 +236,7 @@ pub fn run() {
             move_to_trash,
             list_folder_files,
             watch_folder,
+            watch_file,
             unwatch_folder,
             read_app_data,
             write_app_data,

@@ -11,6 +11,8 @@ import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { message, open } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { check } from "@tauri-apps/plugin-updater";
 import type {
   DirectoryEntry,
   MenuItemSpec,
@@ -33,6 +35,12 @@ export function createTauriPlatform(): Platform {
     locale: navigator.language,
     readTextFile: (path) => invoke<string>("read_text_file", { path }),
     writeTextFile: (path, text) => invoke<void>("write_text_file", { path, text }),
+    async watchFile(path, onChange) {
+      const channel = new Channel<null>();
+      channel.onmessage = () => onChange();
+      const id = await invoke<number>("watch_file", { path, onChange: channel });
+      return () => void invoke<void>("unwatch_folder", { id });
+    },
     async showOpenDialog({ title, filters }) {
       const picked = await open({
         title,
@@ -121,6 +129,23 @@ export function createTauriPlatform(): Platform {
     writeRecoverySnapshot: (id, contents) =>
       invoke<void>("write_recovery_snapshot", { id, contents }),
     deleteRecoverySnapshot: (id) => invoke<void>("delete_recovery_snapshot", { id }),
+    isMainWindow: getCurrentWindow().label === "main",
+    async checkForUpdate() {
+      // The backend knows whether this build was given an updater key and endpoint.
+      if (!(await invoke<boolean>("updates_supported"))) return { status: "unavailable" };
+      const update = await check();
+      if (!update) return { status: "upToDate" };
+      return {
+        status: "available",
+        update: {
+          version: update.version,
+          async install() {
+            await update.downloadAndInstall();
+            await relaunch();
+          },
+        },
+      };
+    },
   };
 }
 

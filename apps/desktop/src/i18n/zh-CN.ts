@@ -46,6 +46,16 @@ export const zhCN: Messages = {
   "find.invalid": "正则表达式无效",
 
   "command.app.settings": "设置…",
+  "command.app.checkForUpdates": "检查更新…",
+
+  "update.available": "MINT {version} 已发布。",
+  "update.install": "安装并重启",
+  "update.later": "稍后",
+  "update.installing": "正在安装 MINT {version}…完成后 MINT 会自动重启。",
+  "update.upToDate": "MINT 已是最新版本。",
+  "update.unavailable": "此 MINT 副本不支持自动更新。请从发布页面或包管理器获取新版本。",
+  "update.checkFailed": "无法检查更新：{reason}",
+  "update.installFailed": "无法安装 MINT {version}：{reason}",
 
   "settings.title": "设置",
   "settings.close": "关闭",
@@ -66,6 +76,7 @@ export const zhCN: Messages = {
   "settings.language.zh-CN": "简体中文",
   "settings.language.en": "English",
   "settings.autosave": "自动保存",
+  "settings.checkForUpdates": "启动时检查更新",
 
   "dialog.open.title": "打开文档",
   "dialog.filter.markdown": "Markdown",
@@ -122,4 +133,15 @@ export const zhCN: Messages = {
   "recovery.restore": "恢复",
   "recovery.discard": "丢弃",
   "recovery.later": "稍后再说",
+
+  "external.conflict": "{name} 已被其他程序修改，而这里还有未保存的改动。",
+  "external.keepMine": "保留我的改动",
+  "external.loadDisk": "载入磁盘内容",
+  "external.compare": "查看差异",
+  "external.compare.title": "与磁盘内容比较",
+  "external.compare.legend": "标 − 的行只在此标签页中，标 + 的行只在磁盘上的 {name} 中。",
+  "external.compare.close": "关闭",
+  "external.missing": "{name} 已被其他程序删除或移动。保存即可将它写回原位置。",
+  "external.save": "保存",
+  "external.dismiss": "忽略",
 };

@@ -19,6 +19,14 @@ export interface Platform {
   /** Write text as UTF-8 atomically: either the whole new content lands or the old file stays intact. */
   writeTextFile(path: string, text: string): Promise<void>;
 
+  /**
+   * Watch one document for changes made on disk: modified, created, deleted or
+   * renamed away. `onChange` is called after each (debounced) batch of changes,
+   * MINT's own saves included; it is up to the caller to compare contents.
+   * Resolves to a function that stops watching.
+   */
+  watchFile(path: string, onChange: () => void): Promise<() => void>;
+
   /** Ask the user to pick a document. Resolves to its path, or `null` if cancelled. */
   showOpenDialog(options: OpenDialogOptions): Promise<string | null>;
 
@@ -117,12 +125,36 @@ export interface Platform {
 
   /** Remove a snapshot from the recovery area; removing one that does not exist is not an error. */
   deleteRecoverySnapshot(id: string): Promise<void>;
+
+  /**
+   * Whether this is the first window of the app (the one opened at launch).
+   * Once-per-launch work, such as the startup update check, runs only there.
+   */
+  readonly isMainWindow: boolean;
+
+  /**
+   * Ask the release server whether a newer version of MINT exists. Rejects
+   * when the check fails (offline, server error).
+   */
+  checkForUpdate(): Promise<UpdateCheck>;
 }
 
 /** One entry of the recovery area. `contents` is opaque to the platform. */
 export interface RecoverySnapshot {
   readonly id: string;
   readonly contents: string;
+}
+
+export type UpdateCheck =
+  /** This build cannot update itself (development build, no updater key, package-manager install). */
+  | { readonly status: "unavailable" }
+  | { readonly status: "upToDate" }
+  | { readonly status: "available"; readonly update: AvailableUpdate };
+
+export interface AvailableUpdate {
+  readonly version: string;
+  /** Download and install the new version, then restart MINT into it. Rejects if any step fails. */
+  install(): Promise<void>;
 }
 
 export interface QuestionDialogOptions {

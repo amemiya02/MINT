@@ -42,7 +42,8 @@ export function createAutosave({
         setTimeout(() => {
           timers.delete(id);
           const tab = store.getState().tabs.find((t) => t.id === id);
-          if (tab?.dirty && isEnabled()) void store.save(id);
+          // A notice about a change on disk must be settled by the user, never overwritten.
+          if (tab?.dirty && !tab.external && isEnabled()) void store.save(id);
         }, delayMs),
       );
     },

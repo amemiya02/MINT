@@ -83,3 +83,13 @@ describe("editor core", () => {
     expect(editor.getText()).toBe("> a\nb\r\nc\rd");
   });
 });
+
+describe("replacing the text (reload from disk)", () => {
+  it("takes the new text and keeps the cursor next to the text around it", () => {
+    const editor = open("one\ntwo\nthree\n");
+    editor.setSelection({ anchor: 10 }); // "th|ree"
+    editor.replaceText("zero\none\ntwo\nthree\n");
+    expect(editor.getText()).toBe("zero\none\ntwo\nthree\n");
+    expect(editor.getSelection()).toEqual({ anchor: 15, head: 15 });
+  });
+});
