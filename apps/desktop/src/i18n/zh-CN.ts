@@ -26,6 +26,23 @@ export const zhCN: Messages = {
   "command.tab.previous": "显示上一个标签页",
   "command.window.new": "新建窗口",
 
+  "command.edit.find": "查找…",
+  "command.edit.replace": "替换…",
+
+  "find.label": "查找",
+  "find.replaceWith": "替换为",
+  "find.caseSensitive": "区分大小写",
+  "find.wholeWord": "全字匹配",
+  "find.regexp": "使用正则表达式",
+  "find.previous": "上一个匹配项",
+  "find.next": "下一个匹配项",
+  "find.close": "关闭",
+  "find.replace": "替换",
+  "find.replaceAll": "全部替换",
+  "find.count": "第 {current} 个，共 {total} 个",
+  "find.noResults": "无结果",
+  "find.invalid": "正则表达式无效",
+
   "command.app.settings": "设置…",
 
   "settings.title": "设置",

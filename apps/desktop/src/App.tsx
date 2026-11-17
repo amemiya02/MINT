@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { buildMenu, type CommandId } from "./commands.ts";
 import { EditorPane } from "./EditorPane.tsx";
+import { FindBar, type FindMode } from "./find/FindBar.tsx";
 import { type Translate, useT } from "./i18n/index.ts";
 import type { Platform } from "./platform/platform.ts";
 import { QuickOpen } from "./quick-open/QuickOpen.tsx";
@@ -93,6 +94,11 @@ function Window({ platform, store }: { readonly platform: Platform; readonly sto
     if (path) await store.openDocument(path);
   }, [platform, store, t]);
 
+  const [find, setFind] = useState<{ mode: FindMode; request: number } | null>(null);
+  const showFind = (mode: FindMode) => {
+    if (activeId !== null) setFind((f) => ({ mode, request: (f?.request ?? 0) + 1 }));
+  };
+
   const handlers = useRef<Record<CommandId, () => void>>({} as Record<CommandId, () => void>);
   handlers.current = {
     "file.open": () => void open(),
@@ -101,6 +107,8 @@ function Window({ platform, store }: { readonly platform: Platform; readonly sto
     "file.save": () => {
       if (activeId !== null) void store.save(activeId);
     },
+    "edit.find": () => showFind("find"),
+    "edit.replace": () => showFind("replace"),
     "tab.close": () => {
       if (activeId !== null) void store.close(activeId);
       else void platform.closeWindow();
@@ -153,6 +161,15 @@ function Window({ platform, store }: { readonly platform: Platform; readonly sto
         )}
         <div className="flex min-w-0 flex-1 flex-col">
           {tabs.length > 0 && <TabBar />}
+          {find && active && (
+            <FindBar
+              mode={find.mode}
+              request={find.request}
+              editorKey={active.id}
+              getEditor={() => store.editor(active.id)}
+              onClose={() => setFind(null)}
+            />
+          )}
           <main className="min-h-0 flex-1">
             {tabs.map((tab) => (
               <TabPanel key={tab.id} tab={tab} active={tab.id === activeId} />

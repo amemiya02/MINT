@@ -11,6 +11,8 @@ export type CommandId =
   | "file.openFolder"
   | "file.quickOpen"
   | "file.save"
+  | "edit.find"
+  | "edit.replace"
   | "tab.close"
   | "tab.next"
   | "tab.previous"
@@ -25,6 +27,8 @@ export interface Command {
   readonly accelerator?: string;
 }
 
+const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+
 export const commands: readonly Command[] = [
   { id: "file.open", title: "command.file.open", accelerator: "CmdOrCtrl+O" },
   { id: "file.openFolder", title: "command.file.openFolder" },
@@ -34,6 +38,13 @@ export const commands: readonly Command[] = [
     id: "view.toggleSidebar",
     title: "command.view.toggleSidebar",
     accelerator: "CmdOrCtrl+Shift+L",
+  },
+  { id: "edit.find", title: "command.edit.find", accelerator: "CmdOrCtrl+F" },
+  // Typora's replace shortcut: ⌘⌥F on macOS, Ctrl+H elsewhere (Ctrl+Alt is AltGr on Windows).
+  {
+    id: "edit.replace",
+    title: "command.edit.replace",
+    accelerator: isMac ? "Cmd+Alt+F" : "Ctrl+H",
   },
   { id: "tab.close", title: "command.tab.close", accelerator: "CmdOrCtrl+W" },
   { id: "tab.next", title: "command.tab.next", accelerator: "Ctrl+Tab" },
@@ -82,6 +93,9 @@ export function buildMenu(t: Translate, run: (id: CommandId) => void): MenuSpec[
         { kind: "native", action: "paste", label: t("menu.paste") },
         { kind: "separator" },
         { kind: "native", action: "selectAll", label: t("menu.selectAll") },
+        { kind: "separator" },
+        item("edit.find"),
+        item("edit.replace"),
       ],
     },
     { label: t("menu.view"), items: [item("view.toggleSidebar")] },
