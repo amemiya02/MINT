@@ -21,6 +21,23 @@ export const en = {
   "command.tab.previous": "Show Previous Tab",
   "command.window.new": "New Window",
 
+  "command.edit.find": "Find…",
+  "command.edit.replace": "Replace…",
+
+  "find.label": "Find",
+  "find.replaceWith": "Replace with",
+  "find.caseSensitive": "Match Case",
+  "find.wholeWord": "Match Whole Word",
+  "find.regexp": "Use Regular Expression",
+  "find.previous": "Previous Match",
+  "find.next": "Next Match",
+  "find.close": "Close",
+  "find.replace": "Replace",
+  "find.replaceAll": "Replace All",
+  "find.count": "{current} of {total}",
+  "find.noResults": "No results",
+  "find.invalid": "Invalid regular expression",
+
   "dialog.open.title": "Open Document",
   "dialog.filter.markdown": "Markdown",
 

@@ -52,6 +52,8 @@ export interface TabStore {
   closeAll(): Promise<boolean>;
   save(id: number): Promise<boolean>;
 
+  /** The editor of a tab, once its view has mounted. */
+  editor(id: number): MintEditor | null;
   /** Called by a tab's editor view as it mounts (`editor`) and unmounts (`null`). */
   attachEditor(id: number, editor: MintEditor | null): void;
   /** Called by a tab's editor view on every text change. */
@@ -169,6 +171,8 @@ export function createTabStore({ platform, askUnsaved }: TabStoreOptions): TabSt
         return false;
       }
     },
+
+    editor: (id) => editors.get(id) ?? null,
 
     attachEditor(id, editor) {
       if (editor) editors.set(id, editor);

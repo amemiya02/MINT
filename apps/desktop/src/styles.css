@@ -20,6 +20,8 @@
   --mint-accent: #2f7d6d;
   --mint-error-bg: #fdecea;
   --mint-error-fg: #a1260d;
+  --mint-find-match: #ffe58a99;
+  --mint-find-current: #ffb84d;
 
   color-scheme: light dark;
 }
@@ -34,6 +36,8 @@
     --mint-accent: #5fc2ac;
     --mint-error-bg: #3b1f1c;
     --mint-error-fg: #f2b8ad;
+    --mint-find-match: #8a6d0066;
+    --mint-find-current: #b8741a;
   }
 }
 

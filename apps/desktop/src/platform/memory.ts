@@ -108,7 +108,8 @@ function matchesAccelerator(event: KeyboardEvent, accelerator: string): boolean 
   const wantMeta = mods.has("cmd") || mods.has("command") || (primary && isMac);
   const wantCtrl = mods.has("ctrl") || mods.has("control") || (primary && !isMac);
   return (
-    event.key.toLowerCase() === key &&
+    // With Option held, macOS reports the composed character (⌥F is "ƒ"), so fall back to the physical key.
+    (event.key.toLowerCase() === key || event.code.toLowerCase() === `key${key}`) &&
     event.metaKey === wantMeta &&
     event.ctrlKey === wantCtrl &&
     event.shiftKey === mods.has("shift") &&
