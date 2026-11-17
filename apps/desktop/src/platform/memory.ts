@@ -24,6 +24,10 @@ export interface MemoryPlatform extends Platform {
   readonly closed: boolean;
   /** Activate a menu item by id, as a click in a native menu would. */
   runMenuItem(id: string): void;
+  /** Delete a file as another program would. */
+  removeFile(path: string): void;
+  /** Rename or move a file as another program would. */
+  moveFile(from: string, to: string): void;
 }
 
 export function createMemoryPlatform(options: MemoryPlatformOptions = {}): MemoryPlatform {
@@ -36,6 +40,16 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
   let closeHandler: (() => Promise<boolean>) | null = null;
   let closed = false;
   const settingsListeners = new Set<(file: SettingsFile) => void>();
+  const fileWatchers = new Set<{ readonly path: string; readonly onChange: () => void }>();
+
+  function notifyFiles(paths: readonly string[]) {
+    // Watchers report asynchronously, like file system events do.
+    setTimeout(() => {
+      for (const watcher of [...fileWatchers]) {
+        if (paths.includes(watcher.path)) watcher.onChange();
+      }
+    });
+  }
 
   // Same contract as the Rust backend's `settings::load`.
   function readSettings(): SettingsFile {
@@ -82,8 +96,27 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     },
     async writeTextFile(path, text) {
       files.set(path, text);
-      // Mirrors the backend's file watcher: any write to settings.json is reported.
+      // Mirrors the backend's file watchers: every write is reported, MINT's own included.
       if (path === memorySettingsPath) notifySettings();
+      notifyFiles([path]);
+    },
+    async watchFile(path, onChange) {
+      const watcher = { path, onChange };
+      fileWatchers.add(watcher);
+      return () => {
+        fileWatchers.delete(watcher);
+      };
+    },
+    removeFile(path) {
+      files.delete(path);
+      notifyFiles([path]);
+    },
+    moveFile(from, to) {
+      const text = files.get(from);
+      if (text === undefined) throw new Error(`No such file: ${from}`);
+      files.delete(from);
+      files.set(to, text);
+      notifyFiles([from, to]);
     },
     get questions() {
       return questions;

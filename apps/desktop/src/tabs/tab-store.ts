@@ -8,7 +8,18 @@ export interface Tab {
   /** Text as read from disk; the tab's editor owns the live text. */
   readonly text: string;
   readonly dirty: boolean;
+  /** A change made to the document on disk by another program that the user has to know about. */
+  readonly external: ExternalChange | null;
 }
+
+export type ExternalChange =
+  /** The document changed on disk while the tab had unsaved changes. */
+  | { readonly kind: "conflict"; readonly diskText: string }
+  /** The document was deleted or renamed away. */
+  | { readonly kind: "missing" };
+
+/** How the user settles a conflict between the tab and the document on disk. */
+export type ConflictChoice = "keepMine" | "loadDisk";
 
 export interface TabsState {
   readonly tabs: readonly Tab[];
@@ -51,6 +62,12 @@ export interface TabStore {
   /** Close every tab (e.g. before the window closes). Resolves to false if the user cancelled. */
   closeAll(): Promise<boolean>;
   save(id: number): Promise<boolean>;
+  /** The tab's live text, or `null` if its editor is not mounted. */
+  getText(id: number): string | null;
+  /** Settle a conflict with the document on disk. */
+  resolveConflict(id: number, choice: ConflictChoice): void;
+  /** Hide the notice about a document that was deleted or moved (the tab stays unsaved). */
+  dismissExternal(id: number): void;
 
   /** Called by a tab's editor view as it mounts (`editor`) and unmounts (`null`). */
   attachEditor(id: number, editor: MintEditor | null): void;
@@ -64,6 +81,18 @@ export function createTabStore({ platform, askUnsaved }: TabStoreOptions): TabSt
   const editors = new Map<number, MintEditor>();
   /** Bumped on every change, so a save can tell whether edits arrived meanwhile. */
   const versions = new Map<number, number>();
+  /** Version at the last load or save: the tab has edits of its own when its version differs. */
+  const cleanVersions = new Map<number, number>();
+  /** The text the document had on disk when MINT last read or wrote it. */
+  const diskTexts = new Map<number, string>();
+  /** Bumped when a save starts, so a disk check that overlaps a save is discarded. */
+  const saveEpochs = new Map<number, number>();
+  const savesInFlight = new Set<number>();
+  /** Tabs whose document changed while they were saving: check again afterwards. */
+  const recheck = new Set<number>();
+  const unwatchers = new Map<number, Promise<() => void>>();
+  /** Set while the store itself replaces a tab's text, so the change does not count as an edit. */
+  let reloading: number | null = null;
   /** Paths being read, so a double open does not create two tabs. */
   const opening = new Map<string, Promise<void>>();
   let nextId = 1;
@@ -93,12 +122,92 @@ export function createTabStore({ platform, askUnsaved }: TabStoreOptions): TabSt
         set({ activeId: existing.id, error: null });
         return;
       }
-      const tab: Tab = { id: nextId++, path, text, dirty: false };
+      const tab: Tab = { id: nextId++, path, text, dirty: false, external: null };
       versions.set(tab.id, 0);
+      cleanVersions.set(tab.id, 0);
+      diskTexts.set(tab.id, text);
+      saveEpochs.set(tab.id, 0);
+      unwatchers.set(
+        tab.id,
+        platform.watchFile(path, () => void checkDisk(tab.id)).catch(() => () => {}),
+      );
       set({ tabs: [...state.tabs, tab], activeId: tab.id, error: null });
     } catch (e) {
       set({ error: { kind: "open", path, reason: reasonOf(e) } });
     }
+  }
+
+  function hasOwnEdits(id: number) {
+    return versions.get(id) !== cleanVersions.get(id);
+  }
+
+  function markClean(id: number, diskText: string) {
+    diskTexts.set(id, diskText);
+    cleanVersions.set(id, versions.get(id) ?? 0);
+    updateTab(id, { dirty: false, external: null });
+  }
+
+  /** Put the disk text into the tab's editor; the selection stays near the text around it. */
+  function loadDiskText(id: number, diskText: string) {
+    const editor = editors.get(id);
+    if (!editor) return;
+    if (editor.getText() !== diskText) {
+      reloading = id;
+      try {
+        editor.replaceText(diskText);
+      } finally {
+        reloading = null;
+      }
+    }
+    markClean(id, diskText);
+  }
+
+  /** React to a watcher event: compare the document on disk with what the tab knows. */
+  async function checkDisk(id: number) {
+    if (savesInFlight.has(id)) {
+      recheck.add(id);
+      return;
+    }
+    const tab = state.tabs.find((t) => t.id === id);
+    if (!tab) return;
+    const epoch = saveEpochs.get(id);
+    let diskText: string | null;
+    try {
+      diskText = await platform.readTextFile(tab.path);
+    } catch {
+      diskText = null;
+    }
+    const current = state.tabs.find((t) => t.id === id);
+    if (!current || current.path !== tab.path) return;
+    if (saveEpochs.get(id) !== epoch || savesInFlight.has(id)) {
+      // A save overlapped the read: what was read may already be stale.
+      recheck.add(id);
+      if (!savesInFlight.has(id)) void runRecheck(id);
+      return;
+    }
+
+    if (diskText === null) {
+      if (current.external?.kind !== "missing") {
+        // Closing the tab now would lose the text, so it counts as unsaved.
+        updateTab(id, { dirty: true, external: { kind: "missing" } });
+      }
+      return;
+    }
+    // MINT's own save, or a change that left the content as it was.
+    if (diskText === diskTexts.get(id) && current.external?.kind !== "missing") return;
+
+    if (!hasOwnEdits(id)) {
+      loadDiskText(id, diskText);
+    } else if (editors.get(id)?.getText() === diskText) {
+      markClean(id, diskText);
+    } else {
+      updateTab(id, { external: { kind: "conflict", diskText } });
+    }
+  }
+
+  async function runRecheck(id: number) {
+    if (!recheck.delete(id)) return;
+    await checkDisk(id);
   }
 
   const store: TabStore = {
@@ -143,6 +252,13 @@ export function createTabStore({ platform, askUnsaved }: TabStoreOptions): TabSt
       if (activeId === id) activeId = (tabs[index] ?? tabs[index - 1])?.id ?? null;
       editors.delete(id);
       versions.delete(id);
+      cleanVersions.delete(id);
+      diskTexts.delete(id);
+      saveEpochs.delete(id);
+      recheck.delete(id);
+      const unwatch = unwatchers.get(id);
+      unwatchers.delete(id);
+      void unwatch?.then((stop) => stop());
       set({ tabs, activeId });
       return true;
     },
@@ -158,16 +274,44 @@ export function createTabStore({ platform, askUnsaved }: TabStoreOptions): TabSt
       const tab = state.tabs.find((t) => t.id === id);
       const editor = editors.get(id);
       if (!tab || !editor) return false;
-      const savedVersion = versions.get(id);
+      const savedVersion = versions.get(id) ?? 0;
+      const text = editor.getText();
+      saveEpochs.set(id, (saveEpochs.get(id) ?? 0) + 1);
+      savesInFlight.add(id);
       try {
-        await platform.writeTextFile(tab.path, editor.getText());
-        updateTab(id, { dirty: versions.get(id) !== savedVersion });
+        await platform.writeTextFile(tab.path, text);
+        diskTexts.set(id, text);
+        cleanVersions.set(id, savedVersion);
+        // Saving overwrites the disk, which settles any notice about it.
+        updateTab(id, { dirty: versions.get(id) !== savedVersion, external: null });
         set({ error: null });
         return true;
       } catch (e) {
         set({ error: { kind: "save", path: tab.path, reason: reasonOf(e) } });
         return false;
+      } finally {
+        savesInFlight.delete(id);
+        void runRecheck(id);
       }
+    },
+
+    getText: (id) => editors.get(id)?.getText() ?? null,
+
+    resolveConflict(id, choice) {
+      const tab = state.tabs.find((t) => t.id === id);
+      if (tab?.external?.kind !== "conflict") return;
+      const { diskText } = tab.external;
+      if (choice === "loadDisk") {
+        loadDiskText(id, diskText);
+      } else {
+        // The next save overwrites the disk; until then this disk text is known.
+        diskTexts.set(id, diskText);
+        updateTab(id, { external: null });
+      }
+    },
+
+    dismissExternal(id) {
+      updateTab(id, { external: null });
     },
 
     attachEditor(id, editor) {
@@ -176,6 +320,7 @@ export function createTabStore({ platform, askUnsaved }: TabStoreOptions): TabSt
     },
 
     markChanged(id) {
+      if (reloading === id) return;
       versions.set(id, (versions.get(id) ?? 0) + 1);
       if (!state.tabs.find((t) => t.id === id)?.dirty) updateTab(id, { dirty: true });
     },

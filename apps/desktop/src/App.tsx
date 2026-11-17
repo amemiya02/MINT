@@ -6,6 +6,7 @@ import type { Platform } from "./platform/platform.ts";
 import { SettingsDialog } from "./settings/SettingsDialog.tsx";
 import { SettingsIssues } from "./settings/SettingsIssues.tsx";
 import { TabStoreContext, useTabStore, useTabsState } from "./tabs/context.ts";
+import { ExternalChangeNotice } from "./tabs/ExternalChangeNotice.tsx";
 import { baseName } from "./tabs/paths.ts";
 import { TabBar } from "./tabs/TabBar.tsx";
 import { createTabStore, type Tab, type TabError, type TabStore } from "./tabs/tab-store.ts";
@@ -146,9 +147,12 @@ function TabPanel({ tab, active }: { readonly tab: Tab; readonly active: boolean
       id={`tabpanel-${id}`}
       aria-labelledby={`tab-${id}`}
       hidden={!active}
-      className="h-full"
+      className="flex h-full flex-col"
     >
-      <EditorPane text={tab.text} active={active} onReady={onReady} onChange={onChange} />
+      <ExternalChangeNotice tab={tab} />
+      <div className="min-h-0 flex-1">
+        <EditorPane text={tab.text} active={active} onReady={onReady} onChange={onChange} />
+      </div>
     </div>
   );
 }

@@ -36,11 +36,27 @@ export function readFile(page: Page, path: string): Promise<string | undefined> 
 
 /**
  * Change a file as another program would. Watchers are notified, so this is how
- * tests edit settings.json behind MINT's back.
+ * tests edit settings.json or an open document behind MINT's back.
  */
 export async function writeFile(page: Page, path: string, text: string): Promise<void> {
   await page.evaluate(
     ([p, t]) => (window as unknown as MemoryWindow).__MINT_MEMORY_PLATFORM__.writeTextFile(p, t),
     [path, text] as const,
+  );
+}
+
+/** Delete a file as another program would; watchers are notified. */
+export async function removeFile(page: Page, path: string): Promise<void> {
+  await page.evaluate(
+    (p) => (window as unknown as MemoryWindow).__MINT_MEMORY_PLATFORM__.removeFile(p),
+    path,
+  );
+}
+
+/** Rename or move a file as another program would; watchers are notified. */
+export async function moveFile(page: Page, from: string, to: string): Promise<void> {
+  await page.evaluate(
+    ([f, t]) => (window as unknown as MemoryWindow).__MINT_MEMORY_PLATFORM__.moveFile(f, t),
+    [from, to] as const,
   );
 }
