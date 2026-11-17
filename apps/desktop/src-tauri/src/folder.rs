@@ -435,11 +435,17 @@ mod tests {
 
         fs::write(link.join("added.md"), "x").unwrap();
 
-        let paths = rx.recv_timeout(Duration::from_secs(3)).unwrap();
+        // The change may arrive in any of several batches (FSEvents can also
+        // replay events from just before the watch started).
+        let mut paths = Vec::new();
+        while let Ok(batch) = rx.recv_timeout(Duration::from_secs(3)) {
+            paths.extend(batch);
+        }
         assert!(paths.contains(&link.join("added.md")), "{paths:?}");
     }
 
     /// Write `count` empty files spread over directories of 20 files each.
+    #[cfg(not(target_os = "linux"))]
     fn generate_tree(root: &Path, count: usize) {
         for i in 0..count {
             let dir = root
@@ -453,12 +459,16 @@ mod tests {
     }
 
     /// How long starting a folder watcher on `dir` takes.
+    #[cfg(not(target_os = "linux"))]
     fn start_time(dir: &Path) -> Duration {
         let started = std::time::Instant::now();
         let _watcher = FolderWatcher::new(dir, |_| {}).unwrap();
         started.elapsed()
     }
 
+    // Not on Linux: inotify itself must add one watch per directory, so starting
+    // there grows with the folder whatever MINT does (it runs off the main thread).
+    #[cfg(not(target_os = "linux"))]
     #[test]
     fn watcher_starts_without_walking_a_large_folder() {
         let empty = tempfile::tempdir().unwrap();
@@ -477,8 +487,10 @@ mod tests {
 
         // The platform watcher has a fixed start-up cost (FSEvents: ~0.2 s);
         // what must not happen is a cost that grows with the folder.
-        let baseline = start_time(empty.path());
-        let large = start_time(&dir);
+        // Best of three, so one slow start on a busy machine doesn't fail it.
+        let best = |p: &Path| (0..3).map(|_| start_time(p)).min().unwrap();
+        let baseline = best(empty.path());
+        let large = best(&dir);
 
         assert!(
             large < baseline + walk / 2,
@@ -487,6 +499,7 @@ mod tests {
     }
 
     /// Every path under `root`, depth first.
+    #[cfg(not(target_os = "linux"))]
     fn walkdir_all(root: &Path) -> Vec<PathBuf> {
         let mut out = Vec::new();
         let mut stack = vec![root.to_path_buf()];

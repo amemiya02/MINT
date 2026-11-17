@@ -47,8 +47,13 @@ test("a shortcut recorded in the settings window is saved in settings.json and w
   expect(await savedSettings(page)).toEqual({
     shortcuts: { "format.bold": "CmdOrCtrl+Shift+J" },
   });
-  const items = (await menu(page)).flatMap((m) => m.items);
-  expect(items.find((i) => i.id === "format.bold")?.accelerator).toBe("CmdOrCtrl+Shift+J");
+  // The menu is rebuilt asynchronously after the settings change.
+  await expect
+    .poll(async () => {
+      const items = (await menu(page)).flatMap((m) => m.items);
+      return items.find((i) => i.id === "format.bold")?.accelerator;
+    })
+    .toBe("CmdOrCtrl+Shift+J");
 
   await page.keyboard.press("Escape");
   await boldWithSelection(page, "ControlOrMeta+Shift+J");
