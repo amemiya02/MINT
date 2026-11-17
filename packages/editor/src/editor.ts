@@ -2,7 +2,7 @@ import { defaultKeymap, history, historyKeymap, redo, undo } from "@codemirror/c
 import { syntaxTree } from "@codemirror/language";
 import { Compartment, EditorSelection, EditorState } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
-import { type Dialect, defaultDialect } from "@mint/markdown";
+import { type Dialect, defaultDialect, renderHtml } from "@mint/markdown";
 import { markdownSupport } from "./dialect.ts";
 import {
   fileText,
@@ -34,6 +34,13 @@ import { livePreview, previewRenderer } from "./live-preview/preview.ts";
 import { quotesAndRules } from "./live-preview/quotes-and-rules.ts";
 import { markupContinuation } from "./markup-continuation.ts";
 import { type OutlineHeading, outline, sameOutline } from "./outline.ts";
+import { type TableCommands, tableCommands } from "./table/commands.ts";
+import {
+  focusTableCell,
+  runInFocusedTable,
+  tableRenderer,
+  tableTheme,
+} from "./table/table-widget.ts";
 import { themeable } from "./theme.ts";
 
 /**
@@ -76,6 +83,11 @@ export interface EditorOptions {
   readonly host?: HostAdapter;
   /** Initial mode; defaults to `livePreview`. */
   readonly mode?: EditorMode;
+  /**
+   * Translations of the editor's own UI copy, keyed by the English text
+   * (the exported `tablePhrases`). Untranslated text stays English.
+   */
+  readonly phrases?: Readonly<Record<string, string>>;
 }
 
 /** A selection range in {@link MintEditor.getText} offsets (UTF-16 code units). */
@@ -85,7 +97,7 @@ export interface TextSelection {
 }
 
 /** Named commands and their arguments. */
-export interface EditorCommands extends FindCommands, FormattingCommands {
+export interface EditorCommands extends FindCommands, FormattingCommands, TableCommands {
   undo: [];
   redo: [];
   /** Replace the selection with text, as if typed. Line breaks take the document's line ending. */
@@ -167,6 +179,7 @@ export function createEditor(options: EditorOptions): MintEditor {
       doc: parsed.doc,
       extensions: [
         parsed.extension,
+        options.phrases ? EditorState.phrases.of(options.phrases) : [],
         history(),
         findReplace(),
         keymap.of([
@@ -177,6 +190,8 @@ export function createEditor(options: EditorOptions): MintEditor {
         markupContinuation,
         themeable(),
         previewRenderer.of(inlineSpans),
+        previewRenderer.of(tableRenderer((markdown) => renderHtml(markdown, dialect))),
+        tableTheme,
         mathPreview(),
         headings,
         lists,
@@ -218,6 +233,7 @@ export function createEditor(options: EditorOptions): MintEditor {
 
   const commands: { [C in EditorCommand]: (...args: EditorCommands[C]) => boolean } = {
     ...findCommands(view),
+    ...tableCommands(view, runInFocusedTable, focusTableCell),
     ...formattingCommands(view),
     undo: () => undo(view),
     redo: () => redo(view),
@@ -284,7 +300,10 @@ export function createEditor(options: EditorOptions): MintEditor {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    focus: () => view.focus(),
+    // Focus already inside the editor (say, in a table cell) stays where it is.
+    focus: () => {
+      if (!view.dom.contains(view.root.activeElement)) view.focus();
+    },
     destroy: () => {
       listeners.clear();
       view.destroy();

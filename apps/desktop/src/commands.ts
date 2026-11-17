@@ -119,10 +119,21 @@ export const commands = [
     group: "blocks",
     editor: ["insertCodeBlock"],
   },
-  // Further editor commands only need an entry here once the editor core has
-  // them. Insert table (⌘T, #9) goes in the "blocks" group:
-  //   { id: "paragraph.table", title: "command.paragraph.table", accelerator: "CmdOrCtrl+T",
-  //     menu: "paragraph", group: "blocks", editor: ["insertTable"] },
+  {
+    id: "paragraph.table",
+    title: "command.paragraph.table",
+    accelerator: "CmdOrCtrl+T",
+    menu: "paragraph",
+    group: "blocks",
+    editor: ["insertTable"],
+  },
+  {
+    id: "paragraph.formatTable",
+    title: "command.paragraph.formatTable",
+    menu: "paragraph",
+    group: "table",
+    editor: ["formatTable"],
+  },
 
   {
     id: "format.bold",
