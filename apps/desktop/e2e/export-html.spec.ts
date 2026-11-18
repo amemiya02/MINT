@@ -117,7 +117,7 @@ test("uses the selected bundled theme in a standalone export", async ({ page, co
   await launch(page, {
     files: {
       "/notes/report.md": "# Field notes\n",
-      [settingsPath]: '{"theme":"builtin/bookleaf","appearance":"dark"}',
+      [settingsPath]: '{"theme":"builtin/typora-latex","appearance":"dark"}',
     },
     openDialogResults: ["/notes/report.md"],
     saveDialogResults: ["/notes/out.html"],
@@ -125,18 +125,18 @@ test("uses the selected bundled theme in a standalone export", async ({ page, co
   });
   await page.keyboard.press("ControlOrMeta+O");
   await expect(page.locator(".cm-content")).toBeVisible();
-  await expect(page.locator("body")).toHaveCSS("background-color", "rgb(37, 31, 29)");
+  await expect(page.locator("body")).toHaveCSS("background-color", "rgb(37, 35, 33)");
   await runMenuItem(page, "file.exportHtml");
   const dialog = page.getByRole("dialog", { name: "Export as HTML" });
-  await expect(dialog.getByLabel("Theme")).toHaveValue("builtin/bookleaf");
+  await expect(dialog.getByLabel("Theme")).toHaveValue("builtin/typora-latex");
   await expect(dialog.getByLabel("Appearance")).toHaveValue("dark");
   await dialog.getByRole("button", { name: "Export" }).click();
   await expect(dialog).toHaveCount(0);
 
   const exported = await context.newPage();
   await exported.setContent((await readFile(page, "/notes/out.html")) ?? "");
-  await expect(exported.locator("html")).toHaveCSS("background-color", "rgb(37, 31, 29)");
-  await expect(exported.locator("h1")).toHaveCSS("font-family", /Georgia/);
+  await expect(exported.locator("html")).toHaveCSS("background-color", "rgb(37, 35, 33)");
+  await expect(exported.locator("h1")).toHaveCSS("font-family", /Latin Modern Roman/);
 });
 
 test("is in the command palette, in Chinese too", async ({ page }) => {

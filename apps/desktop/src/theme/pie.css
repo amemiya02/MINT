@@ -1,0 +1,102 @@
+/* Pie-inspired red editorial headings and Palenight-style code blocks. */
+:root {
+  --mint-font-editor: "Source Sans 3", "Source Sans Pro", var(--mint-font-ui);
+  --mint-heading-weight: 700;
+  --mint-heading-1-size: 2.15em;
+  --mint-heading-2-size: 1.65em;
+  --mint-bg: #fffdfc;
+  --mint-fg: #29272b;
+  --mint-muted: #6e5658;
+  --mint-border: #e6d6d7;
+  --mint-hover: #faf0ef;
+  --mint-selected: #f9dfdc;
+  --mint-sidebar-bg: #f8f3f2;
+  --mint-accent: #af3035;
+  --mint-selection: #facfc9;
+  --mint-heading-fg: #352831;
+  --mint-link: #a12732;
+  --mint-code-fg: #83323f;
+  --mint-code-bg: #fbefef;
+  --mint-quote-fg: #664449;
+  --mint-find-current: #f7be76;
+  --mint-caret: var(--mint-fg);
+  --mint-marker: var(--mint-muted);
+  --pie-quote-bg: #fff0ef;
+  --pie-fence-bg: #eeedf7;
+  --pie-fence-fg: #34374d;
+  --pie-fence-keyword: #633d8b;
+  --pie-fence-string: #3a622e;
+  --pie-fence-number: #8a4d23;
+  --pie-fence-muted: #555977;
+  --pie-fence-name: #255589;
+}
+
+:root[data-appearance="dark"] {
+  --mint-bg: #282b40;
+  --mint-fg: #eceaf3;
+  --mint-muted: #bdb8cf;
+  --mint-border: #47465e;
+  --mint-hover: #35364c;
+  --mint-selected: #483949;
+  --mint-sidebar-bg: #222437;
+  --mint-accent: #ff9994;
+  --mint-selection: #5d4251;
+  --mint-heading-fg: #f5edf6;
+  --mint-link: #ffa7a2;
+  --mint-code-fg: #f2c5d4;
+  --mint-code-bg: #383449;
+  --mint-quote-fg: #e6cbd4;
+  --mint-find-current: #654524;
+  --pie-quote-bg: #413346;
+  --pie-fence-bg: #1e2032;
+  --pie-fence-fg: #e2e7fc;
+  --pie-fence-keyword: #ddb9f5;
+  --pie-fence-string: #cae7a5;
+  --pie-fence-number: #ffca9f;
+  --pie-fence-muted: #b2b9d6;
+  --pie-fence-name: #94c7ff;
+}
+
+.mint-editor .cm-mint-h1,
+.mint-document h1 {
+  text-align: center;
+}
+
+.mint-editor .cm-mint-h1::after,
+.mint-document h1::after {
+  content: "";
+  display: block;
+  width: 5rem;
+  margin: 0.2rem auto 0;
+  border-bottom: 2px dashed var(--mint-accent);
+}
+
+.mint-editor .cm-mint-h2,
+.mint-document h2 {
+  border-left: 0.25rem solid var(--mint-accent);
+  padding-left: 0.5rem;
+}
+
+.mint-editor .cm-mint-blockquote,
+.mint-document blockquote {
+  border-left-color: var(--mint-accent);
+  background-color: var(--pie-quote-bg);
+}
+
+.mint-document pre:not(.mint-mermaid-error),
+.mint-editor .cm-mint-codeblock {
+  --mint-code-bg: var(--pie-fence-bg);
+  --mint-code-fg: var(--pie-fence-fg);
+  --mint-accent: var(--pie-fence-keyword);
+  --mint-link: var(--pie-fence-string);
+  --mint-muted: var(--pie-fence-muted);
+  --mint-marker: var(--mint-muted);
+  --mint-heading-fg: var(--pie-fence-name);
+  background-color: var(--mint-code-bg);
+  color: var(--mint-code-fg);
+}
+
+.mint-document pre .cm-mint-code-number,
+.mint-editor .cm-mint-codeblock .cm-mint-code-number {
+  color: var(--pie-fence-number);
+}

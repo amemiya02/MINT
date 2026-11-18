@@ -8,9 +8,9 @@ import {
   writeFile,
 } from "./memory-platform.ts";
 
-// Sage is the default theme in both appearances.
-const lightBackground = "rgb(246, 248, 239)";
-const darkBackground = "rgb(25, 35, 29)";
+// GitHub is the default theme in both appearances.
+const lightBackground = "rgb(255, 255, 255)";
+const darkBackground = "rgb(13, 17, 23)";
 
 const background = (page: Page) =>
   page.evaluate(() => getComputedStyle(document.body).backgroundColor);
@@ -64,16 +64,42 @@ test("bundled themes can be selected and follow appearance without hiding custom
   await page.keyboard.press("ControlOrMeta+,");
   const theme = page.getByLabel("Theme");
   await expect(theme.locator("optgroup").first().getByRole("option")).toHaveText([
-    "Sage (default)",
+    "Sage",
     "Bookleaf",
     "Blueprint",
     "Dusk",
   ]);
+  await expect(theme.locator("optgroup").nth(1).getByRole("option")).toHaveText([
+    "GitHub (default)",
+    "Gothic",
+    "Newsprint",
+    "Night",
+    "Pixyll",
+    "Whitey",
+  ]);
+  await expect(theme.locator("optgroup").nth(2).getByRole("option")).toHaveText([
+    "Academic",
+    "Cobalt",
+    "Dracula",
+    "Drake",
+    "GitBook",
+    "Ladder",
+    "Lapis",
+    "Mdmdt",
+    "Notion",
+    "Pie",
+    "Purple",
+    "Typora LaTeX",
+    "Ursine",
+    "Vue",
+  ]);
   for (const [name, light, dark] of [
     ["Bookleaf", "rgb(250, 246, 236)", "rgb(37, 31, 29)"],
     ["Blueprint", "rgb(246, 249, 253)", "rgb(19, 28, 44)"],
-    ["Sage (default)", lightBackground, darkBackground],
+    ["Sage", "rgb(246, 248, 239)", "rgb(25, 35, 29)"],
     ["Dusk", "rgb(249, 245, 250)", "rgb(32, 27, 39)"],
+    ["GitHub (default)", lightBackground, darkBackground],
+    ["Vue", "rgb(255, 255, 255)", "rgb(29, 32, 34)"],
   ] as const) {
     await theme.selectOption({ label: name });
     await expect.poll(() => background(page)).toBe(light);
@@ -83,7 +109,7 @@ test("bundled themes can be selected and follow appearance without hiding custom
     await page.emulateMedia({ colorScheme: "light" });
   }
   expect(JSON.parse((await readFile(page, settingsPath)) ?? "")).toMatchObject({
-    theme: "builtin/dusk",
+    theme: "builtin/vue",
   });
   await theme.selectOption({ label: "bookleaf" });
   await expect.poll(() => background(page)).toBe("rgb(250, 240, 220)");
@@ -103,7 +129,7 @@ test("a .css file in the theme folder can be chosen as the theme", async ({ page
   await expect.poll(() => background(page)).toBe("rgb(250, 240, 220)");
   expect(JSON.parse((await readFile(page, settingsPath)) ?? "")).toEqual({ theme: "paper" });
 
-  await page.getByLabel("Theme").selectOption({ label: "Sage (default)" });
+  await page.getByLabel("Theme").selectOption({ label: "GitHub (default)" });
   await expect.poll(() => background(page)).toBe(lightBackground);
 });
 
@@ -128,7 +154,9 @@ test("a theme dropped into the folder shows up in the settings window without a 
   await page.keyboard.press("ControlOrMeta+,");
 
   await externalWrite(page, `${themesPath}/night.css`, paper("rgb(0, 0, 40)"));
-  await expect(page.getByLabel("Theme").getByRole("option", { name: "night" })).toBeAttached();
+  await expect(
+    page.getByLabel("Theme").getByRole("option", { name: "night", exact: true }),
+  ).toBeAttached();
 
   await page.getByLabel("Theme").selectOption({ label: "night" });
   await expect.poll(() => background(page)).toBe("rgb(0, 0, 40)");

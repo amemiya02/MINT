@@ -1,0 +1,44 @@
+:root {
+  --mint-font-editor: var(--mint-font-ui);
+  --mint-heading-weight: 700;
+  --mint-heading-1-size: 2em;
+  --mint-bg: #faf7ff;
+  --mint-fg: #372f49;
+  --mint-muted: #655775;
+  --mint-border: #d8d0e4;
+  --mint-hover: #f1ebf7;
+  --mint-selected: #e7d9f3;
+  --mint-sidebar-bg: #f4eff9;
+  --mint-accent: #713c94;
+  --mint-heading-fg: #67368a;
+  --mint-link: #135874;
+  --mint-code-fg: #8d285e;
+  --mint-code-bg: #f0eaf5;
+  --mint-quote-fg: var(--mint-muted);
+  --mint-marker: var(--mint-muted);
+  --mint-caret: var(--mint-fg);
+  --mint-selection: var(--mint-selected);
+}
+
+:root[data-appearance="dark"] {
+  --mint-bg: #282a36;
+  --mint-fg: #f8f8f2;
+  --mint-muted: #b9bdd3;
+  --mint-border: #53566b;
+  --mint-hover: #393c4d;
+  --mint-selected: #47475e;
+  --mint-sidebar-bg: #222430;
+  --mint-accent: #bd93f9;
+  --mint-heading-fg: #bd93f9;
+  --mint-link: #8be9fd;
+  --mint-code-fg: #ff79c6;
+  --mint-code-bg: #353746;
+}
+
+.cm-mint-code-keyword {
+  color: var(--mint-code-fg);
+}
+
+.cm-mint-code-name {
+  color: var(--mint-link);
+}

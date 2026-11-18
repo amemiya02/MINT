@@ -1,0 +1,49 @@
+/* Geometric sans-serif, centered capitals, and oxblood links. */
+:root {
+  --mint-font-editor:
+    "TeX Gyre Adventor", "Century Gothic", "Avenir Next", "Trebuchet MS", var(--mint-font-ui);
+  --mint-heading-weight: 400;
+  --mint-heading-1-size: 2.65em;
+  --mint-heading-2-size: 1.9em;
+  --mint-bg: #fcfcfc;
+  --mint-fg: #262323;
+  --mint-muted: #655c5c;
+  --mint-border: #ddd3d3;
+  --mint-hover: #f2eeee;
+  --mint-selected: #efdddd;
+  --mint-sidebar-bg: #f5f2f2;
+  --mint-accent: #990000;
+  --mint-selection: #f0d5d5;
+  --mint-heading-fg: #191515;
+  --mint-link: var(--mint-accent);
+  --mint-code-fg: #4f3333;
+  --mint-code-bg: #f2ecec;
+  --mint-quote-fg: #615656;
+  --mint-find-current: #edc375;
+  --mint-caret: var(--mint-fg);
+  --mint-marker: var(--mint-muted);
+}
+
+:root[data-appearance="dark"] {
+  --mint-bg: #211d1e;
+  --mint-fg: #ede6e6;
+  --mint-muted: #c0b0b1;
+  --mint-border: #4e3f41;
+  --mint-hover: #30282a;
+  --mint-selected: #483032;
+  --mint-sidebar-bg: #1a1718;
+  --mint-accent: #f1a2a4;
+  --mint-selection: #603c42;
+  --mint-heading-fg: #f8efef;
+  --mint-code-fg: #edcbce;
+  --mint-code-bg: #322629;
+  --mint-quote-fg: #cbb7b9;
+  --mint-find-current: #63461e;
+}
+
+.mint-editor :is(.cm-mint-h1, .cm-mint-h2),
+.mint-document :is(h1, h2) {
+  letter-spacing: 0.04em;
+  text-align: center;
+  text-transform: uppercase;
+}

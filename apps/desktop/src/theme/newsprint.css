@@ -1,0 +1,53 @@
+/* Newspaper stock with serif type, a masthead rule, and ink-blue links. */
+:root {
+  --mint-font-editor: "PT Serif", "Times New Roman", "Songti SC", SimSun, serif;
+  --mint-heading-weight: 700;
+  --mint-heading-1-size: 1.9em;
+  --mint-heading-2-size: 1.4em;
+  --mint-heading-3-size: 1.2em;
+  --mint-bg: #f3f2ee;
+  --mint-fg: #271e1b;
+  --mint-muted: #615b54;
+  --mint-border: #cec9bf;
+  --mint-hover: #eae7df;
+  --mint-selected: #e0e3dc;
+  --mint-sidebar-bg: #edeae2;
+  --mint-accent: #065588;
+  --mint-selection: #d5e0e1;
+  --mint-heading-fg: #211717;
+  --mint-link: var(--mint-accent);
+  --mint-code-fg: #413934;
+  --mint-code-bg: #e7e4dc;
+  --mint-quote-fg: #5d5750;
+  --mint-find-current: #e6c277;
+  --mint-caret: var(--mint-fg);
+  --mint-marker: var(--mint-muted);
+}
+
+:root[data-appearance="dark"] {
+  --mint-bg: #252423;
+  --mint-fg: #eae5db;
+  --mint-muted: #c0b7a9;
+  --mint-border: #524e47;
+  --mint-hover: #33312d;
+  --mint-selected: #383c39;
+  --mint-sidebar-bg: #1f1e1d;
+  --mint-accent: #a5cce5;
+  --mint-selection: #3c4c51;
+  --mint-heading-fg: #f6efe2;
+  --mint-code-fg: #e6ded0;
+  --mint-code-bg: #302e2b;
+  --mint-quote-fg: #c6bcac;
+  --mint-find-current: #654c26;
+}
+
+.mint-editor .cm-mint-h1,
+.mint-document h1 {
+  border-bottom: 1px solid var(--mint-muted);
+  padding-bottom: 0.25em;
+}
+
+.mint-editor .cm-mint-blockquote,
+.mint-document blockquote {
+  font-style: italic;
+}

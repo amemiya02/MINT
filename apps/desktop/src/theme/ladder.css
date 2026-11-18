@@ -1,0 +1,49 @@
+/* Ladder-inspired slate and sky blue with roomier text and optional WenKai. */
+:root {
+  --mint-font-editor: "LXGW WenKai", "Kaiti SC", KaiTi, Georgia, "Noto Serif CJK SC", serif;
+  --mint-font-size: 16px;
+  --mint-line-height: 1.8;
+  --mint-heading-weight: 700;
+  --mint-heading-1-size: 2.3em;
+  --mint-heading-2-size: 1.6em;
+  --mint-bg: #ffffff;
+  --mint-fg: #334155;
+  --mint-muted: #53647a;
+  --mint-border: #d5e1ed;
+  --mint-hover: #edf5fa;
+  --mint-selected: #daedf9;
+  --mint-sidebar-bg: #f4f8fc;
+  --mint-accent: #12658d;
+  --mint-selection: #cdeaf8;
+  --mint-heading-fg: #16253a;
+  --mint-link: var(--mint-accent);
+  --mint-code-fg: #26485a;
+  --mint-code-bg: #edf5fa;
+  --mint-quote-fg: #465e72;
+  --mint-find-current: #f3cb7a;
+  --mint-caret: var(--mint-fg);
+  --mint-marker: var(--mint-muted);
+}
+
+:root[data-appearance="dark"] {
+  --mint-bg: #1e293b;
+  --mint-fg: #dde5ef;
+  --mint-muted: #acbed1;
+  --mint-border: #43536b;
+  --mint-hover: #2a394e;
+  --mint-selected: #294b64;
+  --mint-sidebar-bg: #172234;
+  --mint-accent: #8dd5f9;
+  --mint-selection: #2d526b;
+  --mint-heading-fg: #f0f7ff;
+  --mint-code-fg: #c5e5f4;
+  --mint-code-bg: #29394d;
+  --mint-quote-fg: #b3ccdc;
+  --mint-find-current: #64512b;
+}
+
+.mint-editor .cm-mint-blockquote,
+.mint-document blockquote {
+  border-left-color: var(--mint-accent);
+  font-style: italic;
+}

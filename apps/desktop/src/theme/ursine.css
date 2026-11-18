@@ -1,0 +1,48 @@
+/* Ursine-inspired graphite, with rose in light mode and sky blue in dark mode. */
+:root {
+  --mint-font-editor: "Avenir Next", Lato, var(--mint-font-ui);
+  --mint-font-heading: "Roboto Slab", Rockwell, Georgia, "Noto Serif CJK SC", serif;
+  --mint-heading-weight: 700;
+  --mint-heading-1-size: 2.25em;
+  --mint-heading-2-size: 1.6em;
+  --mint-bg: #fbfbfb;
+  --mint-fg: #333136;
+  --mint-muted: #67616a;
+  --mint-border: #ddd6db;
+  --mint-hover: #f0ecef;
+  --mint-selected: #f4dce2;
+  --mint-sidebar-bg: #f3f0f2;
+  --mint-accent: #ad344e;
+  --mint-selection: #f8cbd5;
+  --mint-heading-fg: #28252a;
+  --mint-link: var(--mint-accent);
+  --mint-code-fg: #793348;
+  --mint-code-bg: #f4edf0;
+  --mint-quote-fg: #6a5961;
+  --mint-find-current: #f1c37f;
+  --mint-caret: var(--mint-fg);
+  --mint-marker: var(--mint-muted);
+}
+
+:root[data-appearance="dark"] {
+  --mint-bg: #1e2022;
+  --mint-fg: #e2e2e6;
+  --mint-muted: #a6a9b3;
+  --mint-border: #41454d;
+  --mint-hover: #292d34;
+  --mint-selected: #303f54;
+  --mint-sidebar-bg: #191a1d;
+  --mint-accent: #7dc7f2;
+  --mint-selection: #2b4e73;
+  --mint-heading-fg: #f1f0f3;
+  --mint-code-fg: #e1ceeb;
+  --mint-code-bg: #2b2b3a;
+  --mint-quote-fg: #b2b7c4;
+  --mint-find-current: #61451e;
+}
+
+.mint-editor .cm-mint-blockquote,
+.mint-document blockquote {
+  border-left-color: var(--mint-accent);
+  font-style: italic;
+}

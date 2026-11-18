@@ -1,0 +1,68 @@
+/* Drake-inspired flat surfaces with coral callouts by day and blue accents by night. */
+:root {
+  --mint-font-editor: "Source Sans 3", var(--mint-font-ui);
+  --mint-heading-weight: 700;
+  --mint-heading-1-size: 2.2em;
+  --mint-heading-2-size: 1.7em;
+  --mint-bg: #ffffff;
+  --mint-fg: #33373c;
+  --mint-muted: #5e646c;
+  --mint-border: #dce0e5;
+  --mint-hover: #f1f2f4;
+  --mint-selected: #f4e2df;
+  --mint-sidebar-bg: #f6f7f8;
+  --mint-accent: #a43628;
+  --mint-selection: #f3cfc7;
+  --mint-heading-fg: #283b4b;
+  --mint-link: #a23120;
+  --mint-code-fg: #7d3b31;
+  --mint-code-bg: #f5ebe8;
+  --mint-quote-fg: #554346;
+  --mint-find-current: #f5ca79;
+  --mint-caret: var(--mint-fg);
+  --mint-marker: var(--mint-muted);
+  --drake-quote-bg: #fcf0ed;
+}
+
+:root[data-appearance="dark"] {
+  --mint-bg: #2b2c2e;
+  --mint-fg: #d6dce4;
+  --mint-muted: #b3bdc9;
+  --mint-border: #4a5057;
+  --mint-hover: #35393e;
+  --mint-selected: #3a4858;
+  --mint-sidebar-bg: #252628;
+  --mint-accent: #87c6fa;
+  --mint-selection: #3d526a;
+  --mint-heading-fg: #e5edf6;
+  --mint-link: #9bcdf8;
+  --mint-code-fg: #cad8e7;
+  --mint-code-bg: #222427;
+  --mint-quote-fg: #c6d5e4;
+  --mint-find-current: #6b4824;
+  --drake-quote-bg: #303a46;
+}
+
+.mint-editor .cm-mint-h1,
+.mint-document h1 {
+  text-align: center;
+}
+
+.mint-editor .cm-mint-h2,
+.mint-document h2 {
+  border-bottom: 2px solid var(--mint-heading-fg);
+  padding-bottom: 0.15rem;
+}
+
+.mint-editor .cm-mint-blockquote,
+.mint-document blockquote {
+  border-left-color: var(--mint-accent);
+  background-color: var(--drake-quote-bg);
+}
+
+.mint-document table th,
+.mint-document table tbody tr:nth-child(even),
+.mint-editor .cm-mint-table th,
+.mint-editor .cm-mint-table tbody tr:nth-child(even) {
+  background-color: var(--mint-hover);
+}

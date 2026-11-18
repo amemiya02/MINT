@@ -1,0 +1,48 @@
+/* GitHub-inspired Markdown with blue links and ruled headings. */
+:root {
+  --mint-font-editor: "Open Sans", var(--mint-font-ui);
+  --mint-heading-weight: 700;
+  --mint-heading-1-size: 2.25em;
+  --mint-heading-2-size: 1.75em;
+  --mint-heading-3-size: 1.5em;
+  --mint-bg: #ffffff;
+  --mint-fg: #24292f;
+  --mint-muted: #57606a;
+  --mint-border: #d0d7de;
+  --mint-hover: #eef1f4;
+  --mint-selected: #ddedff;
+  --mint-sidebar-bg: #f6f8fa;
+  --mint-accent: #0969da;
+  --mint-selection: #c6e2ff;
+  --mint-heading-fg: var(--mint-fg);
+  --mint-link: #0969da;
+  --mint-code-fg: #24292f;
+  --mint-code-bg: #f0f3f6;
+  --mint-quote-fg: #57606a;
+  --mint-find-current: #f5c675;
+  --mint-caret: var(--mint-fg);
+  --mint-marker: var(--mint-muted);
+}
+
+:root[data-appearance="dark"] {
+  --mint-bg: #0d1117;
+  --mint-fg: #e6edf3;
+  --mint-muted: #9da7b3;
+  --mint-border: #30363d;
+  --mint-hover: #1c232d;
+  --mint-selected: #172d48;
+  --mint-sidebar-bg: #161b22;
+  --mint-accent: #58a6ff;
+  --mint-selection: #21466f;
+  --mint-link: #79b8ff;
+  --mint-code-fg: #d2dfeb;
+  --mint-code-bg: #1b222c;
+  --mint-quote-fg: #a4afbc;
+  --mint-find-current: #66461d;
+}
+
+.mint-editor :is(.cm-mint-h1, .cm-mint-h2),
+.mint-document :is(h1, h2) {
+  border-bottom: 1px solid var(--mint-border);
+  padding-bottom: 0.25em;
+}

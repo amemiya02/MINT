@@ -56,7 +56,7 @@ async function exportPdf(page: Page) {
   await expect(dialog.getByLabel("Embed images")).toHaveCount(0);
   await expect(dialog.getByLabel("Appearance")).toHaveValue("light");
   await expect(dialog.getByLabel("Theme")).toHaveValue("");
-  await dialog.getByLabel("Theme").selectOption({ label: "Blueprint" });
+  await dialog.getByLabel("Theme").selectOption({ label: "Newsprint" });
   await dialog.getByRole("button", { name: "Print…" }).click();
   await expect(dialog).toHaveCount(0, { timeout: 30_000 });
 }
@@ -78,7 +78,7 @@ test("prints the document with formulas, diagrams and highlighted code", async (
   await view.route("**/*", (route) => route.abort());
   await view.emulateMedia({ media: "print" });
   await view.setContent(html, { waitUntil: "load" });
-  await expect(view.locator("html")).toHaveCSS("background-color", "rgb(246, 249, 253)");
+  await expect(view.locator("html")).toHaveCSS("background-color", "rgb(243, 242, 238)");
   await expect(view.locator(".katex").first()).toBeVisible();
   await expect(view.locator(".katex-display")).toBeVisible();
   await expect(view.locator(".cm-mint-code-keyword").first()).toHaveText("const");

@@ -1,0 +1,81 @@
+/* LaTeX Typora-inspired typesetting with a restrained heading scale and ruled tables. */
+:root {
+  --mint-font-editor:
+    "New Computer Modern", "Latin Modern Roman", "CMU Serif", "Cambria", "Songti SC",
+    "Noto Serif CJK SC", SimSun, serif;
+  --mint-font-code: "Latin Modern Mono", "CMU Typewriter Text", "Courier New", monospace;
+  --mint-heading-weight: 700;
+  --mint-heading-1-size: 1.7em;
+  --mint-heading-2-size: 1.35em;
+  --mint-heading-3-size: 1.16em;
+  --mint-heading-4-size: 1.08em;
+  --mint-heading-5-size: 1em;
+  --mint-heading-6-size: 0.95em;
+  --mint-bg: #fcfbf7;
+  --mint-fg: #2a261f;
+  --mint-muted: #625c51;
+  --mint-border: #ded8cc;
+  --mint-hover: #f1ede4;
+  --mint-selected: #ece5d9;
+  --mint-sidebar-bg: #f4f1e9;
+  --mint-accent: #554c42;
+  --mint-selection: #e7dece;
+  --mint-heading-fg: #221e19;
+  --mint-link: #403574;
+  --mint-code-fg: #3f382e;
+  --mint-code-bg: #f1ede5;
+  --mint-quote-fg: #50483d;
+  --mint-find-current: #ecd288;
+  --mint-caret: var(--mint-fg);
+  --mint-marker: var(--mint-muted);
+}
+
+:root[data-appearance="dark"] {
+  --mint-bg: #252321;
+  --mint-fg: #ede8df;
+  --mint-muted: #beb5a8;
+  --mint-border: #4b463f;
+  --mint-hover: #34302a;
+  --mint-selected: #403931;
+  --mint-sidebar-bg: #211f1c;
+  --mint-accent: #d5c7b3;
+  --mint-selection: #4b4338;
+  --mint-heading-fg: #f5eee2;
+  --mint-link: #c6b9f0;
+  --mint-code-fg: #e7dbcb;
+  --mint-code-bg: #312c26;
+  --mint-quote-fg: #d0c4b4;
+  --mint-find-current: #624b23;
+}
+
+.mint-editor .cm-line:not(.cm-mint-heading, .cm-mint-blockquote, .cm-mint-codeblock),
+.mint-document p {
+  text-align: justify;
+}
+
+.mint-editor .cm-mint-h1,
+.mint-document h1 {
+  text-align: center;
+}
+
+.mint-editor .cm-mint-heading-1,
+.mint-document h1 {
+  font-weight: 400;
+}
+
+.mint-document table :is(th, td),
+.mint-editor .cm-mint-table :is(th, td) {
+  border: 0;
+}
+
+.mint-document table th,
+.mint-editor .cm-mint-table th {
+  background: transparent;
+  border-top: 2px solid var(--mint-muted);
+  border-bottom: 1px solid var(--mint-muted);
+}
+
+.mint-document table tbody tr:last-child td,
+.mint-editor .cm-mint-table tbody tr:last-child td {
+  border-bottom: 2px solid var(--mint-muted);
+}

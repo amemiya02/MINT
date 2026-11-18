@@ -4,6 +4,9 @@
 
 <h1 align="center">MINT</h1>
 
+<p align="center">MINT = <strong>M</strong>INT <strong>I</strong>s <strong>N</strong>ot <strong>T</strong>ypora<br>
+A recursive acronym. Expand the first word and you get the same four words again.</p>
+
 <p align="center">An open-source desktop Markdown editor with live preview.</p>
 
 <p align="center">
@@ -19,7 +22,7 @@
   <a href="README.zh-CN.md">简体中文</a>
 </p>
 
-**MINT Is Not Typora.** Open a Markdown file and edit it in place. Live preview renders the document as you type and reveals the Markdown syntax at the cursor. Saving preserves the original bytes outside your edits.
+Open a Markdown file and edit it in place. Live preview renders the document as you type and reveals the Markdown syntax at the cursor. Saving preserves the original bytes outside your edits.
 
 ![MINT editing a field journal in the light Sage theme, with a folder tree, tabs, and a rendered task list](docs/screenshots/live-preview.png)
 
@@ -62,7 +65,7 @@ Open an existing `.md` file, or choose **File → Open Folder** to keep a set of
 - **Write in live preview or source mode.** Use focus mode, typewriter mode, or Vim bindings while you work. Customize shortcuts in Settings.
 - **Work with a folder of notes.** Browse the file tree, keep documents open in tabs and windows, and search across the open folder.
 - **Write rich Markdown.** Add GitHub Flavored Markdown tables and task lists, KaTeX math, Mermaid diagrams, front matter, footnotes, and inline HTML.
-- **Pick your writing setup.** Choose among four [built-in themes](docs/themes.md), with light and dark appearances, or load your own CSS. The interface supports English and Simplified Chinese.
+- **Pick your writing setup.** GitHub is the default writing theme. Choose from 24 [built-in themes](docs/themes.md), including MINT originals and styles inspired by Typora’s classic and community themes. Each has light and dark appearances. You can also load your own CSS. The interface supports English and Simplified Chinese.
 - **Keep and share drafts.** Autosave and crash recovery help you resume interrupted work. Paste images into an assets folder and export to HTML or PDF.
 
 ## MINT in use
