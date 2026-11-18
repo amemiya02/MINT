@@ -8,7 +8,7 @@
 #   secret   TAURI_SIGNING_PRIVATE_KEY           updater private key
 #   secret   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  its password
 #   variable TAURI_UPDATER_PUBKEY                matching public key
-# Then distribute.yml updates the Homebrew tap and winget (optional tokens).
+# Then distribute.yml prepares the Homebrew and winget package manifests.
 name: Release
 
 on:
@@ -150,11 +150,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --draft=false --latest
 
-  # Homebrew tap and winget; each channel no-ops until its token is configured.
   distribute:
-    name: Update package managers
+    name: Render package manifests
     needs: publish
     uses: ./.github/workflows/distribute.yml
     with:
       tag: ${{ github.ref_name }}
-    secrets: inherit
