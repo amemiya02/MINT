@@ -1,0 +1,48 @@
+/* Warm paper, serif text, and terracotta accents for long-form writing. */
+:root {
+  --mint-font-editor: Georgia, "Songti SC", SimSun, "Noto Serif CJK SC", serif;
+  --mint-heading-weight: 700;
+  --mint-heading-1-size: 2.4em;
+  --mint-heading-2-size: 1.62em;
+  --mint-bg: #faf6ec;
+  --mint-fg: #342920;
+  --mint-muted: #6d584b;
+  --mint-border: #dccbb9;
+  --mint-hover: #f0e7d8;
+  --mint-selected: #ecddca;
+  --mint-sidebar-bg: #f2eadd;
+  --mint-accent: #89452e;
+  --mint-selection: #e9cdb5;
+  --mint-heading-fg: #38241c;
+  --mint-link: #83452f;
+  --mint-code-fg: #5d382a;
+  --mint-code-bg: #f2e8d9;
+  --mint-quote-fg: #624e41;
+  --mint-find-current: #efbf72;
+  --mint-caret: var(--mint-fg);
+  --mint-marker: var(--mint-muted);
+}
+
+:root[data-appearance="dark"] {
+  --mint-bg: #251f1d;
+  --mint-fg: #eee0d1;
+  --mint-muted: #c0ad9b;
+  --mint-border: #4e3d36;
+  --mint-hover: #342b27;
+  --mint-selected: #48362c;
+  --mint-sidebar-bg: #211a18;
+  --mint-accent: #edae8f;
+  --mint-selection: #583e33;
+  --mint-heading-fg: #f3e4d7;
+  --mint-link: #f0b395;
+  --mint-code-fg: #eed3bd;
+  --mint-code-bg: #322823;
+  --mint-quote-fg: #ccb6a4;
+  --mint-find-current: #654319;
+}
+
+.mint-editor .cm-mint-blockquote,
+.mint-document blockquote {
+  border-left-color: var(--mint-accent);
+  font-style: italic;
+}

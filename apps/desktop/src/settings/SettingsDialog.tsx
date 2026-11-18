@@ -1,5 +1,7 @@
 import { useEffect, useId, useState } from "react";
 import { useT } from "../i18n/index.ts";
+import { findBuiltinTheme } from "../theme/catalog.ts";
+import { ThemeOptions } from "../theme/ThemeOptions.tsx";
 import { useTheme } from "../theme/useTheme.ts";
 import { useModalDialog } from "../window/useModalDialog.ts";
 import { ShortcutsSettings } from "./ShortcutsSettings.tsx";
@@ -195,7 +197,7 @@ function TextField({
   );
 }
 
-/** The built-in theme and every user theme in the theme folder. */
+/** The built-in themes and every user theme in the theme folder. */
 function ThemeSelect({
   id,
   value,
@@ -207,15 +209,16 @@ function ThemeSelect({
 }) {
   const t = useT();
   const { themes } = useTheme();
+  const builtin = findBuiltinTheme(value);
   return (
-    <select id={id} value={value} onChange={(e) => onChange(e.target.value)} className={fieldClass}>
-      <option value="">{t("settings.theme.builtin")}</option>
-      {themes.map((name) => (
-        <option key={name} value={name}>
-          {name}
-        </option>
-      ))}
-      {value !== "" && !themes.includes(value) && (
+    <select
+      id={id}
+      value={builtin?.id ?? value}
+      onChange={(e) => onChange(e.target.value)}
+      className={fieldClass}
+    >
+      <ThemeOptions customThemes={themes} />
+      {!builtin && !themes.includes(value) && (
         <option value={value}>{t("settings.theme.missing", { name: value })}</option>
       )}
     </select>

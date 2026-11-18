@@ -1,0 +1,47 @@
+/* Cool white and ink blue with monospace headings for technical documents. */
+:root {
+  --mint-font-editor: var(--mint-font-ui);
+  --mint-font-heading: var(--mint-font-code);
+  --mint-heading-weight: 700;
+  --mint-heading-1-size: 2.05em;
+  --mint-bg: #f6f9fd;
+  --mint-fg: #1e2e46;
+  --mint-muted: #505f77;
+  --mint-border: #cbd8e9;
+  --mint-hover: #e9eff8;
+  --mint-selected: #dce9f9;
+  --mint-sidebar-bg: #eaf0f8;
+  --mint-accent: #315eaa;
+  --mint-selection: #cfdef6;
+  --mint-heading-fg: #11274a;
+  --mint-link: #265491;
+  --mint-code-fg: #263d5d;
+  --mint-code-bg: #e8f0fa;
+  --mint-quote-fg: #475d7b;
+  --mint-find-current: #f5c978;
+  --mint-caret: var(--mint-fg);
+  --mint-marker: var(--mint-muted);
+}
+
+:root[data-appearance="dark"] {
+  --mint-bg: #131c2c;
+  --mint-fg: #dfe9f8;
+  --mint-muted: #a9b8d1;
+  --mint-border: #35455f;
+  --mint-hover: #1d2a41;
+  --mint-selected: #263b59;
+  --mint-sidebar-bg: #101827;
+  --mint-accent: #92b9fa;
+  --mint-selection: #2e466b;
+  --mint-heading-fg: #e9f1ff;
+  --mint-link: #9fc5ff;
+  --mint-code-fg: #dae8fb;
+  --mint-code-bg: #1a2941;
+  --mint-quote-fg: #acbfdd;
+  --mint-find-current: #5e451e;
+}
+
+.cm-mint-heading-1,
+.mint-document h1 {
+  letter-spacing: -0.035em;
+}

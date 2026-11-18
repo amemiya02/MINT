@@ -5,11 +5,11 @@ import type { Platform } from "../platform/platform.ts";
 import { dialectOf } from "../settings/dialect.ts";
 import type { Settings } from "../settings/schema.ts";
 import builtinThemeCss from "../theme/builtin.css?raw";
-import { readUserTheme, typographyCss } from "../theme/theme.ts";
+import { readTheme, typographyCss } from "../theme/theme.ts";
 
 /** What the user chose in the export dialog. */
 export interface HtmlExportChoice {
-  /** A user theme's name, or `""` for the built-in theme. */
+  /** A built-in theme ID or a user theme's name. */
   readonly theme: string;
   readonly appearance: "light" | "dark";
   /** Embed local images as data URIs instead of linking to them. */
@@ -30,14 +30,13 @@ export interface HtmlExportSource {
 
 /**
  * The standalone HTML of a document, styled like the editor shows it in the
- * chosen theme: the built-in themes, then the user theme, then the font
+ * chosen theme: the base stylesheet, then the selected theme, then the font
  * settings, as on screen. Mermaid diagrams are rendered as in the editor.
  * HTML export saves it; PDF export prints it.
  */
 export async function documentHtml(source: HtmlExportSource, choice: HtmlExportChoice) {
   const { platform, settings } = source;
-  const userTheme =
-    choice.theme === "" ? "" : await readUserTheme(platform, source.themeFolder, choice.theme);
+  const selectedTheme = await readTheme(platform, source.themeFolder, choice.theme);
   // Only resolving images: export never saves one.
   const images = createImageHost(
     platform,
@@ -49,7 +48,7 @@ export async function documentHtml(source: HtmlExportSource, choice: HtmlExportC
     // The dialect the editor uses, so an export reads the document as it was edited.
     dialect: dialectOf(settings),
     title: source.title,
-    themeCss: [builtinThemeCss, userTheme, typographyCss(settings)].join("\n"),
+    themeCss: [builtinThemeCss, selectedTheme, typographyCss(settings)].join("\n"),
     appearance: choice.appearance,
     renderMermaid,
     ...(choice.embedImages

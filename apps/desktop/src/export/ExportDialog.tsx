@@ -3,6 +3,8 @@ import { useT } from "../i18n/index.ts";
 import { baseName } from "../paths.ts";
 import type { Platform } from "../platform/platform.ts";
 import { useSettings } from "../settings/useSettings.ts";
+import { findBuiltinTheme } from "../theme/catalog.ts";
+import { ThemeOptions } from "../theme/ThemeOptions.tsx";
 import { useTheme } from "../theme/useTheme.ts";
 import { useModalDialog } from "../window/useModalDialog.ts";
 import { documentHtml, type HtmlExportChoice } from "./html-export.ts";
@@ -45,7 +47,9 @@ export function ExportDialog({ platform, format, path, getText, onClose }: Expor
   const imagesId = useId();
   const [choice, setChoice] = useState<HtmlExportChoice>(() => ({
     // The look on screen: the theme in use and the current appearance.
-    theme: themes.includes(settings.theme) ? settings.theme : "",
+    theme:
+      findBuiltinTheme(settings.theme)?.id ??
+      (themes.includes(settings.theme) ? settings.theme : ""),
     // Paper is light; HTML keeps the current appearance.
     appearance:
       format === "html" && document.documentElement.dataset.appearance === "dark"
@@ -122,12 +126,7 @@ export function ExportDialog({ platform, format, path, getText, onClose }: Expor
               onChange={(e) => setChoice({ ...choice, theme: e.target.value })}
               className={fieldClass}
             >
-              <option value="">{t("settings.theme.builtin")}</option>
-              {themes.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
+              <ThemeOptions customThemes={themes} />
             </select>
           </div>
           <div className="flex items-center justify-between gap-4">

@@ -1,14 +1,15 @@
 /*
- * MINT's built-in light and dark themes: a value for every theme variable.
+ * Base light and dark styles: a value for every theme variable.
  * docs/themes.md documents each variable; keep the two in sync (a unit test
  * checks that every variable here is documented and vice versa).
  *
- * `:where()` gives these rules zero specificity, so a user theme's plain
+ * `:where()` gives these rules zero specificity, so a theme's plain
  * `:root { … }` overrides them in both appearances. The shell sets
  * `data-appearance="light" | "dark"` on <html> from the appearance setting.
  */
 :where(:root) {
   color-scheme: light;
+  accent-color: var(--mint-accent);
 
   /* Typography (the font, size, line height and width settings override these). */
   --mint-font-ui:

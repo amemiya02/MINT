@@ -1,5 +1,12 @@
 import { expect, type Page, test } from "@playwright/test";
-import { launch, readFile, runMenuItem, savedDialogs, themesPath } from "./memory-platform.ts";
+import {
+  launch,
+  readFile,
+  runMenuItem,
+  savedDialogs,
+  settingsPath,
+  themesPath,
+} from "./memory-platform.ts";
 
 /** A 1×1 PNG. */
 const pngBase64 =
@@ -104,6 +111,32 @@ test("cancelling the save dialog writes nothing", async ({ page }) => {
   await expect(dialog).toHaveCount(0);
   expect(await savedDialogs(page)).toEqual(["/notes/report.html"]);
   expect(await readFile(page, "/notes/report.html")).toBeUndefined();
+});
+
+test("uses the selected bundled theme in a standalone export", async ({ page, context }) => {
+  await launch(page, {
+    files: {
+      "/notes/report.md": "# Field notes\n",
+      [settingsPath]: '{"theme":"builtin/bookleaf","appearance":"dark"}',
+    },
+    openDialogResults: ["/notes/report.md"],
+    saveDialogResults: ["/notes/out.html"],
+    locale: "en-US",
+  });
+  await page.keyboard.press("ControlOrMeta+O");
+  await expect(page.locator(".cm-content")).toBeVisible();
+  await expect(page.locator("body")).toHaveCSS("background-color", "rgb(37, 31, 29)");
+  await runMenuItem(page, "file.exportHtml");
+  const dialog = page.getByRole("dialog", { name: "Export as HTML" });
+  await expect(dialog.getByLabel("Theme")).toHaveValue("builtin/bookleaf");
+  await expect(dialog.getByLabel("Appearance")).toHaveValue("dark");
+  await dialog.getByRole("button", { name: "Export" }).click();
+  await expect(dialog).toHaveCount(0);
+
+  const exported = await context.newPage();
+  await exported.setContent((await readFile(page, "/notes/out.html")) ?? "");
+  await expect(exported.locator("html")).toHaveCSS("background-color", "rgb(37, 31, 29)");
+  await expect(exported.locator("h1")).toHaveCSS("font-family", /Georgia/);
 });
 
 test("is in the command palette, in Chinese too", async ({ page }) => {

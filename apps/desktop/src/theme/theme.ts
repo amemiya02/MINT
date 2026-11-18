@@ -1,14 +1,15 @@
 import type { Platform } from "../platform/platform.ts";
 import type { Settings } from "../settings/schema.ts";
 import type { SettingsStore } from "../settings/settings.ts";
+import { defaultTheme, findBuiltinTheme } from "./catalog.ts";
 
 /**
  * Applies the look chosen in settings to the page:
  *
  * - `appearance`: `data-appearance="light" | "dark"` on <html>, following the
  *   system's preference unless pinned. Themes key their dark values off it.
- * - `theme`: a user theme (a `.css` file in the theme folder) loaded after the
- *   built-in themes, so it overrides them. The folder is watched: adding,
+ * - `theme`: a bundled or user stylesheet layered over the base stylesheet.
+ *   The user theme folder is watched: adding,
  *   editing or removing a theme takes effect at once.
  * - Font, size, line height and content width: set as theme variables on
  *   <html> itself, so they win over any theme.
@@ -32,8 +33,8 @@ export interface ThemeStore {
 }
 
 const themeExtension = ".css";
-/** The <style> element that holds the user theme. */
-const userThemeId = "mint-user-theme";
+/** The <style> element that holds the selected theme. */
+const selectedThemeId = "mint-selected-theme";
 
 export async function createThemeStore(
   platform: Platform,
@@ -65,11 +66,11 @@ export async function createThemeStore(
   };
 
   const styleElement = () => {
-    let style = document.getElementById(userThemeId);
+    let style = document.getElementById(selectedThemeId);
     if (!style) {
       style = document.createElement("style");
-      style.id = userThemeId;
-      // Last in <head>: after the built-in themes, so equally specific rules win.
+      style.id = selectedThemeId;
+      // Last in <head>: after the base stylesheet, so equally specific rules win.
       document.head.append(style);
     }
     return style;
@@ -77,11 +78,12 @@ export async function createThemeStore(
 
   // Loads can overlap (a burst of file events); only the latest one may apply.
   let generation = 0;
-  const loadUserTheme = async () => {
+  const loadTheme = async () => {
     const run = ++generation;
     const name = current().theme;
     const folder = state.folder;
-    let css = "";
+    const builtin = findBuiltinTheme(name);
+    let css = builtin?.css ?? defaultTheme.css;
     let issue: ThemeIssue | null = null;
     let found: ThemeFile[] = [];
     try {
@@ -89,7 +91,7 @@ export async function createThemeStore(
     } catch {
       // An unreadable folder has no themes; the chosen one is reported missing.
     }
-    if (name !== "") {
+    if (!builtin) {
       const file = found.find((theme) => theme.name === name);
       if (!file) {
         issue = { kind: "missing", name };
@@ -117,20 +119,20 @@ export async function createThemeStore(
     if (next === previous) return;
     if (next.appearance !== previous.appearance) applyAppearance();
     applyTypography(next);
-    if (next.theme !== previous.theme) void loadUserTheme();
+    if (next.theme !== previous.theme) void loadTheme();
     previous = next;
   });
 
   try {
     const folder = await platform.themesPath();
     update({ folder });
-    await platform.watchFolder(folder, () => void loadUserTheme());
+    await platform.watchFolder(folder, () => void loadTheme());
   } catch (e) {
     // Without a theme folder MINT still runs on its built-in themes.
     console.warn("MINT: the theme folder is unavailable", e);
   }
-  // Before the first render, so a user theme never flashes in late.
-  await loadUserTheme();
+  // Before the first render, so the selected theme never flashes in late.
+  await loadTheme();
 
   return {
     getSnapshot: () => state,
@@ -142,14 +144,11 @@ export async function createThemeStore(
 }
 
 /**
- * The stylesheet of the user theme `name` in the theme folder. Rejects if it
- * is missing or unreadable.
+ * The selected stylesheet. Rejects if a custom theme is missing or unreadable.
  */
-export async function readUserTheme(
-  platform: Platform,
-  folder: string,
-  name: string,
-): Promise<string> {
+export async function readTheme(platform: Platform, folder: string, name: string): Promise<string> {
+  const builtin = findBuiltinTheme(name);
+  if (builtin) return builtin.css;
   const file = (await listThemes(platform, folder)).find((theme) => theme.name === name);
   if (!file) throw new Error(`The theme "${name}" is not in ${folder}`);
   return platform.readTextFile(file.path);

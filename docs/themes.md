@@ -2,13 +2,24 @@
 
 **主题**是一份 `.css` 文件，它覆盖 MINT 的 CSS 变量，必要时也可以覆盖选择器。MINT 不兼容 Typora 主题（见 ADR-0003）。
 
-## 安装与切换
+## 内置主题
+
+在「设置 → 主题」中选择。每套主题都支持亮色和暗色，可跟随系统，也可在「亮暗模式」中手动指定。
+
+| 主题 | 风格 | `settings.json` 中的 `theme` 值 |
+| --- | --- | --- |
+| 青苔（Sage，默认） | 鼠尾草绿、无衬线正文和衬线标题，适合日常笔记 | `""` |
+| 书页（Bookleaf） | 暖纸色、衬线正文和陶土色强调，适合长文 | `"builtin/bookleaf"` |
+| 蓝图（Blueprint） | 蓝灰底色、等宽标题，适合技术文档 | `"builtin/blueprint"` |
+| 暮色（Dusk） | 淡紫亮色和深紫灰暗色，适合夜间写作 | `"builtin/dusk"` |
+
+## 安装自定义主题
 
 1. 把 `名字.css` 放进主题目录。设置窗口的「主题」一项下方会显示这个目录的完整路径，它位于 MINT 的应用数据目录中，名为 `themes`。
-2. 在设置窗口的「主题」中选择它，或者在 `settings.json` 中写 `"theme": "名字"`。值为 `""` 时使用内置主题。
+2. 在设置窗口的「主题」中选择它，或者在 `settings.json` 中写 `"theme": "名字"`。
 3. 主题目录处于监听状态。新增、修改或删除主题文件后，界面会立即更新，不需要重启。
 
-如果选中的主题文件不存在或无法读取，MINT 会提示原因，并在问题解决前使用内置主题。
+如果选中的主题文件不存在或无法读取，MINT 会提示原因，并在问题解决前使用默认主题。
 
 ## 亮色与暗色
 
@@ -26,7 +37,7 @@ MINT 会在 `<html>` 上设置 `data-appearance="light"` 或 `data-appearance="d
 }
 ```
 
-内置主题的规则写在 `:where()` 中，优先级为零，所以主题中普通的 `:root { … }` 一定能覆盖它们。主题没有设置的变量会沿用内置主题在当前亮暗模式下的值。如果主题只写了 `:root`，它在暗色模式下也会生效。
+基础样式的规则写在 `:where()` 中，优先级为零，所以主题中普通的 `:root { … }` 可以覆盖它们。主题没有设置的变量会沿用当前亮暗模式下的基础值。如果主题只写了 `:root`，它在暗色模式下也会生效。
 
 ## 设置优先于主题
 
@@ -34,11 +45,11 @@ MINT 会在 `<html>` 上设置 `data-appearance="light"` 或 `data-appearance="d
 
 ## 变量清单
 
-下表列出全部变量及其在内置亮色主题中的值。只覆盖需要修改的变量即可。
+下表列出全部变量及其基础亮色值。只覆盖需要修改的变量即可。
 
 ### 排版
 
-| 变量 | 作用 | 内置值 |
+| 变量 | 作用 | 基础值 |
 | --- | --- | --- |
 | `--mint-font-ui` | 界面文字（侧边栏、标签页、对话框）的字体 | 系统界面字体 |
 | `--mint-font-editor` | 文档正文的字体（可被「字体」设置覆盖） | 等宽字体 |
@@ -50,7 +61,7 @@ MINT 会在 `<html>` 上设置 `data-appearance="light"` 或 `data-appearance="d
 
 ### 界面
 
-| 变量 | 作用 | 内置值 |
+| 变量 | 作用 | 基础值 |
 | --- | --- | --- |
 | `--mint-bg` | 窗口和文档的背景色 | `#fdfdfc` |
 | `--mint-fg` | 主要文字颜色 | `#1f2328` |
@@ -69,7 +80,7 @@ MINT 会在 `<html>` 上设置 `data-appearance="light"` 或 `data-appearance="d
 
 ### 文档
 
-| 变量 | 作用 | 内置值 |
+| 变量 | 作用 | 基础值 |
 | --- | --- | --- |
 | `--mint-caret` | 光标颜色 | `#1f2328` |
 | `--mint-selection` | 选区背景 | `#cfe5df` |
@@ -88,7 +99,7 @@ MINT 会在 `<html>` 上设置 `data-appearance="light"` 或 `data-appearance="d
 | `--mint-find-current` | 查找时当前匹配项的背景 | `#ffb84d` |
 | `--mint-focus-dimmed-opacity` | 专注模式下当前段落以外内容的不透明度 | `0.35` |
 
-暗色主题的取值见 `apps/desktop/src/theme/builtin.css`。
+基础暗色值见 `apps/desktop/src/theme/builtin.css`。青苔的亮暗配色见 `apps/desktop/src/theme/sage.css`。
 
 ## 可覆盖的选择器
 
@@ -115,6 +126,6 @@ MINT 会在 `<html>` 上设置 `data-appearance="light"` 或 `data-appearance="d
 
 ## 导出的文档
 
-导出 HTML（以及以它为基础的 PDF）时，MINT 把内置主题、所选主题和字体设置一起内联到导出文件中，并在 `<html>` 上设置所选的 `data-appearance`。导出文件中的正文是普通的 HTML 元素（`h1`、`p`、`pre`、`table` 等），包在 `.mint-document` 中，样式同样由上面的变量决定，所以只覆盖变量的主题在编辑器和导出文件中效果一致。主题中针对编辑器 DOM（`.cm-*`）的选择器不会作用于导出文件；如果想单独调整导出效果，可以为 `.mint-document` 及其中的元素写样式。
+导出 HTML 或 PDF 时可以选择任意内置或自定义主题，并为导出文件指定亮暗模式。MINT 把基础样式、所选主题和字体设置一起内联到导出 HTML 中，并在 `<html>` 上设置所选的 `data-appearance`。导出文件中的正文是普通的 HTML 元素（`h1`、`p`、`pre`、`table` 等），包在 `.mint-document` 中，样式同样由上面的变量决定，所以只覆盖变量的主题在编辑器和导出文件中效果一致。主题中针对编辑器 DOM（`.cm-*`）的选择器不会作用于导出文件；如果想单独调整导出效果，可以为 `.mint-document` 及其中的元素写样式。
 
 代码块中的语法高亮在两处使用相同的类名：`.cm-mint-code-keyword`、`.cm-mint-code-string`、`.cm-mint-code-number`、`.cm-mint-code-comment`、`.cm-mint-code-name`。Mermaid 图表以 SVG 形式放在 `figure.mint-mermaid` 中。
