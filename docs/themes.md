@@ -1,6 +1,6 @@
 # 编写 MINT 主题
 
-**主题**是一份 `.css` 文件，它覆盖 MINT 的 CSS 变量，必要时也可以覆盖选择器。MINT 不兼容 Typora 主题（见 ADR-0003）。
+**主题**是一份 `.css` 文件，它覆盖 MINT 的 CSS 变量，必要时也可以覆盖选择器。
 
 ## 内置主题
 
@@ -8,37 +8,30 @@
 
 | 主题 | 风格 | `settings.json` 中的 `theme` 值 |
 | --- | --- | --- |
-| 青苔（Sage） | 鼠尾草绿、无衬线正文和衬线标题，适合日常笔记 | `"builtin/sage"` |
-| 书页（Bookleaf） | 暖纸色、衬线正文和陶土色强调，适合长文 | `"builtin/bookleaf"` |
+| GitHub（默认） | 蓝色链接、灰底代码和带分隔线的标题 | `""` 或 `"builtin/github"` |
+| Academic | 黑墨色衬线正文和居中论文标题 | `"builtin/academic"` |
 | 蓝图（Blueprint） | 蓝灰底色、等宽标题，适合技术文档 | `"builtin/blueprint"` |
+| 书页（Bookleaf） | 暖纸色、衬线正文和陶土色强调，适合长文 | `"builtin/bookleaf"` |
+| Cobalt | 深海蓝与琥珀色强调 | `"builtin/cobalt"` |
+| Dracula | 紫灰底色、粉色代码和青色链接 | `"builtin/dracula"` |
+| Drake | 扁平界面，亮色用珊瑚红，暗色用蓝色 | `"builtin/drake"` |
 | 暮色（Dusk） | 淡紫亮色和深紫灰暗色，适合夜间写作 | `"builtin/dusk"` |
-
-### Typora 参考主题
-
-「Typora 经典风格」收录 Typora 自带的六套主题。「Typora 社区风格」选取十四套有代表性的社区主题。下列主题均使用 MINT 的 CSS 变量和编辑器选择器重新编写，随应用提供；原作仅提供单一亮暗外观时，另一套配色由 MINT 补齐。
-
-| 主题 | 风格 | `settings.json` 中的 `theme` 值 | 参考来源 |
-| --- | --- | --- | --- |
-| GitHub（默认） | 蓝色链接、灰底代码和带分隔线的标题 | `""` 或 `"builtin/github"` | [官方样式](https://github.com/typora/typora-default-themes) |
-| Gothic | 几何无衬线字、居中标题和酒红色链接 | `"builtin/gothic"` | [官方样式](https://github.com/typora/typora-default-themes) |
-| Newsprint | 暖灰纸色、报刊衬线字和刊头细线 | `"builtin/newsprint"` | [官方样式](https://github.com/typora/typora-default-themes) |
-| Night | 石板灰底、浅蓝强调和轻字重标题 | `"builtin/night"` | [官方样式](https://github.com/typora/typora-default-themes) |
-| Pixyll | 衬线正文配大号无衬线标题 | `"builtin/pixyll"` | [官方样式](https://github.com/typora/typora-default-themes) |
-| Whitey | 简洁纸面、居中衬线标题和短横线 | `"builtin/whitey"` | [官方样式](https://github.com/typora/typora-default-themes) |
-| Academic | 黑墨色衬线正文和居中论文标题 | `"builtin/academic"` | [原主题](https://theme.typora.io/theme/Academic/) |
-| Cobalt | 深海蓝与琥珀色强调 | `"builtin/cobalt"` | [原主题](https://github.com/elitistsnob/typora-cobalt-theme) |
-| Dracula | 紫灰底色、粉色代码和青色链接 | `"builtin/dracula"` | [原主题](https://github.com/dracula/typora) |
-| Drake | 扁平界面，亮色用珊瑚红，暗色用蓝色 | `"builtin/drake"` | [原主题](https://theme.typora.io/theme/Drake/) |
-| GitBook | 文档手册式标题和蓝色链接 | `"builtin/gitbook"` | [原主题](https://github.com/h16nning/typora-gitbook-theme) |
-| Ladder | 石板色与天蓝色，优先使用本机霞鹜文楷 | `"builtin/ladder"` | [原主题](https://github.com/guangzhengli/typora-ladder-theme) |
-| Lapis | 墨蓝色文字和浅色底纹小标题 | `"builtin/lapis"` | [原主题](https://github.com/YiNNx/typora-theme-lapis) |
-| Mdmdt | 中性文档底色、蓝色细节和内嵌引文 | `"builtin/mdmdt"` | [原主题](https://github.com/cayxc/Mdmdt) |
-| Notion | 暖灰界面、紧凑标题和红色行内代码 | `"builtin/notion"` | [原主题](https://github.com/adrian-fuertes/typora-notion-theme) |
-| Pie | 珊瑚红标题和 Palenight 风格的代码配色 | `"builtin/pie"` | [原主题](https://theme.typora.io/theme/Pie/) |
-| Purple | 紫色衬线标题、青色链接和淡紫代码背景 | `"builtin/purple"` | [原主题](https://theme.typora.io/theme/Purple/) |
-| Typora LaTeX | 仿 LaTeX 的论文排版 | `"builtin/typora-latex"` | [原主题](https://theme.typora.io/theme/LaTeX-Typora/) |
-| Ursine | 浅色玫红、暗色天蓝，搭配石墨灰 | `"builtin/ursine"` | [原主题](https://github.com/noatpad/typora-theme-ursine) |
-| Vue | 石板色标题和绿色引用块 | `"builtin/vue"` | [原主题](https://theme.typora.io/theme/Vue/) |
+| GitBook | 文档手册式标题和蓝色链接 | `"builtin/gitbook"` |
+| Gothic | 几何无衬线字、居中标题和酒红色链接 | `"builtin/gothic"` |
+| Ladder | 石板色与天蓝色，优先使用本机霞鹜文楷 | `"builtin/ladder"` |
+| Lapis | 墨蓝色文字和浅色底纹小标题 | `"builtin/lapis"` |
+| LaTeX | 仿 LaTeX 的论文排版 | `"builtin/latex"` |
+| Mdmdt | 中性文档底色、蓝色细节和内嵌引文 | `"builtin/mdmdt"` |
+| Newsprint | 暖灰纸色、报刊衬线字和刊头细线 | `"builtin/newsprint"` |
+| Night | 石板灰底、浅蓝强调和轻字重标题 | `"builtin/night"` |
+| Notion | 暖灰界面、紧凑标题和红色行内代码 | `"builtin/notion"` |
+| Pie | 珊瑚红标题和 Palenight 风格的代码配色 | `"builtin/pie"` |
+| Pixyll | 衬线正文配大号无衬线标题 | `"builtin/pixyll"` |
+| Purple | 紫色衬线标题、青色链接和淡紫代码背景 | `"builtin/purple"` |
+| 青苔（Sage） | 鼠尾草绿、无衬线正文和衬线标题，适合日常笔记 | `"builtin/sage"` |
+| Ursine | 浅色玫红、暗色天蓝，搭配石墨灰 | `"builtin/ursine"` |
+| Vue | 石板色标题和绿色引用块 | `"builtin/vue"` |
+| Whitey | 简洁纸面、居中衬线标题和短横线 | `"builtin/whitey"` |
 
 ## 安装自定义主题
 

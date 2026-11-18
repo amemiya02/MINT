@@ -113,7 +113,10 @@ test("cancelling the save dialog writes nothing", async ({ page }) => {
   expect(await readFile(page, "/notes/report.html")).toBeUndefined();
 });
 
-test("uses the selected bundled theme in a standalone export", async ({ page, context }) => {
+test("uses the LaTeX theme from older settings in a standalone export", async ({
+  page,
+  context,
+}) => {
   await launch(page, {
     files: {
       "/notes/report.md": "# Field notes\n",
@@ -128,7 +131,7 @@ test("uses the selected bundled theme in a standalone export", async ({ page, co
   await expect(page.locator("body")).toHaveCSS("background-color", "rgb(37, 35, 33)");
   await runMenuItem(page, "file.exportHtml");
   const dialog = page.getByRole("dialog", { name: "Export as HTML" });
-  await expect(dialog.getByLabel("Theme")).toHaveValue("builtin/typora-latex");
+  await expect(dialog.getByLabel("Theme").locator("option:checked")).toHaveText("LaTeX");
   await expect(dialog.getByLabel("Appearance")).toHaveValue("dark");
   await dialog.getByRole("button", { name: "Export" }).click();
   await expect(dialog).toHaveCount(0);
