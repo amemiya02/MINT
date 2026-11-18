@@ -4,8 +4,7 @@
 
 <h1 align="center">MINT</h1>
 
-<p align="center">MINT = <strong>M</strong>INT <strong>I</strong>s <strong>N</strong>ot <strong>T</strong>ypora<br>
-这是一个递归缩写。展开第一个词 MINT，又会得到同样的四个词。</p>
+<p align="center">MINT = <strong>M</strong>INT <strong>I</strong>s <strong>N</strong>ot <strong>T</strong>ypora</p>
 
 <p align="center">支持实时预览的开源桌面 Markdown 编辑器。</p>
 
@@ -24,7 +23,7 @@
 
 直接打开和编辑磁盘上的 Markdown 文件。实时预览会在写作时渲染文档，并在光标处显露 Markdown 标记。保存时，编辑范围之外的内容按原字节保留。
 
-![MINT 使用青苔亮色主题编辑海岸手记，左侧显示文件树，正文包含已渲染的任务列表](docs/screenshots/live-preview.png)
+![MINT 使用 GitHub 亮色主题编辑海岸手记，左侧显示文件树，正文包含已渲染的任务列表](docs/screenshots/live-preview.png)
 
 ## 安装
 
