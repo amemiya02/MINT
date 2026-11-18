@@ -73,13 +73,13 @@ Windows、macOS 和 AppImage 支持应用内更新。`.deb` 和 `.rpm` 用户可
 
 通过大纲定位章节，在实时预览中阅读 Mermaid 流程图、表格和命令块。
 
-![MINT 使用蓝图暗色主题显示发布手册，包含大纲、Mermaid 流程图、检查表和命令块](docs/screenshots/technical-notes.png)
+![MINT 使用 Blueprint 暗色主题显示发布手册，包含大纲、Mermaid 流程图、检查表和命令块](docs/screenshots/technical-notes.png)
 
 ### 命令面板
 
 输入命令名称，用键盘切换源码、专注或打字机模式，也可以查找其他操作。
 
-![MINT 在书页亮色主题下打开命令面板，并筛选写作模式相关命令](docs/screenshots/command-palette.png)
+![MINT 在 Bookleaf 亮色主题下打开命令面板，并筛选写作模式相关命令](docs/screenshots/command-palette.png)
 
 ## 从源码运行
 

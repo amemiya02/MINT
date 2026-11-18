@@ -53,16 +53,14 @@ test("an appearance pinned in settings.json applies at startup", async ({ page }
 
 const paper = (bg: string) => `:root { --mint-bg: ${bg}; }`;
 
-test("bundled themes can be selected and follow appearance without hiding custom themes", async ({
-  page,
-}) => {
+test("bundled themes have English names in Chinese and follow appearance", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "light" });
   await launch(page, {
-    locale: "en-US",
+    locale: "zh-CN",
     files: { [`${themesPath}/bookleaf.css`]: paper("rgb(250, 240, 220)") },
   });
   await page.keyboard.press("ControlOrMeta+,");
-  const theme = page.getByLabel("Theme");
+  const theme = page.getByLabel("主题", { exact: true });
   await expect(theme.locator(":scope > option")).toHaveText([
     "GitHub (default)",
     "Academic",

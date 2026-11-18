@@ -4,18 +4,18 @@
 
 ## 内置主题
 
-在「设置 → 主题」中选择。每套主题都支持亮色和暗色，可跟随系统，也可在「亮暗模式」中手动指定。
+在「设置 → 主题」中选择，默认使用 GitHub。每套主题都支持亮色和暗色，可跟随系统，也可在「亮暗模式」中手动指定。
 
 | 主题 | 风格 | `settings.json` 中的 `theme` 值 |
 | --- | --- | --- |
-| GitHub（默认） | 蓝色链接、灰底代码和带分隔线的标题 | `""` 或 `"builtin/github"` |
+| GitHub | 蓝色链接、灰底代码和带分隔线的标题 | `""` 或 `"builtin/github"` |
 | Academic | 黑墨色衬线正文和居中论文标题 | `"builtin/academic"` |
-| 蓝图（Blueprint） | 蓝灰底色、等宽标题，适合技术文档 | `"builtin/blueprint"` |
-| 书页（Bookleaf） | 暖纸色、衬线正文和陶土色强调，适合长文 | `"builtin/bookleaf"` |
+| Blueprint | 蓝灰底色、等宽标题，适合技术文档 | `"builtin/blueprint"` |
+| Bookleaf | 暖纸色、衬线正文和陶土色强调，适合长文 | `"builtin/bookleaf"` |
 | Cobalt | 深海蓝与琥珀色强调 | `"builtin/cobalt"` |
 | Dracula | 紫灰底色、粉色代码和青色链接 | `"builtin/dracula"` |
 | Drake | 扁平界面，亮色用珊瑚红，暗色用蓝色 | `"builtin/drake"` |
-| 暮色（Dusk） | 淡紫亮色和深紫灰暗色，适合夜间写作 | `"builtin/dusk"` |
+| Dusk | 淡紫亮色和深紫灰暗色，适合夜间写作 | `"builtin/dusk"` |
 | GitBook | 文档手册式标题和蓝色链接 | `"builtin/gitbook"` |
 | Gothic | 几何无衬线字、居中标题和酒红色链接 | `"builtin/gothic"` |
 | Ladder | 石板色与天蓝色，优先使用本机霞鹜文楷 | `"builtin/ladder"` |
@@ -28,7 +28,7 @@
 | Pie | 珊瑚红标题和 Palenight 风格的代码配色 | `"builtin/pie"` |
 | Pixyll | 衬线正文配大号无衬线标题 | `"builtin/pixyll"` |
 | Purple | 紫色衬线标题、青色链接和淡紫代码背景 | `"builtin/purple"` |
-| 青苔（Sage） | 鼠尾草绿、无衬线正文和衬线标题，适合日常笔记 | `"builtin/sage"` |
+| Sage | 鼠尾草绿、无衬线正文和衬线标题，适合日常笔记 | `"builtin/sage"` |
 | Ursine | 浅色玫红、暗色天蓝，搭配石墨灰 | `"builtin/ursine"` |
 | Vue | 石板色标题和绿色引用块 | `"builtin/vue"` |
 | Whitey | 简洁纸面、居中衬线标题和短横线 | `"builtin/whitey"` |
@@ -119,7 +119,7 @@ MINT 会在 `<html>` 上设置 `data-appearance="light"` 或 `data-appearance="d
 | `--mint-find-current` | 查找时当前匹配项的背景 | `#ffb84d` |
 | `--mint-focus-dimmed-opacity` | 专注模式下当前段落以外内容的不透明度 | `0.35` |
 
-基础暗色值见 `apps/desktop/src/theme/builtin.css`。青苔的亮暗配色见 `apps/desktop/src/theme/sage.css`。
+基础暗色值见 `apps/desktop/src/theme/builtin.css`。Sage 的亮暗配色见 `apps/desktop/src/theme/sage.css`。
 
 ## 可覆盖的选择器
 

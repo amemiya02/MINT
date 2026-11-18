@@ -1,4 +1,3 @@
-import type { MessageKey } from "../i18n/index.ts";
 import academic from "./academic.css?raw";
 import blueprint from "./blueprint.css?raw";
 import bookleaf from "./bookleaf.css?raw";
@@ -26,40 +25,40 @@ import whitey from "./whitey.css?raw";
 
 interface BuiltinTheme {
   readonly id: string;
-  readonly label: MessageKey;
+  readonly label: string;
   readonly css: string;
 }
 
-export const defaultTheme: BuiltinTheme = { id: "", label: "theme.builtin.github", css: github };
+export const defaultTheme: BuiltinTheme = { id: "", label: "GitHub (default)", css: github };
 
-const latexTheme: BuiltinTheme = { id: "builtin/latex", label: "theme.builtin.latex", css: latex };
+const latexTheme: BuiltinTheme = { id: "builtin/latex", label: "LaTeX", css: latex };
 
 // A slash cannot occur in a theme filename, so the built-in IDs and user names never collide.
 export const builtinThemes: readonly BuiltinTheme[] = [
   defaultTheme,
-  { id: "builtin/academic", label: "theme.builtin.academic", css: academic },
-  { id: "builtin/blueprint", label: "theme.builtin.blueprint", css: blueprint },
-  { id: "builtin/bookleaf", label: "theme.builtin.bookleaf", css: bookleaf },
-  { id: "builtin/cobalt", label: "theme.builtin.cobalt", css: cobalt },
-  { id: "builtin/dracula", label: "theme.builtin.dracula", css: dracula },
-  { id: "builtin/drake", label: "theme.builtin.drake", css: drake },
-  { id: "builtin/dusk", label: "theme.builtin.dusk", css: dusk },
-  { id: "builtin/gitbook", label: "theme.builtin.gitbook", css: gitbook },
-  { id: "builtin/gothic", label: "theme.builtin.gothic", css: gothic },
-  { id: "builtin/ladder", label: "theme.builtin.ladder", css: ladder },
-  { id: "builtin/lapis", label: "theme.builtin.lapis", css: lapis },
+  { id: "builtin/academic", label: "Academic", css: academic },
+  { id: "builtin/blueprint", label: "Blueprint", css: blueprint },
+  { id: "builtin/bookleaf", label: "Bookleaf", css: bookleaf },
+  { id: "builtin/cobalt", label: "Cobalt", css: cobalt },
+  { id: "builtin/dracula", label: "Dracula", css: dracula },
+  { id: "builtin/drake", label: "Drake", css: drake },
+  { id: "builtin/dusk", label: "Dusk", css: dusk },
+  { id: "builtin/gitbook", label: "GitBook", css: gitbook },
+  { id: "builtin/gothic", label: "Gothic", css: gothic },
+  { id: "builtin/ladder", label: "Ladder", css: ladder },
+  { id: "builtin/lapis", label: "Lapis", css: lapis },
   latexTheme,
-  { id: "builtin/mdmdt", label: "theme.builtin.mdmdt", css: mdmdt },
-  { id: "builtin/newsprint", label: "theme.builtin.newsprint", css: newsprint },
-  { id: "builtin/night", label: "theme.builtin.night", css: night },
-  { id: "builtin/notion", label: "theme.builtin.notion", css: notion },
-  { id: "builtin/pie", label: "theme.builtin.pie", css: pie },
-  { id: "builtin/pixyll", label: "theme.builtin.pixyll", css: pixyll },
-  { id: "builtin/purple", label: "theme.builtin.purple", css: purple },
-  { id: "builtin/sage", label: "theme.builtin.sage", css: sage },
-  { id: "builtin/ursine", label: "theme.builtin.ursine", css: ursine },
-  { id: "builtin/vue", label: "theme.builtin.vue", css: vue },
-  { id: "builtin/whitey", label: "theme.builtin.whitey", css: whitey },
+  { id: "builtin/mdmdt", label: "Mdmdt", css: mdmdt },
+  { id: "builtin/newsprint", label: "Newsprint", css: newsprint },
+  { id: "builtin/night", label: "Night", css: night },
+  { id: "builtin/notion", label: "Notion", css: notion },
+  { id: "builtin/pie", label: "Pie", css: pie },
+  { id: "builtin/pixyll", label: "Pixyll", css: pixyll },
+  { id: "builtin/purple", label: "Purple", css: purple },
+  { id: "builtin/sage", label: "Sage", css: sage },
+  { id: "builtin/ursine", label: "Ursine", css: ursine },
+  { id: "builtin/vue", label: "Vue", css: vue },
+  { id: "builtin/whitey", label: "Whitey", css: whitey },
 ];
 
 export function findBuiltinTheme(id: string): BuiltinTheme | undefined {
