@@ -4,8 +4,7 @@
 
 <h1 align="center">MINT</h1>
 
-<p align="center">MINT = <strong>M</strong>INT <strong>I</strong>s <strong>N</strong>ot <strong>T</strong>ypora<br>
-A recursive acronym. Expand the first word and you get the same four words again.</p>
+<p align="center">MINT = <strong>M</strong>INT <strong>I</strong>s <strong>N</strong>ot <strong>T</strong>ypora</p>
 
 <p align="center">An open-source desktop Markdown editor with live preview.</p>
 
@@ -24,7 +23,7 @@ A recursive acronym. Expand the first word and you get the same four words again
 
 Open a Markdown file and edit it in place. Live preview renders the document as you type and reveals the Markdown syntax at the cursor. Saving preserves the original bytes outside your edits.
 
-![MINT editing a field journal in the light Sage theme, with a folder tree, tabs, and a rendered task list](docs/screenshots/live-preview.png)
+![MINT editing a field journal in the light GitHub theme, with a folder tree, tabs, and a rendered task list](docs/screenshots/live-preview.png)
 
 ## Install
 
