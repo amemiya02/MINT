@@ -183,33 +183,24 @@ Windows SmartScreen warns about an unrecognised app. Updates work either way.
 2. Commit, then tag and push: `git tag v0.2.0 && git push origin v0.2.0`.
    The workflow refuses a tag that does not match `tauri.conf.json`.
 3. When the workflow finishes, the release is public and installed copies see
-   the update on their next check. Its last job then updates the package
-   managers (next section).
+   the update on their next check. Its last job generates Homebrew and winget
+   manifests (next section).
 
 ## Distribution channels
 
-| Channel | Users install with | Updated on release by |
-| --- | --- | --- |
-| GitHub Release (`.dmg`, `-setup.exe`, `.msi`, `.AppImage`, `.deb`, `.rpm`) | download (README, "Install") | `release.yml` |
-| Homebrew tap `amemiya02/homebrew-mint` | `brew install --cask amemiya02/mint/mint` | `distribute.yml`, job "Update the Homebrew tap" |
-| winget `amemiya02.MINT` | `winget install amemiya02.MINT` | `distribute.yml`, job "Submit to winget" |
+`release.yml` publishes installers to GitHub Releases. The AppImage and
+`.deb` come from the Linux build on Ubuntu 22.04 and run on glibc 2.35+.
+Before publishing, the workflow checks that the installers required by the
+README and package manifests are attached. Their names are defined in
+`packaging/render.mjs` (`releaseAssets`).
 
-The AppImage and `.deb` come from the Linux build in `release.yml` (Ubuntu
-22.04, so they run on glibc 2.35+). Before publishing, the release workflow
-checks that every installer the channels and the README link to is attached;
-the names are defined once in `packaging/render.mjs` (`releaseAssets`).
-
-`packaging/` holds the templates: `homebrew/mint.rb.template` (the cask) and
-`winget/*.yaml.template` (version, installer and default-locale manifests).
-`.github/workflows/distribute.yml` downloads the released `.dmg`s and
-`-setup.exe`, fills in version and SHA-256 with `packaging/render.mjs`, and
-uploads the result as the `package-manifests` artifact. It then commits
-`Casks/mint.rb` to the tap and opens a pull request on `microsoft/winget-pkgs`,
-each only if its token is set; otherwise the job is skipped with a notice and
-the workflow still succeeds. It runs after `release.yml`, when a release is
-published by hand, and from **Actions › Distribute › Run workflow** with a tag
-(use that to retry or to update a channel after setting it up). Change the
-templates, not the generated files; `pnpm test:packaging` checks them.
+`packaging/` holds the Homebrew cask template and the winget manifest
+templates. `.github/workflows/distribute.yml` downloads the released `.dmg`s and
+`-setup.exe`, fills in the version and SHA-256 with `packaging/render.mjs`, and
+uploads the result as the `package-manifests` artifact. It runs after
+`release.yml`, when a release is published by hand, and from **Actions ›
+Distribute › Run workflow** with a tag. Update the templates to change future
+manifests. `pnpm test:packaging` checks them.
 
 To render the manifests locally for a published release:
 
@@ -219,54 +210,10 @@ gh release download v0.2.0 --dir /tmp/mint-assets --pattern '*.dmg' --pattern '*
 node packaging/render.mjs manifests 0.2.0 /tmp/mint-assets /tmp/mint-manifests
 ```
 
-### One-time setup for the package managers
-
-Do these once, after the first release has been published (steps 2 and 3 need
-its installers). Until then the distribution jobs are no-ops.
-
-1. **Create the Homebrew tap.** Create the public repository
-   `amemiya02/homebrew-mint` (the `homebrew-` prefix is required; `brew` turns
-   `amemiya02/mint` into it). Give it a README and a `Casks/` directory; the
-   workflow writes `Casks/mint.rb`. To use another repository, set the Actions
-   variable `HOMEBREW_TAP_REPO` (e.g. `someone/homebrew-mint`) and change the
-   tap name in the README.
-2. **Allow the workflow to push to the tap.** Create a fine-grained personal
-   access token with access to only the tap repository and permission
-   **Contents: Read and write**, and save it in this repository as the Actions
-   secret `HOMEBREW_TAP_TOKEN`. Then run **Actions › Distribute › Run workflow**
-   with the current tag and check that `brew install --cask amemiya02/mint/mint`
-   works.
-3. **Submit the first winget version by hand** (winget only automates updates
-   of packages it already has):
-   1. Run **Distribute** for the current tag (or render locally, above) and
-      download the `package-manifests` artifact.
-   2. Validate on Windows: `winget validate --manifest <dir>` and
-      `winget install --manifest <dir>`, where `<dir>` is
-      `winget/manifests/a/amemiya02/MINT/<version>`.
-   3. Fork `microsoft/winget-pkgs` under the account that will own the
-      token, copy the directory to the same path in the fork, and open a pull
-      request (or use `wingetcreate submit <dir>` / `komac submit`). Sign the
-      Microsoft CLA when the bot asks. Validation runs in a VM; merging usually
-      takes a few days.
-4. **Allow the workflow to update winget.** Under the account that owns the
-   `winget-pkgs` fork, create a **classic** personal access token with the
-   `public_repo` scope (fine-grained tokens are not supported by
-   `winget-releaser`) and save it as the Actions secret `WINGET_TOKEN`. Every
-   later release then opens the winget pull request automatically; keep the
-   fork in place.
-
-| Kind | Name | Needed for |
-| --- | --- | --- |
-| Secret | `HOMEBREW_TAP_TOKEN` | pushing `Casks/mint.rb` to the tap |
-| Variable | `HOMEBREW_TAP_REPO` | optional, tap repository other than `amemiya02/homebrew-mint` |
-| Secret | `WINGET_TOKEN` | opening `winget-pkgs` pull requests from the fork |
-
-The official `homebrew/cask` repository only accepts signed and notarized apps
-(and has popularity requirements), so MINT ships through its own tap until
-Apple Developer ID signing is set up. After that, submit the cask from
-`packaging/homebrew/` to `Homebrew/homebrew-cask`
-(`brew audit --new --cask mint`); Homebrew's autobump then follows releases
-through the cask's `livecheck`.
+To publish the packages manually, copy `homebrew/Casks/mint.rb` from the
+artifact into the tap's `Casks/` directory. For winget, validate
+`winget/manifests/a/amemiya02/MINT/<version>` with `winget validate --manifest`
+and submit that version directory to `microsoft/winget-pkgs`.
 
 ## Commits
 
