@@ -64,7 +64,7 @@ Open an existing `.md` file, or choose **File → Open Folder** to keep a set of
 - **Write in live preview or source mode.** Use focus mode, typewriter mode, or Vim bindings while you work. Customize shortcuts in Settings.
 - **Work with a folder of notes.** Browse the file tree, keep documents open in tabs and windows, and search across the open folder.
 - **Write rich Markdown.** Add GitHub Flavored Markdown tables and task lists, KaTeX math, Mermaid diagrams, front matter, footnotes, and inline HTML.
-- **Pick your writing setup.** GitHub is the default writing theme. Choose from 24 [built-in themes](docs/themes.md), including MINT originals and styles inspired by Typora’s classic and community themes. Each has light and dark appearances. You can also load your own CSS. The interface supports English and Simplified Chinese.
+- **Pick your writing setup.** Choose from 24 [built-in themes](docs/themes.md), each with light and dark appearances. GitHub is the default. You can also load your own CSS. The interface supports English and Simplified Chinese.
 - **Keep and share drafts.** Autosave and crash recovery help you resume interrupted work. Paste images into an assets folder and export to HTML or PDF.
 
 ## MINT in use

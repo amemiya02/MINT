@@ -63,35 +63,32 @@ test("bundled themes can be selected and follow appearance without hiding custom
   });
   await page.keyboard.press("ControlOrMeta+,");
   const theme = page.getByLabel("Theme");
-  await expect(theme.locator("optgroup").first().getByRole("option")).toHaveText([
-    "Sage",
-    "Bookleaf",
-    "Blueprint",
-    "Dusk",
-  ]);
-  await expect(theme.locator("optgroup").nth(1).getByRole("option")).toHaveText([
+  await expect(theme.locator(":scope > option")).toHaveText([
     "GitHub (default)",
-    "Gothic",
-    "Newsprint",
-    "Night",
-    "Pixyll",
-    "Whitey",
-  ]);
-  await expect(theme.locator("optgroup").nth(2).getByRole("option")).toHaveText([
     "Academic",
+    "Blueprint",
+    "Bookleaf",
     "Cobalt",
     "Dracula",
     "Drake",
+    "Dusk",
     "GitBook",
+    "Gothic",
     "Ladder",
     "Lapis",
+    "LaTeX",
     "Mdmdt",
+    "Newsprint",
+    "Night",
     "Notion",
     "Pie",
+    "Pixyll",
     "Purple",
-    "Typora LaTeX",
+    "Sage",
     "Ursine",
     "Vue",
+    "Whitey",
+    "bookleaf",
   ]);
   for (const [name, light, dark] of [
     ["Bookleaf", "rgb(250, 246, 236)", "rgb(37, 31, 29)"],
