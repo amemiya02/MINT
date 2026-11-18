@@ -619,15 +619,26 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building MINT");
-    app.run(|handle, event| {
-        // macOS opens documents (Finder double-click, "Open With") through an event, not arguments.
+    // Finder can send Opened before Tauri runs setup and registers the file grants.
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    let mut startup_paths = Some(Vec::new());
+    app.run(move |handle, event| {
         #[cfg(any(target_os = "macos", target_os = "ios"))]
-        if let tauri::RunEvent::Opened { urls } = event {
-            let paths = urls
-                .into_iter()
-                .filter_map(|url| url.to_file_path().ok())
-                .collect();
-            open_from_outside(handle, paths);
+        match event {
+            tauri::RunEvent::Opened { urls } => {
+                let paths = urls.into_iter().filter_map(|url| url.to_file_path().ok());
+                if let Some(pending) = &mut startup_paths {
+                    pending.extend(paths);
+                } else {
+                    open_from_outside(handle, paths.collect());
+                }
+            }
+            tauri::RunEvent::Ready => {
+                if let Some(paths) = startup_paths.take() {
+                    open_from_outside(handle, paths);
+                }
+            }
+            _ => {}
         }
         #[cfg(not(any(target_os = "macos", target_os = "ios")))]
         let _ = (handle, event);
