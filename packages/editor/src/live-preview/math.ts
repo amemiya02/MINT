@@ -119,6 +119,8 @@ const blockMath: PreviewRenderer = {
 
 const mathTheme = EditorView.baseTheme({
   [`.${mathClass}`]: { cursor: "pointer" },
+  // Use one pointer target for the formula across different surrounding font metrics.
+  [`.${mathClass}-inline`]: { display: "inline-block", maxInlineSize: "100%" },
   [`.${mathClass}-block`]: { padding: "0.5em 0", textAlign: "center", overflowX: "auto" },
   [`.${mathClass}-block .katex-display`]: { margin: "0" },
   [`.${mathClass}-error`]: {
