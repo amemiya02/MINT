@@ -4,6 +4,9 @@
 
 <h1 align="center">MINT</h1>
 
+<p align="center">MINT = <strong>M</strong>INT <strong>I</strong>s <strong>N</strong>ot <strong>T</strong>ypora<br>
+这是一个递归缩写。展开第一个词 MINT，又会得到同样的四个词。</p>
+
 <p align="center">支持实时预览的开源桌面 Markdown 编辑器。</p>
 
 <p align="center">
@@ -19,7 +22,7 @@
   <a href="README.md">English</a>
 </p>
 
-**MINT Is Not Typora.** 直接打开和编辑磁盘上的 Markdown 文件。实时预览会在写作时渲染文档，并在光标处显露 Markdown 标记。保存时，编辑范围之外的内容按原字节保留。
+直接打开和编辑磁盘上的 Markdown 文件。实时预览会在写作时渲染文档，并在光标处显露 Markdown 标记。保存时，编辑范围之外的内容按原字节保留。
 
 ![MINT 使用青苔亮色主题编辑海岸手记，左侧显示文件树，正文包含已渲染的任务列表](docs/screenshots/live-preview.png)
 
@@ -62,7 +65,7 @@ Windows、macOS 和 AppImage 支持应用内更新。`.deb` 和 `.rpm` 用户可
 - **两种编辑模式**。在实时预览和源码模式之间切换。支持专注模式、打字机模式、Vim 键位和自定义快捷键。
 - **管理一组文档**。用文件树浏览目录，在多个标签页和窗口中打开文档，也可以搜索整个文件夹。
 - **丰富的 Markdown 内容**。支持 GitHub Flavored Markdown 表格和任务列表、KaTeX 公式、Mermaid 图表、Front Matter、脚注及内联 HTML。
-- **自定义写作环境**。四套[内置主题](docs/themes.md)均支持亮色和暗色，也可加载自定义 CSS。界面支持简体中文和英文。
+- **自定义写作环境**。默认使用 GitHub 主题。24 套[内置主题](docs/themes.md)包括 MINT 原创、Typora 经典与社区风格，均支持亮色和暗色，也可加载自定义 CSS。界面支持简体中文和英文。
 - **保存和分享文稿**。支持自动保存、崩溃恢复、粘贴图片至资源目录，以及 HTML 和 PDF 导出。
 
 ## 使用截图

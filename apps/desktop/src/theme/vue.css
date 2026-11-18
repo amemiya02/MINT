@@ -1,0 +1,56 @@
+/* Vue-inspired documentation with green callouts and slate headings. */
+:root {
+  --mint-font-editor: Ubuntu, "Source Sans 3", var(--mint-font-ui);
+  --mint-heading-weight: 700;
+  --mint-heading-1-size: 2.2em;
+  --mint-heading-2-size: 1.7em;
+  --mint-bg: #ffffff;
+  --mint-fg: #293b4b;
+  --mint-muted: #586779;
+  --mint-border: #d5dfdf;
+  --mint-hover: #edf4f1;
+  --mint-selected: #ddf1e6;
+  --mint-sidebar-bg: #f6f8f8;
+  --mint-accent: #18724c;
+  --mint-selection: #cceadd;
+  --mint-heading-fg: #203448;
+  --mint-link: #13704d;
+  --mint-code-fg: #195f46;
+  --mint-code-bg: #edf3f1;
+  --mint-quote-fg: #36584b;
+  --mint-find-current: #f4ce80;
+  --mint-caret: var(--mint-fg);
+  --mint-marker: var(--mint-muted);
+  --vue-quote-bg: #eef8f3;
+}
+
+:root[data-appearance="dark"] {
+  --mint-bg: #1d2022;
+  --mint-fg: #dbe1e3;
+  --mint-muted: #a6b5b7;
+  --mint-border: #3c4949;
+  --mint-hover: #263330;
+  --mint-selected: #234939;
+  --mint-sidebar-bg: #191d1f;
+  --mint-accent: #6cdbab;
+  --mint-selection: #2d5242;
+  --mint-heading-fg: #e9f2f4;
+  --mint-link: #7ce0b5;
+  --mint-code-fg: #b6e5d2;
+  --mint-code-bg: #263531;
+  --mint-quote-fg: #b3cbc1;
+  --mint-find-current: #654821;
+  --vue-quote-bg: #243731;
+}
+
+.mint-editor .cm-mint-h2,
+.mint-document h2 {
+  border-bottom: 1px solid var(--mint-border);
+  padding-bottom: 0.25rem;
+}
+
+.mint-editor .cm-mint-blockquote,
+.mint-document blockquote {
+  border-left-color: var(--mint-accent);
+  background-color: var(--vue-quote-bg);
+}

@@ -1,0 +1,56 @@
+/* Academic-inspired black ink, STIX-style serif text, and a centered title. */
+:root {
+  --mint-font-editor:
+    "STIX Two Text", "Times New Roman", "Songti SC", "Noto Serif CJK SC", SimSun, serif;
+  --mint-font-code: "Latin Modern Mono", "Courier New", monospace;
+  --mint-heading-weight: 700;
+  --mint-heading-1-size: 2.4em;
+  --mint-heading-2-size: 1.8em;
+  --mint-heading-3-size: 1.45em;
+  --mint-bg: #ffffff;
+  --mint-fg: #27292c;
+  --mint-muted: #555d65;
+  --mint-border: #d8dce0;
+  --mint-hover: #eff2f4;
+  --mint-selected: #e4eaef;
+  --mint-sidebar-bg: #f5f6f7;
+  --mint-accent: #4b5964;
+  --mint-selection: #dfe6ec;
+  --mint-heading-fg: #16191c;
+  --mint-link: #2e567e;
+  --mint-code-fg: #32383e;
+  --mint-code-bg: #f2f4f5;
+  --mint-quote-fg: #474c52;
+  --mint-find-current: #f2d27c;
+  --mint-caret: var(--mint-fg);
+  --mint-marker: var(--mint-muted);
+}
+
+:root[data-appearance="dark"] {
+  --mint-bg: #202225;
+  --mint-fg: #e5e7e9;
+  --mint-muted: #aeb5bc;
+  --mint-border: #444a51;
+  --mint-hover: #2c3035;
+  --mint-selected: #353e47;
+  --mint-sidebar-bg: #1b1d20;
+  --mint-accent: #b9c7d4;
+  --mint-selection: #384857;
+  --mint-heading-fg: #f1f3f4;
+  --mint-link: #a1caf2;
+  --mint-code-fg: #d7dfe6;
+  --mint-code-bg: #2a2e32;
+  --mint-quote-fg: #bdc6cf;
+  --mint-find-current: #60491f;
+}
+
+.mint-editor .cm-mint-h1,
+.mint-document h1 {
+  text-align: center;
+}
+
+.mint-editor .cm-mint-blockquote,
+.mint-document blockquote {
+  border-left: 2px solid var(--mint-muted);
+  font-style: italic;
+}

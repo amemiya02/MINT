@@ -1,0 +1,49 @@
+/* Slate surfaces, pale blue accents, and lightweight sans-serif headings. */
+:root {
+  --mint-font-editor: "Helvetica Neue", Arial, var(--mint-font-ui);
+  --mint-font-heading: "Lucida Grande", Corbel, var(--mint-font-ui);
+  --mint-heading-weight: 400;
+  --mint-heading-1-size: 2.5em;
+  --mint-heading-2-size: 1.63em;
+  --mint-bg: #edf2f6;
+  --mint-fg: #263441;
+  --mint-muted: #46596b;
+  --mint-border: #c5d0db;
+  --mint-hover: #e1e9f1;
+  --mint-selected: #d3e1ef;
+  --mint-sidebar-bg: #e3eaf1;
+  --mint-accent: #3a618a;
+  --mint-selection: #c9dbed;
+  --mint-heading-fg: #202d39;
+  --mint-link: #345a83;
+  --mint-code-fg: #314960;
+  --mint-code-bg: #dfe8f0;
+  --mint-quote-fg: #495b6d;
+  --mint-find-current: #edc781;
+  --mint-caret: var(--mint-fg);
+  --mint-marker: var(--mint-muted);
+}
+
+:root[data-appearance="dark"] {
+  --mint-bg: #363b40;
+  --mint-fg: #cbd2d9;
+  --mint-muted: #b8c1cb;
+  --mint-border: #565f68;
+  --mint-hover: #414951;
+  --mint-selected: #394e66;
+  --mint-sidebar-bg: #2e3033;
+  --mint-accent: #9dc8f1;
+  --mint-selection: #38506c;
+  --mint-heading-fg: #eceff1;
+  --mint-link: #a6cdf4;
+  --mint-code-fg: #e0e8f0;
+  --mint-code-bg: #2c3238;
+  --mint-quote-fg: #b8c1cb;
+  --mint-find-current: #6a4d26;
+}
+
+.cm-mint-heading-1,
+.cm-mint-heading-2,
+.mint-document :is(h1, h2) {
+  letter-spacing: -0.03em;
+}

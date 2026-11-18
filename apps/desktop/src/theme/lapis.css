@@ -1,0 +1,48 @@
+/* Lapis-inspired ink blue with softly tinted second-level headings. */
+:root {
+  --mint-font-editor: Cantarell, "Segoe UI", var(--mint-font-ui);
+  --mint-font-code: "JetBrains Mono", ui-monospace, Consolas, monospace;
+  --mint-heading-weight: 700;
+  --mint-heading-1-size: 2.15em;
+  --mint-bg: #ffffff;
+  --mint-fg: #40464f;
+  --mint-muted: #596577;
+  --mint-border: #d3dfed;
+  --mint-hover: #edf3fb;
+  --mint-selected: #dce9f7;
+  --mint-sidebar-bg: #f2f6fb;
+  --mint-accent: #3f659d;
+  --mint-selection: #d3e4fa;
+  --mint-heading-fg: #284c7e;
+  --mint-link: var(--mint-accent);
+  --mint-code-fg: #345882;
+  --mint-code-bg: #eaf2fc;
+  --mint-quote-fg: #50647f;
+  --mint-find-current: #ecc47c;
+  --mint-caret: var(--mint-fg);
+  --mint-marker: var(--mint-muted);
+}
+
+:root[data-appearance="dark"] {
+  --mint-bg: #1e222a;
+  --mint-fg: #e0e5ec;
+  --mint-muted: #a9b4c6;
+  --mint-border: #3b4659;
+  --mint-hover: #293244;
+  --mint-selected: #344661;
+  --mint-sidebar-bg: #181c24;
+  --mint-accent: #a0bfdc;
+  --mint-selection: #364d70;
+  --mint-heading-fg: #c9ddf5;
+  --mint-code-fg: #bed7f1;
+  --mint-code-bg: #2a3649;
+  --mint-quote-fg: #aabdd4;
+  --mint-find-current: #62471f;
+}
+
+.mint-editor .cm-mint-h2,
+.mint-document h2 {
+  background-color: var(--mint-code-bg);
+  border-radius: 0.2em;
+  padding-inline-start: 0.35em;
+}
