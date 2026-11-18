@@ -36,7 +36,7 @@ export const settingsSchema = {
       { value: "dark", label: "settings.appearance.dark" },
     ],
   }),
-  /** A user theme: the name of a `.css` file in the theme folder, without `.css`. Empty for the built-in theme. */
+  /** A built-in theme ID or the name of a `.css` file in the theme folder, without `.css`. */
   theme: text({ label: "settings.theme", default: "", maxLength: 200, optionsFrom: "themes" }),
   /** CSS font-family for the document text. Empty for the theme's font. */
   fontFamily: text({
@@ -137,7 +137,7 @@ export interface TextSetting extends BaseSetting<string> {
   readonly maxLength: number;
   /** Shown in the empty field. */
   readonly placeholder?: MessageKey;
-  /** `themes`: the user themes in the theme folder, plus the built-in theme as `""`. */
+  /** `themes`: the built-in themes and any user themes in the theme folder. */
   readonly optionsFrom?: "themes";
 }
 

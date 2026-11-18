@@ -12,7 +12,7 @@
 - **Folders and tabs:** a file tree, quick open, search across a folder, tabs and multiple windows.
 - **Writing tools:** outline, focus mode, typewriter mode, a command palette, and Typora-style shortcuts you can change.
 - **Safe by default:** autosave and crash recovery, image pasting into an assets folder, and export to HTML and PDF.
-- Light and dark modes, [custom CSS themes](docs/themes.md), and an interface in English and 简体中文.
+- [Built-in and custom CSS themes](docs/themes.md), light and dark modes, and an interface in English and 简体中文.
 
 ## Install
 

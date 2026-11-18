@@ -1,0 +1,47 @@
+/* Muted lilac and charcoal-plum with clear hierarchy for evening writing. */
+:root {
+  --mint-font-editor: "Trebuchet MS", var(--mint-font-ui);
+  --mint-font-heading: var(--mint-font-ui);
+  --mint-heading-weight: 700;
+  --mint-heading-1-size: 2.2em;
+  --mint-bg: #f9f5fa;
+  --mint-fg: #37283e;
+  --mint-muted: #644e6b;
+  --mint-border: #dfd2e1;
+  --mint-hover: #f0e8f2;
+  --mint-selected: #ecdef0;
+  --mint-sidebar-bg: #f0e9f3;
+  --mint-accent: #754787;
+  --mint-selection: #e8d5ef;
+  --mint-heading-fg: #442b4e;
+  --mint-link: #704080;
+  --mint-code-fg: #54365d;
+  --mint-code-bg: #f0e7f2;
+  --mint-quote-fg: #634d6d;
+  --mint-find-current: #f1c47d;
+  --mint-caret: var(--mint-fg);
+  --mint-marker: var(--mint-muted);
+}
+
+:root[data-appearance="dark"] {
+  --mint-bg: #201b27;
+  --mint-fg: #ede4f2;
+  --mint-muted: #bfafca;
+  --mint-border: #47394f;
+  --mint-hover: #2c2536;
+  --mint-selected: #3e2f4c;
+  --mint-sidebar-bg: #1b1621;
+  --mint-accent: #d3abed;
+  --mint-selection: #4e3961;
+  --mint-heading-fg: #f3e9fb;
+  --mint-link: #d9b5f4;
+  --mint-code-fg: #e5cdef;
+  --mint-code-bg: #2b2334;
+  --mint-quote-fg: #ccb6d6;
+  --mint-find-current: #604424;
+}
+
+.cm-mint-heading-1,
+.mint-document h1 {
+  letter-spacing: -0.025em;
+}

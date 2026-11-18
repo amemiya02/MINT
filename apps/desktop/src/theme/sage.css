@@ -1,0 +1,49 @@
+/* Soft green surfaces, readable sans-serif body, and serif headings for everyday notes. */
+:root {
+  --mint-font-editor: var(--mint-font-ui);
+  --mint-font-heading:
+    "Palatino Linotype", Palatino, "Songti SC", "Noto Serif CJK SC", SimSun, serif;
+  --mint-heading-weight: 700;
+  --mint-heading-1-size: 2.25em;
+  --mint-heading-2-size: 1.6em;
+  --mint-bg: #f6f8ef;
+  --mint-fg: #29382b;
+  --mint-muted: #52634e;
+  --mint-border: #d0dbca;
+  --mint-hover: #e9efe1;
+  --mint-selected: #dce8d6;
+  --mint-sidebar-bg: #edf2e6;
+  --mint-accent: #356749;
+  --mint-selection: #d6e7cd;
+  --mint-heading-fg: #233c2a;
+  --mint-link: #2e6245;
+  --mint-code-fg: #344d37;
+  --mint-code-bg: #e7eee1;
+  --mint-quote-fg: #4b614b;
+  --mint-find-current: #eacb7b;
+  --mint-caret: var(--mint-fg);
+  --mint-marker: var(--mint-muted);
+}
+
+:root[data-appearance="dark"] {
+  --mint-bg: #19231d;
+  --mint-fg: #e2eddf;
+  --mint-muted: #aabda9;
+  --mint-border: #374b3e;
+  --mint-hover: #253329;
+  --mint-selected: #2e4436;
+  --mint-sidebar-bg: #151e19;
+  --mint-accent: #a2d4a6;
+  --mint-selection: #36533f;
+  --mint-heading-fg: #e5f5e2;
+  --mint-link: #a8dcaf;
+  --mint-code-fg: #c5e5c9;
+  --mint-code-bg: #233229;
+  --mint-quote-fg: #b4cab4;
+  --mint-find-current: #54431e;
+}
+
+.mint-editor .cm-mint-blockquote,
+.mint-document blockquote {
+  border-left-color: var(--mint-accent);
+}

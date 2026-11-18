@@ -8,9 +8,9 @@ import {
   writeFile,
 } from "./memory-platform.ts";
 
-// The built-in themes' page backgrounds (docs/themes.md).
-const lightBackground = "rgb(253, 253, 252)";
-const darkBackground = "rgb(28, 30, 33)";
+// Sage is the default theme in both appearances.
+const lightBackground = "rgb(246, 248, 239)";
+const darkBackground = "rgb(25, 35, 29)";
 
 const background = (page: Page) =>
   page.evaluate(() => getComputedStyle(document.body).backgroundColor);
@@ -53,6 +53,42 @@ test("an appearance pinned in settings.json applies at startup", async ({ page }
 
 const paper = (bg: string) => `:root { --mint-bg: ${bg}; }`;
 
+test("bundled themes can be selected and follow appearance without hiding custom themes", async ({
+  page,
+}) => {
+  await page.emulateMedia({ colorScheme: "light" });
+  await launch(page, {
+    locale: "en-US",
+    files: { [`${themesPath}/bookleaf.css`]: paper("rgb(250, 240, 220)") },
+  });
+  await page.keyboard.press("ControlOrMeta+,");
+  const theme = page.getByLabel("Theme");
+  await expect(theme.locator("optgroup").first().getByRole("option")).toHaveText([
+    "Sage (default)",
+    "Bookleaf",
+    "Blueprint",
+    "Dusk",
+  ]);
+  for (const [name, light, dark] of [
+    ["Bookleaf", "rgb(250, 246, 236)", "rgb(37, 31, 29)"],
+    ["Blueprint", "rgb(246, 249, 253)", "rgb(19, 28, 44)"],
+    ["Sage (default)", lightBackground, darkBackground],
+    ["Dusk", "rgb(249, 245, 250)", "rgb(32, 27, 39)"],
+  ] as const) {
+    await theme.selectOption({ label: name });
+    await expect.poll(() => background(page)).toBe(light);
+    await page.emulateMedia({ colorScheme: "dark" });
+    await expect.poll(() => background(page)).toBe(dark);
+    await expect(page.locator("html")).toHaveCSS("color-scheme", "dark");
+    await page.emulateMedia({ colorScheme: "light" });
+  }
+  expect(JSON.parse((await readFile(page, settingsPath)) ?? "")).toMatchObject({
+    theme: "builtin/dusk",
+  });
+  await theme.selectOption({ label: "bookleaf" });
+  await expect.poll(() => background(page)).toBe("rgb(250, 240, 220)");
+});
+
 test("a .css file in the theme folder can be chosen as the theme", async ({ page }) => {
   await launch(page, {
     locale: "en-US",
@@ -67,7 +103,7 @@ test("a .css file in the theme folder can be chosen as the theme", async ({ page
   await expect.poll(() => background(page)).toBe("rgb(250, 240, 220)");
   expect(JSON.parse((await readFile(page, settingsPath)) ?? "")).toEqual({ theme: "paper" });
 
-  await page.getByLabel("Theme").selectOption({ label: "MINT (built-in)" });
+  await page.getByLabel("Theme").selectOption({ label: "Sage (default)" });
   await expect.poll(() => background(page)).toBe(lightBackground);
 });
 
