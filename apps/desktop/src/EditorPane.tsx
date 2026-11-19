@@ -22,6 +22,7 @@ interface EditorPaneProps {
   readonly onModeChange: () => void;
   /** The user ⌘-clicked a link. */
   readonly onOpenLink: (link: LinkTarget) => void;
+  readonly writeClipboardText: (text: string) => Promise<void>;
   /** Resolves and saves the document's images. */
   readonly imageHost: ImageHost;
   /** The document's word count, reported while the pane is active: on activation and shortly after edits. */
@@ -41,6 +42,7 @@ export function EditorPane({
   onChange,
   onModeChange,
   onOpenLink,
+  writeClipboardText,
   imageHost,
   onWordCount,
   dialect,
@@ -63,6 +65,7 @@ export function EditorPane({
     onChange,
     onModeChange,
     onOpenLink,
+    writeClipboardText,
     imageHost,
     onWordCount,
     active,
@@ -74,6 +77,7 @@ export function EditorPane({
     onChange,
     onModeChange,
     onOpenLink,
+    writeClipboardText,
     imageHost,
     onWordCount,
     active,
@@ -91,6 +95,7 @@ export function EditorPane({
       settings: callbacks.current.editorSettings,
       host: {
         openLink: (link) => callbacks.current.onOpenLink(link),
+        writeClipboardText: (text) => callbacks.current.writeClipboardText(text),
         resolveImageUrl: (path) => callbacks.current.imageHost.resolveImageUrl(path),
         saveImage: (file) => callbacks.current.imageHost.saveImage(file),
       },

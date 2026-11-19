@@ -65,6 +65,8 @@ import { countWords, type WordCount } from "./word-count.ts";
 export interface HostAdapter {
   /** Open a link the user ⌘-clicked (Ctrl-clicked off macOS). Without it, links do nothing. */
   openLink?(link: LinkTarget): void;
+  /** Copy plain text. Without it, the editor uses the browser clipboard. */
+  writeClipboardText?(text: string): Promise<void>;
   /**
    * Turn the path of a local image, as written in the document (relative to
    * it, or absolute; angle brackets removed and percent-decoded), into a URL
@@ -118,7 +120,7 @@ export interface EditorOptions {
   readonly mode?: EditorMode;
   /**
    * Translations of the editor's own UI copy, keyed by the English text
-   * (the exported `tablePhrases`). Untranslated text stays English.
+   * (see `tablePhrases` and `codeBlockPhrases`). Untranslated text stays English.
    */
   readonly phrases?: Readonly<Record<string, string>>;
   /** Initial settings; each one left out is off. */
@@ -283,7 +285,7 @@ export function createEditor(options: EditorOptions): MintEditor {
         quotesAndRules,
         footnotes,
         tableOfContents,
-        codeBlocks,
+        codeBlocks(host.writeClipboardText?.bind(host)),
         imagePreview(),
         host.resolveImageUrl
           ? imageUrlResolver.of((path) => host.resolveImageUrl?.(path) ?? null)

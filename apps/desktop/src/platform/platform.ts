@@ -129,6 +129,8 @@ export interface Platform {
    * when the clipboard cannot be read or holds no text.
    */
   readClipboardText(): Promise<string>;
+  /** Write plain text to the system clipboard. */
+  writeClipboardText(text: string): Promise<void>;
 
   /** Open a URL (`https:`, `mailto:`, ...) in the user's default browser or handler. */
   openExternal(url: string): Promise<void>;

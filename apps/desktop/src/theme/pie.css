@@ -92,8 +92,11 @@
   --mint-muted: var(--pie-fence-muted);
   --mint-marker: var(--mint-muted);
   --mint-heading-fg: var(--pie-fence-name);
-  background-color: var(--mint-code-bg);
   color: var(--mint-code-fg);
+}
+
+.mint-document pre:not(.mint-mermaid-error) {
+  background-color: var(--mint-code-bg);
 }
 
 .mint-document pre .cm-mint-code-number,

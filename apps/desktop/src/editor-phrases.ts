@@ -1,11 +1,14 @@
-import type { tablePhrases } from "@mint/editor";
+import type { codeBlockPhrases, tablePhrases } from "@mint/editor";
 import type { MessageKey, Translate } from "./i18n/index.ts";
 
 /**
  * The editor core's own UI copy is keyed by its English text; this maps each
  * phrase to an i18n key, and type-checks that every phrase is translated.
  */
-const keys: Record<(typeof tablePhrases)[number], MessageKey> = {
+const keys: Record<(typeof tablePhrases | typeof codeBlockPhrases)[number], MessageKey> = {
+  "Copy code block": "editor.codeBlock.copy",
+  Copied: "editor.codeBlock.copied",
+  "Copy failed": "editor.codeBlock.copyFailed",
   "Insert row above": "editor.table.insertRowAbove",
   "Insert row below": "editor.table.insertRowBelow",
   "Delete row": "editor.table.deleteRow",

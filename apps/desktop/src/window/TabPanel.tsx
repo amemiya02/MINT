@@ -85,6 +85,7 @@ export function TabPanel({
           onChange={onChange}
           onModeChange={onModeChange}
           onOpenLink={onOpenLink}
+          writeClipboardText={platform.writeClipboardText}
           imageHost={imageHost}
           onWordCount={onWordCount}
           dialect={dialect}

@@ -39,6 +39,13 @@ export function readFile(page: Page, path: string): Promise<string | undefined> 
   );
 }
 
+/** Read the plain text the shell copied to the in-memory clipboard. */
+export function readClipboardText(page: Page): Promise<string> {
+  return page.evaluate(() =>
+    (window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.readClipboardText(),
+  );
+}
+
 /** Every file and directory path that exists in the in-memory platform, sorted. */
 export function listPaths(page: Page): Promise<string[]> {
   return page.evaluate(() =>
