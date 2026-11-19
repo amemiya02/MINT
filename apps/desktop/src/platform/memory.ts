@@ -434,6 +434,9 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       if (clipboardText === null) throw new Error("The clipboard holds no text");
       return clipboardText;
     },
+    async writeClipboardText(text) {
+      clipboardText = text;
+    },
     setClipboardText(text) {
       clipboardText = text;
     },

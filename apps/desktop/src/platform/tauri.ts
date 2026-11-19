@@ -9,7 +9,7 @@ import {
 } from "@tauri-apps/api/menu";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { readText } from "@tauri-apps/plugin-clipboard-manager";
+import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { message } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { relaunch } from "@tauri-apps/plugin-process";
@@ -129,6 +129,7 @@ export function createTauriPlatform(): Platform {
     writeAppData: (name, text) => invoke<void>("write_app_data", { name, text }),
     // Rejects when the clipboard cannot be read, or holds no text (an image, say).
     readClipboardText: () => readText(),
+    writeClipboardText: (text) => writeText(text),
     openExternal: (url) => openUrl(url),
     themesPath: () => invoke<string>("themes_path"),
     async showQuestionDialog({ title, message: text, yes, no, cancel }) {

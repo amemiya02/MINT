@@ -10,6 +10,7 @@
     "core:window:allow-destroy",
     "core:webview:allow-create-webview-window",
     "clipboard-manager:allow-read-text",
+    "clipboard-manager:allow-write-text",
     "dialog:allow-message",
     "opener:allow-open-url",
     "opener:allow-default-urls",
