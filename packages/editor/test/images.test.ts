@@ -1,6 +1,7 @@
 // Images in live preview, and pasting or dropping image files, through the
 // editor core's public interface. Resolving paths and saving files are the
 // host's job: these tests play the host.
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createEditor,
@@ -9,6 +10,7 @@ import {
   type ImageFile,
   type MintEditor,
 } from "../src/index.ts";
+import { finishParsing } from "./parsed.ts";
 
 const mounted: { editor: MintEditor; parent: HTMLElement }[] = [];
 function open(text: string, options: Partial<EditorOptions> = {}) {
@@ -53,6 +55,35 @@ describe("images in live preview", () => {
       "asset://img/a.png",
       "asset:///abs/b c.png",
     ]);
+  });
+
+  it("resolves the same Document image in prose, HTML and table cells without editing the source", () => {
+    const source = [
+      "![Logo](assets/logo.png)",
+      "",
+      '<div><img src="assets/logo.png" alt="Logo"></div>',
+      "",
+      "| Asset |",
+      "| --- |",
+      "| ![Logo](assets/logo.png) |",
+      "",
+      "end",
+    ].join("\r\n");
+    const { editor, parent, placeholders } = open(source, {
+      host: { resolveImageUrl: (path) => `asset://notes/${path}` },
+    });
+    finishParsing(parent);
+    end(editor);
+    const rendered = [...parent.querySelectorAll<HTMLImageElement>('img[alt="Logo"]')];
+    expect(rendered.map((img) => img.getAttribute("src"))).toEqual(
+      Array(3).fill("asset://notes/assets/logo.png"),
+    );
+    for (const img of rendered) img.dispatchEvent(new Event("error"));
+    expect(placeholders().map((node) => node.textContent)).toEqual(["Logo", "Logo", "Logo"]);
+    const cell = parent.querySelector<HTMLElement>('[data-mint-cell="1:0"]');
+    cell?.focus();
+    expect(cell?.textContent).toBe("![Logo](assets/logo.png)");
+    expect(editor.getText()).toBe(source);
   });
 
   it("shows a placeholder when the host cannot resolve the path", () => {
