@@ -2,6 +2,7 @@ import { redo, undo } from "@codemirror/commands";
 import { syntaxTree } from "@codemirror/language";
 import type { ChangeSpec, EditorState } from "@codemirror/state";
 import { Decoration, EditorView, WidgetType } from "@codemirror/view";
+import { previewFragment } from "../live-preview/images.ts";
 import type { PreviewRenderer } from "../live-preview/preview.ts";
 import { type TableAction, tableEdit } from "./commands.ts";
 import {
@@ -307,7 +308,7 @@ class TableController {
     const key = html === null ? `text:${this.sourceOf(address)}` : `html:${html}`;
     if (this.showing.get(element) === key) return;
     if (html === null) element.textContent = this.sourceOf(address);
-    else element.innerHTML = html;
+    else element.replaceChildren(previewFragment(this.view, html));
     this.showing.set(element, key);
   }
 

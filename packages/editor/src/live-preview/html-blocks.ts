@@ -2,7 +2,7 @@ import type { Extension } from "@codemirror/state";
 import { Decoration, EditorView, WidgetType } from "@codemirror/view";
 import type { SyntaxNode } from "@lezer/common";
 import { classify, isOpenLinkClick, linkOpener } from "../links.ts";
-import { imagePlaceholder, resolveImageSource } from "./images.ts";
+import { previewFragment } from "./images.ts";
 import { type PreviewRenderer, previewRenderer } from "./preview.ts";
 
 /**
@@ -13,9 +13,6 @@ export type SafeHtmlRenderer = (markdown: string) => string;
 
 /** Class on every rendered HTML block. */
 export const htmlBlockClass = "cm-mint-html";
-
-/** Image sources the page loads itself; any other `srcset` entry is a local file. */
-const webUrl = /^(https?|data|blob):/i;
 
 /**
  * A raw HTML block, rendered. Images load through the host's resolver like
@@ -39,34 +36,7 @@ class HtmlWidget extends WidgetType {
     const dom = document.createElement("div");
     dom.className = this.html ? htmlBlockClass : `${htmlBlockClass} ${htmlBlockClass}-hidden`;
     if (this.title) dom.title = this.title;
-    // A template's content is inert: no image loads before its source is resolved.
-    const template = document.createElement("template");
-    template.innerHTML = this.html;
-    const content = template.content;
-    // Local `srcset` files cannot go through the host's resolver; the `<img>` fallback is used instead.
-    for (const source of content.querySelectorAll("source")) {
-      const urls = (source.getAttribute("srcset") ?? "")
-        .split(",")
-        .map((entry) => entry.trim().split(/\s+/)[0] ?? "");
-      if (urls.some((url) => url && !webUrl.test(url))) source.remove();
-    }
-    for (const img of content.querySelectorAll("img")) {
-      const placeholder = () => {
-        img.replaceWith(imagePlaceholder(img.alt, img.getAttribute("src") ?? ""));
-        view.requestMeasure();
-      };
-      const src = img.getAttribute("src");
-      const url = src ? resolveImageSource(view.state, src) : null;
-      if (url === null) {
-        placeholder();
-        continue;
-      }
-      img.setAttribute("src", url);
-      img.draggable = false;
-      img.addEventListener("error", placeholder, { once: true });
-      img.addEventListener("load", () => view.requestMeasure(), { once: true });
-    }
-    dom.append(content);
+    dom.append(previewFragment(view, this.html));
     dom.addEventListener("mousedown", (event) => {
       if (event.button !== 0) return;
       event.preventDefault();

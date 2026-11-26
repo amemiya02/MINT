@@ -50,7 +50,7 @@ function altText(state: EditorState, node: SyntaxNode): string {
 }
 
 /** What stands in for an image that cannot be shown: its alt text (or else `title`) in a dashed box. */
-export function imagePlaceholder(alt: string, title: string): HTMLElement {
+function imagePlaceholder(alt: string, title: string): HTMLElement {
   const missing = document.createElement("span");
   missing.className = "cm-mint-image-missing";
   missing.setAttribute("role", "img");
@@ -58,6 +58,46 @@ export function imagePlaceholder(alt: string, title: string): HTMLElement {
   missing.title = title;
   missing.textContent = alt || title;
   return missing;
+}
+
+/** Install the resolved source and keep the editor layout in sync with the image. */
+function displayImage(
+  view: EditorView,
+  img: HTMLImageElement,
+  url: string | null,
+  fallback: string,
+) {
+  const missing = () => {
+    img.replaceWith(imagePlaceholder(img.alt, fallback));
+    view.requestMeasure();
+  };
+  if (url === null) {
+    missing();
+    return;
+  }
+  img.draggable = false;
+  img.addEventListener("error", missing, { once: true });
+  img.addEventListener("load", () => view.requestMeasure(), { once: true });
+  img.setAttribute("src", url);
+}
+
+/** Prepare already-sanitised widget HTML while its document-relative URLs are still inert. */
+export function previewFragment(view: EditorView, html: string): DocumentFragment {
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  const content = template.content;
+  // Use the img fallback when a picture's source set contains local files.
+  for (const source of content.querySelectorAll("source")) {
+    const urls = (source.getAttribute("srcset") ?? "")
+      .split(",")
+      .map((entry) => entry.trim().split(/\s+/)[0]);
+    if (urls.some((url) => url && !webUrl.test(url))) source.remove();
+  }
+  for (const img of content.querySelectorAll("img")) {
+    const src = img.getAttribute("src") ?? "";
+    displayImage(view, img, src ? resolveImageSource(view.state, src) : null, src);
+  }
+  return content;
 }
 
 class ImageWidget extends WidgetType {
@@ -82,22 +122,11 @@ class ImageWidget extends WidgetType {
   toDOM(view: EditorView): HTMLElement {
     const wrapper = document.createElement(this.block ? "div" : "span");
     wrapper.className = this.block ? "cm-mint-image cm-mint-image-block" : "cm-mint-image";
-    const placeholder = () => {
-      wrapper.replaceChildren(imagePlaceholder(this.alt, this.title));
-      view.requestMeasure();
-    };
-    if (this.url === null) {
-      placeholder();
-      return wrapper;
-    }
     const img = document.createElement("img");
-    img.src = this.url;
     img.alt = this.alt;
     if (this.title) img.title = this.title;
-    img.draggable = false;
-    img.addEventListener("error", placeholder, { once: true });
-    img.addEventListener("load", () => view.requestMeasure(), { once: true });
     wrapper.append(img);
+    displayImage(view, img, this.url, this.title);
     return wrapper;
   }
 
