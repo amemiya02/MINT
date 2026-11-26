@@ -21,7 +21,9 @@ export function baseName(path: string): string {
 
 /** Whether `path` is `root` itself or inside it. */
 export function isWithin(path: string, root: string): boolean {
-  return path === root || path.startsWith(`${root}/`) || path.startsWith(`${root}\\`);
+  if (path === root) return true;
+  if (/[\\/]$/.test(root)) return path.startsWith(root);
+  return path.startsWith(`${root}/`) || path.startsWith(`${root}\\`);
 }
 
 /** Where `path` ends up after `from` was renamed to `to` (unchanged if not inside `from`). */
@@ -80,6 +82,8 @@ export const documentExtensions: readonly string[] = markdownExtensions;
 /** The folder part of a path (`/a/b.md` → `/a`); the root of a root-level path stays (`/b.md` → `/`). */
 export function parentPath(path: string): string {
   const cut = lastSeparator(path);
+  // A drive root includes its separator, e.g. the parent of C:\notes is C:\.
+  if (cut === 2 && /^[a-z]:/i.test(path)) return path.slice(0, 3);
   return cut <= 0 ? path.slice(0, cut + 1) : path.slice(0, cut);
 }
 

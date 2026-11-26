@@ -6,19 +6,20 @@ import {
   useEffect,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import { useT } from "../i18n/index.ts";
 import { Outline } from "../outline/Outline.tsx";
 import { baseName, isDocumentPath, isValidName, joinPath, parentPath } from "../paths.ts";
-import type { DirectoryEntry, Platform } from "../platform/platform.ts";
-import { type TreeRow, useFileTree } from "./useFileTree.ts";
+import type { DirectoryEntry } from "../platform/platform.ts";
+import type { FolderTree, TreeRow } from "./file-tree.ts";
 
 /** What the sidebar shows: the file tree of the open folder, or the outline of the active document. */
 export type SidebarView = "files" | "outline";
 
-export interface SidebarProps extends Omit<FileTreeProps, "root"> {
+export interface SidebarProps extends Omit<FileTreeProps, "tree"> {
   /** The open folder, if any; without one only the outline is offered. */
-  readonly root: string | null;
+  readonly tree: FolderTree | null;
   readonly view: SidebarView;
   readonly onViewChange: (view: SidebarView) => void;
   /** The editor of the active document, for the outline. */
@@ -28,10 +29,10 @@ export interface SidebarProps extends Omit<FileTreeProps, "root"> {
 
 /** The sidebar: the file tree of the open folder or the outline of the active document. */
 export function Sidebar(props: SidebarProps) {
-  const { root, editor, onViewChange, onHide, ...tree } = props;
+  const { tree, editor, onViewChange, onHide, ...fileTreeProps } = props;
   const t = useT();
-  const view: SidebarView = root === null ? "outline" : props.view;
-  const views: readonly SidebarView[] = root === null ? ["outline"] : ["files", "outline"];
+  const view: SidebarView = tree === null ? "outline" : props.view;
+  const views: readonly SidebarView[] = tree === null ? ["outline"] : ["files", "outline"];
   return (
     <aside
       aria-label={t("sidebar.label")}
@@ -61,8 +62,8 @@ export function Sidebar(props: SidebarProps) {
           <path d="M6 2.5v11M11 6.5 9.5 8l1.5 1.5" />
         </IconButton>
       </header>
-      {view === "files" && root !== null ? (
-        <FileTree root={root} {...tree} />
+      {view === "files" && tree !== null ? (
+        <FileTree key={tree.root} tree={tree} {...fileTreeProps} />
       ) : (
         <Outline editor={editor} />
       )}
@@ -71,9 +72,8 @@ export function Sidebar(props: SidebarProps) {
 }
 
 interface FileTreeProps {
-  readonly platform: Platform;
   /** The open folder. */
-  readonly root: string;
+  readonly tree: FolderTree;
   /** The document shown in the editor, highlighted in the tree. */
   readonly activePath: string | null;
   /** The single way the sidebar opens a document. */
@@ -99,9 +99,10 @@ interface ContextMenu {
 
 /** The file tree of the open folder, with create, rename and trash actions. */
 function FileTree(props: FileTreeProps) {
-  const { platform, root, activePath, onOpenDocument, onRenamed, onTrashed, onError } = props;
+  const { tree, activePath, onOpenDocument, onRenamed, onTrashed, onError } = props;
   const t = useT();
-  const tree = useFileTree(platform, root);
+  const { root } = tree;
+  const rows = useSyncExternalStore(tree.subscribe, tree.getRows);
   const [edit, setEdit] = useState<NameEdit | null>(null);
   const [menu, setMenu] = useState<ContextMenu | null>(null);
   const treeRef = useRef<HTMLDivElement>(null);
@@ -116,13 +117,9 @@ function FileTree(props: FileTreeProps) {
 
   function defaultName(target: NameEdit): string {
     if (target.kind === "rename") return target.entry.name;
-    const taken = new Set((tree.children.get(target.parent) ?? []).map((e) => e.name));
     const stem = t(target.type === "file" ? "tree.untitledDocument" : "tree.untitledFolder");
     const ext = target.type === "file" ? ".md" : "";
-    for (let n = 1; ; n++) {
-      const name = n === 1 ? `${stem}${ext}` : `${stem} ${n}${ext}`;
-      if (!taken.has(name)) return name;
-    }
+    return tree.availableName(target.parent, stem, ext);
   }
 
   async function commitName(target: NameEdit, typed: string) {
@@ -138,40 +135,34 @@ function FileTree(props: FileTreeProps) {
       if (target.type === "file" && !name.includes(".")) name += ".md";
       const path = joinPath(target.parent, name);
       try {
-        if (target.type === "file") await platform.createFile(path);
-        else await platform.createDirectory(path);
+        await tree.create(path, target.type);
       } catch (e) {
         onError(t("error.create", { name, reason: reason(e) }));
         return;
       }
-      await tree.refresh();
       if (target.type === "file") onOpenDocument(path);
-      else await tree.expand(path);
     } else {
       const from = target.entry.path;
       const to = joinPath(parentPath(from), name);
       try {
-        await platform.rename(from, to);
+        await tree.rename(from, to);
       } catch (e) {
         onError(t("error.rename", { name, reason: reason(e) }));
         return;
       }
-      tree.renamed(from, to);
       onRenamed(from, to);
-      await tree.refresh();
     }
   }
 
   async function trash(entry: DirectoryEntry) {
     setMenu(null);
     try {
-      await platform.moveToTrash(entry.path);
+      await tree.trash(entry.path);
     } catch (e) {
       onError(t("error.trash", { name: entry.name, reason: reason(e) }));
       return;
     }
     onTrashed(entry.path);
-    await tree.refresh();
   }
 
   function activate(row: TreeRow) {
@@ -239,7 +230,7 @@ function FileTree(props: FileTreeProps) {
 
   const items: ReactNode[] = [];
   if (edit?.kind === "create" && edit.parent === root) items.push(nameField(edit, 1));
-  tree.rows.forEach((row, index) => {
+  rows.forEach((row, index) => {
     const { entry } = row;
     if (edit?.kind === "rename" && edit.entry.path === entry.path) {
       items.push(nameField(edit, row.level));

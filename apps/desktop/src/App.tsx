@@ -11,6 +11,7 @@ import {
 } from "./commands.ts";
 import { ExportDialog } from "./export/ExportDialog.tsx";
 import { FindBar, type FindMode } from "./find/FindBar.tsx";
+import { FolderTree } from "./folder/file-tree.ts";
 import { useRecent } from "./folder/recent.ts";
 import { Sidebar, type SidebarView } from "./folder/Sidebar.tsx";
 import { type Translate, useT } from "./i18n/index.ts";
@@ -103,7 +104,16 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   const { shortcuts } = useSettings().settings;
   const active = tabs.find((tab) => tab.id === activeId) ?? null;
   const updates = useUpdates(platform);
-  const [folder, setFolder] = useState<string | null>(null);
+  const [tree, setTree] = useState<FolderTree | null>(null);
+  const folder = tree?.root ?? null;
+  const openFolderState = useRef<{ request: number; tree?: FolderTree }>({ request: 0 });
+  useEffect(
+    () => () => {
+      openFolderState.current.request++;
+      openFolderState.current.tree?.dispose();
+    },
+    [],
+  );
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [sidebarView, setSidebarView] = useState<SidebarView>("files");
   // Without a folder the sidebar only has the outline, shown once asked for.
@@ -124,15 +134,26 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
 
   const openFolder = useCallback(
     async (path: string) => {
+      const request = ++openFolderState.current.request;
+      setShellError(null);
       try {
-        await platform.readDirectory(path);
+        const opened = await FolderTree.open(platform, path, (error) => {
+          if (request === openFolderState.current.request)
+            setShellError(t("error.watch", { path, reason: reasonOf(error) }));
+        });
+        if (request !== openFolderState.current.request) {
+          opened.dispose();
+          return;
+        }
+        openFolderState.current.tree?.dispose();
+        openFolderState.current.tree = opened;
+        setTree(opened);
       } catch (e) {
-        setShellError(t("error.openFolder", { path, reason: reasonOf(e) }));
+        if (request === openFolderState.current.request)
+          setShellError(t("error.openFolder", { path, reason: reasonOf(e) }));
         return;
       }
-      setFolder(path);
       setSidebarVisible(true);
-      setShellError(null);
       addRecent("folder", path);
     },
     [platform, t, addRecent],
@@ -309,8 +330,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
         )}
         {folderSearch === null && sidebarShown && (
           <Sidebar
-            platform={platform}
-            root={folder}
+            tree={tree}
             view={sidebarView}
             onViewChange={setSidebarView}
             editor={activeId === null ? null : store.editor(activeId)}

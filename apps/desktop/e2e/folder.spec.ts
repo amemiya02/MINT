@@ -192,6 +192,34 @@ test("a change outside MINT re-reads only the directory it happened in", async (
   expect((await directoriesRead(page)).slice(before + 1)).toEqual(["/notes"]);
 });
 
+test("opens the Folder with one listing and a Sidebar rename leaves sibling listings alone", async ({
+  page,
+}) => {
+  await launch(page, {
+    files: { ...files, "/notes/archive/old.md": "# Old" },
+    openFolderDialogResults: [folder],
+    locale: "en-US",
+  });
+  await page.getByRole("button", { name: "Open Folder…" }).click();
+  await expect(item(page, "journal")).toBeVisible();
+  expect((await directoriesRead(page)).filter((path) => path === folder)).toEqual([folder]);
+
+  await item(page, "journal").click();
+  await item(page, "archive").click();
+  await expect(item(page, "old.md")).toBeVisible();
+  await item(page, "2026.md").click();
+  const before = (await directoriesRead(page)).length;
+  await item(page, "2026.md").press("F2");
+  const name = page.getByRole("textbox", { name: "Name" });
+  await name.fill("year.md");
+  await name.press("Enter");
+  await expect(item(page, "year.md")).toBeVisible();
+  await expect(page).toHaveTitle("year.md — MINT");
+  // Include any read triggered by the watcher's echo of the local rename.
+  await page.waitForTimeout(500);
+  expect(new Set((await directoriesRead(page)).slice(before))).toEqual(new Set(["/notes/journal"]));
+});
+
 test("the sidebar can be hidden and shown again", async ({ page }) => {
   await openFolder(page);
   const tree = page.getByRole("tree", { name: "notes" });
