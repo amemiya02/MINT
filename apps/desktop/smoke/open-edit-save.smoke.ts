@@ -150,3 +150,52 @@ test("a document opened from the command line can be edited and saved", async ()
     Buffer.from("\uFEFF# Smoke\r\n\r\nfirst line  \r\n[second line](#smoke)"),
   );
 });
+
+test("the native statistics view refuses a denied read and allows an explicit grant", async () => {
+  const click = async (label: string) => {
+    const element = await until(label, async () => {
+      const result = await command<Record<string, string>>("POST", `/session/${session}/element`, {
+        using: "xpath",
+        value: `//button[normalize-space(.)='${label}']`,
+      });
+      return result[elementKey] ?? null;
+    }).catch(explain);
+    await command("POST", `/session/${session}/element/${element}/click`, {});
+  };
+  const shows = (text: string) =>
+    until(text, () =>
+      command<boolean>("POST", `/session/${session}/execute/sync`, {
+        script:
+          "return document.querySelector('dialog[open]')?.innerText.includes(arguments[0]) === true",
+        args: [text],
+      }).then((found) => (found ? true : null)),
+    ).catch(explain);
+
+  await keyActions(chord(keys.control, "n"));
+  await until("the new document to receive focus", async () => {
+    const ready = await command<boolean>("POST", `/session/${session}/execute/sync`, {
+      script:
+        "return document.activeElement?.matches('.cm-content') && document.activeElement.textContent === ''",
+      args: [],
+    });
+    return ready ? true : null;
+  }).catch(explain);
+  await keyActions(typing("a native draft"));
+  await keyActions(chord(keys.control, ","));
+  await click("Install");
+  await shows("Read the current document");
+  await click("Deny access");
+  await click("Close");
+  await click("Writing statistics");
+  await shows("Permission to read the current document was denied.");
+  await click("Close");
+  await keyActions(chord(keys.control, ","));
+  await click("Allow access");
+  await click("Close");
+  await click("Writing statistics");
+  await shows("Words: 3");
+  await click("Close");
+  await keyActions(chord(keys.control, ","));
+  await click("Uninstall");
+  await click("Close");
+});
