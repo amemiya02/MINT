@@ -227,6 +227,8 @@ export const en = {
   "status.characters.other": "{count} characters",
   "status.readingTime": "{minutes} min read",
 
+  "error.missingHeading": "Heading not found: {fragment}",
+  "error.ambiguousHeading": "Multiple headings match: {fragment}",
   "error.open": "Could not open {path}: {reason}",
   "error.save": "Could not save {path}: {reason}",
   "error.openFolder": "Could not open the folder {path}: {reason}",

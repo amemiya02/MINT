@@ -10,10 +10,10 @@ export type LinkTarget =
   | { readonly kind: "external"; readonly url: string }
   /**
    * A local Markdown document, as written in the link (percent-decoded, without
-   * `#fragment` or `?query`). Relative paths are relative to the current
-   * document; resolving them is the host's job.
+   * query or fragment in the path). An empty path refers to the current
+   * document. The host resolves relative paths and the decoded heading fragment.
    */
-  | { readonly kind: "document"; readonly path: string };
+  | { readonly kind: "document"; readonly path: string; readonly fragment?: string };
 
 /** The link target at `pos`, if `pos` is inside a link MINT can open. */
 export function linkAt(state: EditorState, pos: number): LinkTarget | null {
@@ -89,13 +89,17 @@ export function classify(rawHref: string): LinkTarget | null {
   // A scheme has at least two characters, so `C:\notes\a.md` is a path.
   if (/^[a-z][a-z0-9+.-]+:/i.test(href)) return { kind: "external", url: href };
   const path = decode(href.replace(/[?#].*$/s, ""));
-  if (/\.(md|markdown)$/i.test(path)) return { kind: "document", path };
+  const hash = href.indexOf("#");
+  const fragment = hash < 0 ? "" : decode(href.slice(hash + 1));
+  if (/\.(md|markdown)$/i.test(path) || (href.startsWith("#") && fragment)) {
+    return fragment ? { kind: "document", path, fragment } : { kind: "document", path };
+  }
   return null;
 }
 
 function decode(path: string): string {
   try {
-    return decodeURI(path);
+    return decodeURIComponent(path);
   } catch {
     return path;
   }

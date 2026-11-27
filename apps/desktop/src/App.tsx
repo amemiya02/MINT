@@ -418,6 +418,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
 }
 
 function errorMessage(t: Translate, error: TabError): string {
+  if ("fragment" in error) return t(`error.${error.kind}`, { fragment: error.fragment });
   const params = { path: error.path, reason: error.reason };
   return t(`error.${error.kind}`, params);
 }

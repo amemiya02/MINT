@@ -5,6 +5,7 @@ import { toString as textOf } from "mdast-util-to-string";
 import { markdownLineEnding, markdownSpace } from "micromark-util-character";
 import type { Code, Extension, State, TokenizeContext, Tokenizer } from "micromark-util-types";
 import type { Plugin } from "unified";
+import { headingAnchors } from "../heading-anchor.ts";
 
 /**
  * `[TOC]` (extended syntax): a line holding only `[TOC]` (after up to three
@@ -82,28 +83,6 @@ export const tocFromMarkdown: FromMarkdownExtension = {
   },
 };
 
-/**
- * GitHub-style heading anchors: lower case, punctuation dropped, spaces as
- * `-`; repeated anchors get `-1`, `-2`… appended.
- */
-function slugger() {
-  const occurrences = new Map<string, number>();
-  return (text: string) => {
-    const base = text
-      .toLowerCase()
-      .replace(/[^\p{L}\p{M}\p{N}\p{Pc} -]/gu, "")
-      .replace(/ /g, "-");
-    let slug = base;
-    while (occurrences.has(slug)) {
-      const n = (occurrences.get(base) ?? 0) + 1;
-      occurrences.set(base, n);
-      slug = `${base}-${n}`;
-    }
-    occurrences.set(slug, 0);
-    return slug;
-  };
-}
-
 const element = (tagName: string, children: ElementContent[], properties = {}): Element => ({
   type: "element",
   tagName,
@@ -154,10 +133,10 @@ const renderToc: Plugin<[], Root> = () => (tree) => {
   walk(tree);
   if (tocs.length === 0) return;
 
-  const slug = slugger();
+  const slug = headingAnchors();
   const entries = headings.map((heading) => {
     const text = textOf(heading).replace(/\s+/g, " ").trim();
-    const id = slug(text);
+    const { id } = slug(text);
     heading.data = {
       ...heading.data,
       hProperties: { ...heading.data?.hProperties, id },

@@ -1,4 +1,5 @@
 import type { MintEditor } from "@mint/editor";
+import { matchingHeadings } from "@mint/markdown";
 import { isWithin, rebasePath } from "../paths.ts";
 import type { Platform } from "../platform/platform.ts";
 
@@ -36,6 +37,8 @@ export interface LineRange {
   readonly to: number;
 }
 
+type DocumentLocation = LineRange | { readonly fragment: string };
+
 export interface TabsState {
   readonly tabs: readonly Tab[];
   readonly activeId: number | null;
@@ -43,6 +46,7 @@ export interface TabsState {
 }
 
 export type TabError =
+  | { readonly kind: "missingHeading" | "ambiguousHeading"; readonly fragment: string }
   | { readonly kind: "open"; readonly path: string; readonly reason: string }
   | { readonly kind: "save"; readonly path: string; readonly reason: string }
   /** The document cannot be watched: changes other programs make to it go unnoticed. */
@@ -72,8 +76,10 @@ export interface TabStore {
   getState(): TabsState;
   subscribe(listener: () => void): () => void;
 
-  /** With `select`, the range is selected and scrolled into view once the document shows. */
-  openDocument(path: string, select?: LineRange): Promise<void>;
+  /** Once the document shows, select a line range or move to a linked heading. */
+  openDocument(path: string, select?: DocumentLocation): Promise<void>;
+  /** Follow an anchor in the currently open tab, including an untitled document. */
+  revealHeading(id: number, fragment: string): void;
   /** Open a tab with a new, empty, untitled document. Returns the tab's id. */
   newDocument(): number;
   /**
@@ -139,7 +145,7 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
   /** Paths being read, so a double open does not create two tabs. */
   const opening = new Map<string, Promise<void>>();
   /** Ranges to select in tabs whose editor has not mounted yet. */
-  const pendingSelections = new Map<number, LineRange>();
+  const pendingSelections = new Map<number, DocumentLocation>();
   let nextId = 1;
   /** Numbers untitled documents of this window (Untitled, Untitled 2, …). */
   let nextUntitled = 1;
@@ -159,6 +165,43 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
     const index = tabs.findIndex((t) => t.id === activeId);
     const target = tabs[(index + offset + tabs.length) % tabs.length];
     if (target) set({ activeId: target.id });
+  }
+
+  /** Wait for React to show the destination panel before scrolling it. */
+  function reveal(id: number, editor: MintEditor, range: DocumentLocation) {
+    setTimeout(() => {
+      if (state.activeId !== id || editors.get(id) !== editor) return;
+      if ("fragment" in range) {
+        const matches = matchingHeadings(editor.getOutline(), range.fragment);
+        const heading = matches[0];
+        if (!heading || matches.length > 1) {
+          set({
+            error: {
+              kind: heading ? "ambiguousHeading" : "missingHeading",
+              fragment: range.fragment,
+            },
+          });
+          return;
+        }
+        editor.setSelection({ anchor: heading.from, scrollIntoView: "start" });
+        editor.focus();
+        return;
+      }
+      const text = editor.getText();
+      let start = 0;
+      for (let line = 1; line < range.line; line++) {
+        const next = text.indexOf("\n", start);
+        if (next < 0) break;
+        start = next + 1;
+      }
+      const clamp = (offset: number) => Math.min(start + offset, text.length);
+      editor.setSelection({
+        anchor: clamp(range.from),
+        head: clamp(range.to),
+        scrollIntoView: true,
+      });
+      editor.focus();
+    });
   }
 
   async function read(path: string) {
@@ -328,7 +371,7 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
     async openDocument(path, select) {
       const existing = state.tabs.find((t) => t.path === path);
       if (existing) {
-        set({ activeId: existing.id });
+        set({ activeId: existing.id, error: null });
       } else {
         let pending = opening.get(path);
         if (!pending) {
@@ -340,8 +383,16 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
       const tab = state.tabs.find((t) => t.path === path);
       if (!select || !tab) return;
       const editor = editors.get(tab.id);
-      if (editor) reveal(editor, select);
+      if (editor) reveal(tab.id, editor, select);
       else pendingSelections.set(tab.id, select);
+    },
+
+    revealHeading(id, fragment) {
+      const editor = editors.get(id);
+      if (editor) {
+        set({ error: null });
+        reveal(id, editor, { fragment });
+      }
     },
 
     newDocument() {
@@ -483,7 +534,7 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
       editors.set(id, editor);
       const select = pendingSelections.get(id);
       pendingSelections.delete(id);
-      if (select) reveal(editor, select);
+      if (select) reveal(id, editor, select);
     },
 
     markChanged(id) {
@@ -493,22 +544,6 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
     },
   };
   return store;
-}
-
-/** Select `range` and bring it into view, after the tab's panel has been shown. */
-function reveal(editor: MintEditor, range: LineRange) {
-  setTimeout(() => {
-    const text = editor.getText();
-    let start = 0;
-    for (let line = 1; line < range.line; line++) {
-      const next = text.indexOf("\n", start);
-      if (next < 0) break;
-      start = next + 1;
-    }
-    const clamp = (offset: number) => Math.min(start + offset, text.length);
-    editor.setSelection({ anchor: clamp(range.from), head: clamp(range.to), scrollIntoView: true });
-    editor.focus();
-  });
 }
 
 function reasonOf(error: unknown): string {

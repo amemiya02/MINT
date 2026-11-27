@@ -17,7 +17,13 @@ const driver = process.env.TAURI_DRIVER_URL ?? "http://127.0.0.1:4444";
 const application = process.env.MINT_APP;
 
 /** WebDriver's key codes (https://w3c.github.io/webdriver/#keyboard-actions). */
-const keys = { control: "\uE009", end: "\uE010", enter: "\uE007" } as const;
+const keys = {
+  control: "\uE009",
+  end: "\uE010",
+  home: "\uE011",
+  shift: "\uE008",
+  enter: "\uE007",
+} as const;
 /** The element reference key of the WebDriver protocol. */
 const elementKey = "element-6066-11e4-a52e-4f735466cecf";
 
@@ -84,7 +90,7 @@ before(async () => {
   assert.ok(application, "set MINT_APP to the built MINT binary");
   dir = await mkdtemp(join(tmpdir(), "mint-smoke-"));
   document = join(dir, "smoke.md");
-  await writeFile(document, "# Smoke\n\nfirst line");
+  await writeFile(document, "\uFEFF# Smoke\r\n\r\nfirst line  ");
   const created = await command<{ sessionId: string }>("POST", "/session", {
     capabilities: {
       alwaysMatch: { "tauri:options": { application, args: [document] } },
@@ -127,5 +133,20 @@ test("a document opened from the command line can be edited and saved", async ()
     const text = await readFile(document, "utf8");
     return text.includes("second line") ? text : null;
   }).catch(explain);
-  assert.equal(saved, "# Smoke\n\nfirst line\nsecond line");
+  assert.equal(saved, "\uFEFF# Smoke\r\n\r\nfirst line  \r\nsecond line");
+
+  await keyActions([
+    ...chord(keys.shift, keys.home),
+    ...chord(keys.control, "k"),
+    ...typing("#smoke"),
+    ...chord(keys.control, "s"),
+  ]);
+  const linked = await until("the standard Markdown link on disk", async () => {
+    const bytes = await readFile(document);
+    return bytes.includes(Buffer.from("[second line](#smoke)")) ? bytes : null;
+  }).catch(explain);
+  assert.deepEqual(
+    linked,
+    Buffer.from("\uFEFF# Smoke\r\n\r\nfirst line  \r\n[second line](#smoke)"),
+  );
 });
