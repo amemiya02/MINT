@@ -17,6 +17,7 @@ import { Sidebar, type SidebarView } from "./folder/Sidebar.tsx";
 import { type Translate, useT } from "./i18n/index.ts";
 import { documentExtensions } from "./paths.ts";
 import type { Platform } from "./platform/platform.ts";
+import { PluginEntries } from "./plugins/Plugins.tsx";
 import { QuickOpen } from "./quick-open/QuickOpen.tsx";
 import { createRecovery, type Recovery } from "./recovery/recovery.ts";
 import { FolderSearch } from "./search/FolderSearch.tsx";
@@ -379,6 +380,11 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
           {active && <StatusBar tab={active} name={name ?? ""} mode={mode} wordCount={wordCount} />}
         </div>
       </div>
+      <PluginEntries
+        readDocument={() =>
+          activeId === null ? null : (store.editor(activeId)?.getWordCount() ?? null)
+        }
+      />
       {paletteVisible && (
         <CommandPalette onRun={(id) => run.current(id)} onClose={() => setPaletteVisible(false)} />
       )}

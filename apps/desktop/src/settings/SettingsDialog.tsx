@@ -1,5 +1,6 @@
 import { useEffect, useId, useState } from "react";
 import { useT } from "../i18n/index.ts";
+import { PluginSettings } from "../plugins/Plugins.tsx";
 import { findBuiltinTheme } from "../theme/catalog.ts";
 import { ThemeOptions } from "../theme/ThemeOptions.tsx";
 import { useTheme } from "../theme/useTheme.ts";
@@ -47,6 +48,7 @@ export function SettingsDialog({ onClose, onOpenFile, onRecordingShortcut }: Set
         </button>
       </div>
       <div className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto px-5 py-4">
+        <PluginSettings />
         {(Object.keys(settingsSchema) as SettingKey[]).map((key) =>
           settingsSchema[key].kind === "shortcuts" ? (
             <ShortcutsSettings key={key} onRecording={onRecordingShortcut} />
