@@ -31,6 +31,10 @@ export const en = {
   "command.view.toggleTypewriterMode": "Toggle Typewriter Mode",
 
   "command.tab.close": "Close Tab",
+  "command.view.openInOtherPane": "Open in other pane",
+  "command.view.focusOtherPane": "Focus other pane",
+  "command.view.closeReferencePane": "Close reference pane",
+  "tabs.otherPane": "Open {name} in other pane",
   "command.tab.next": "Show Next Tab",
   "command.tab.previous": "Show Previous Tab",
   "command.window.new": "New Window",

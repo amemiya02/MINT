@@ -157,3 +157,91 @@ test("a new window has its own independent tabs", async ({ page }) => {
   await expect(page.getByRole("tab", { name: "a.md" })).toHaveAttribute("aria-selected", "true");
   await expect(page).toHaveTitle("a.md — MINT");
 });
+
+test("compare a reference tab beside a draft and return to its unsaved edit", async ({ page }) => {
+  await launch(page, {
+    files,
+    openDialogResults: ["/notes/a.md", "/notes/b.md", "/notes/a.md"],
+    locale: "en-US",
+  });
+  await page.keyboard.press("ControlOrMeta+O");
+  const draft = page.getByRole("tabpanel", { name: "a.md" }).getByRole("textbox");
+  await expect(draft).toBeFocused();
+  await page.keyboard.type("draft ");
+  await page.keyboard.press("ControlOrMeta+O");
+  const reference = page.getByRole("tabpanel", { name: "b.md" }).getByRole("textbox");
+  await expect(reference).toBeFocused();
+  await page.getByRole("button", { name: "Open b.md in other pane" }).click();
+  await expect(draft).toBeVisible();
+  await expect(reference).toBeFocused();
+  await expect(page.getByRole("tablist")).toHaveCount(2);
+  await page.keyboard.type("reference ");
+  await page.keyboard.press("ControlOrMeta+S");
+  await expect.poll(() => readFile(page, "/notes/b.md")).toBe("reference # Beta\n");
+  expect(await readFile(page, "/notes/a.md")).toBe("# Alpha\n");
+  await page.keyboard.press("ControlOrMeta+O");
+  await expect(draft).toBeFocused();
+  await expect(page.getByRole("tab")).toHaveCount(2);
+  await page.getByRole("button", { name: "Close reference pane" }).click();
+  await expect(draft).toBeFocused();
+  await expect(reference).toBeHidden();
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(draft).toContainText("# Alpha");
+  await expect(draft).not.toContainText("draft ");
+});
+
+test("pane commands preserve each selection and reading position and route find and outline", async ({
+  page,
+}) => {
+  const long = Array.from({ length: 250 }, (_, i) => `Paragraph ${i}`).join("\n\n");
+  await launch(page, {
+    files: {
+      ...files,
+      "/notes/a.md": `# Alpha\n\n${long}\n\nAlpha tail`,
+      "/notes/c.md": "# Gamma",
+    },
+    openDialogResults: ["/notes/a.md", "/notes/b.md", "/notes/c.md"],
+    locale: "en-US",
+  });
+  const command = async (name: string) => {
+    await page.keyboard.press("ControlOrMeta+Shift+P");
+    await page.getByRole("dialog", { name: "Command Palette" }).getByRole("combobox").fill(name);
+    await page.keyboard.press("Enter");
+  };
+  await page.keyboard.press("ControlOrMeta+O");
+  const draftPanel = page.getByRole("tabpanel", { name: "a.md" });
+  const draft = draftPanel.getByRole("textbox");
+  await expect(draft).toBeFocused();
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.press("Shift+Home");
+  await expect(draft.getByText("Alpha tail", { exact: true })).toBeInViewport();
+  await page.keyboard.press("ControlOrMeta+O");
+  const reference = page.getByRole("tabpanel", { name: "b.md" }).getByRole("textbox");
+  await expect(reference).toBeFocused();
+  await command("Open in other pane");
+  await expect(draft).toBeVisible();
+  await command("Outline");
+  const outline = page.getByRole("navigation", { name: "Outline" });
+  await expect(outline.getByRole("link", { name: "Beta" })).toBeVisible();
+  await page.keyboard.press("ControlOrMeta+f");
+  const find = page.getByRole("textbox", { name: "Find", exact: true });
+  await find.fill("Beta");
+  await expect(page.getByRole("search").getByRole("status")).toContainText("1");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("ControlOrMeta+O");
+  await expect(page.getByRole("tablist").nth(1).getByRole("tab", { name: "c.md" })).toBeVisible();
+  await page.keyboard.press("Control+Tab");
+  await expect(reference).toBeFocused();
+  await command("Focus other pane");
+  await expect(draft).toBeFocused();
+  await expect(outline.getByRole("link", { name: "Alpha" })).toBeVisible();
+  await page.keyboard.press("ControlOrMeta+/");
+  await command("Close reference pane");
+  await expect(draft).toBeFocused();
+  await expect(draft.getByText("Alpha tail", { exact: true })).toBeInViewport();
+  await page.keyboard.type("replaced tail");
+  await page.keyboard.press("ControlOrMeta+s");
+  await expect
+    .poll(() => readFile(page, "/notes/a.md"))
+    .toBe(`# Alpha\n\n${long}\n\nreplaced tail`);
+});

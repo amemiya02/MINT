@@ -203,6 +203,24 @@ export const commands = [
     menu: "view",
     group: "layout",
   },
+  {
+    id: "view.openInOtherPane",
+    title: "command.view.openInOtherPane",
+    menu: "view",
+    group: "layout",
+  },
+  {
+    id: "view.focusOtherPane",
+    title: "command.view.focusOtherPane",
+    menu: "view",
+    group: "layout",
+  },
+  {
+    id: "view.closeReferencePane",
+    title: "command.view.closeReferencePane",
+    menu: "view",
+    group: "layout",
+  },
   // Typora's outline shortcut: ⌃⌘1 on macOS, Ctrl+Shift+1 elsewhere.
   {
     id: "view.outline",

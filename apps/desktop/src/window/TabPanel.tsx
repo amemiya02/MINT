@@ -15,6 +15,7 @@ import type { Tab, TabStore } from "../tabs/tab-store.ts";
 export function TabPanel({
   tab,
   active,
+  visible,
   platform,
   onModeChange,
   onEditorChange,
@@ -23,6 +24,7 @@ export function TabPanel({
 }: {
   readonly tab: Tab;
   readonly active: boolean;
+  readonly visible: boolean;
   readonly platform: Platform;
   readonly onModeChange: () => void;
   /** The tab's editor was created or destroyed. */
@@ -76,8 +78,12 @@ export function TabPanel({
       role="tabpanel"
       id={`tabpanel-${id}`}
       aria-labelledby={`tab-${id}`}
-      hidden={!active}
-      className="flex h-full flex-col"
+      hidden={!visible}
+      style={{ gridColumn: tab.pane === "primary" ? 1 : 2, gridRow: 1 }}
+      onFocusCapture={() => {
+        if (!active) store.activate(id);
+      }}
+      className="flex min-w-0 min-h-0 h-full flex-col"
     >
       <ExternalChangeNotice tab={tab} />
       {imageFailure && (
