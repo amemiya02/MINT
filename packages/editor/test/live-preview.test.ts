@@ -158,7 +158,7 @@ describe("opening links", () => {
   it("hands a local Markdown link to the host as a document path", () => {
     const { click, opened } = openWithLinks("[notes](../notes/a%20b.md#top) x\n");
     click("notes");
-    expect(opened).toEqual([{ kind: "document", path: "../notes/a b.md" }]);
+    expect(opened).toEqual([{ kind: "document", path: "../notes/a b.md", fragment: "top" }]);
   });
 
   it("follows reference links, autolinks and bare URLs", () => {

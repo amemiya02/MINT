@@ -222,6 +222,8 @@ export const zhCN: Messages = {
   "status.characters.other": "{count} 字符",
   "status.readingTime": "阅读约 {minutes} 分钟",
 
+  "error.missingHeading": "未找到标题：{fragment}",
+  "error.ambiguousHeading": "多个标题匹配：{fragment}",
   "error.open": "无法打开 {path}：{reason}",
   "error.save": "无法保存 {path}：{reason}",
   "error.openFolder": "无法打开文件夹 {path}：{reason}",

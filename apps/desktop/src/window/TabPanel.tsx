@@ -58,12 +58,18 @@ export function TabPanel({
   );
   const onOpenLink = useCallback(
     (link: LinkTarget) => {
-      if (link.kind === "external") void platform.openExternal(link.url);
-      else if (path !== null) void store.openDocument(resolveFrom(path, link.path));
-      // An untitled document has no folder for relative links to start from.
-      else if (isAbsolutePath(link.path)) void store.openDocument(link.path);
+      if (link.kind === "external") {
+        void platform.openExternal(link.url);
+      } else if (!link.path && link.fragment) {
+        store.revealHeading(id, link.fragment);
+      } else {
+        const target = path ? resolveFrom(path, link.path) : link.path;
+        if (isAbsolutePath(target)) {
+          void store.openDocument(target, link.fragment ? { fragment: link.fragment } : undefined);
+        }
+      }
     },
-    [platform, store, path],
+    [platform, store, path, id],
   );
   return (
     <div

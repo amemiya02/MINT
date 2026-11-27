@@ -128,7 +128,7 @@ describe("HTML blocks in live preview", () => {
     click("doc", mod);
     expect(opened).toEqual([
       { kind: "external", url: "https://example.com/x" },
-      { kind: "document", path: "notes/a b.md" },
+      { kind: "document", path: "notes/a b.md", fragment: "top" },
     ]);
     expect(shown()).toBe("\nend");
     click("ext", {});
