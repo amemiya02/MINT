@@ -1,5 +1,11 @@
 /** English UI strings. This is the reference catalogue: every locale must provide the same keys. */
 export const en = {
+  "plugin.templates": "Writing templates",
+  "plugin.installTemplates": "Install writing templates",
+  "plugin.write": "Modify the current document at the selection",
+  "plugin.writeDenied": "Permission to modify the current document was denied.",
+  "plugin.templateEmpty": "Open a document to insert a template.",
+  "plugin.insertTemplate": "Insert template · {name}",
   "plugin.file": "Install a MINT plugin file",
   "plugin.invalid": "Unsupported plugin package or plugin already installed.",
   "plugin.title": "Plugins",

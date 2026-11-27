@@ -11,9 +11,10 @@ import {
   readStatistics,
   uninstall,
   writingStatistics,
+  writingTemplates,
 } from "./host.ts";
 
-function useInstallations() {
+export function useInstallations() {
   const [items, setItems] = useState(installations);
   useEffect(() => {
     const refresh = () => setItems(installations());
@@ -30,6 +31,7 @@ function useInstallations() {
 
 const button = "rounded border border-(--mint-border) px-2 py-1 text-sm hover:bg-(--mint-hover)";
 function name(m: PluginManifest, t: Translate) {
+  if (m.id === writingTemplates.id) return t("plugin.templates");
   return m.id === writingStatistics.id ? t("plugin.statistics") : m.name;
 }
 
@@ -47,16 +49,21 @@ export function PluginSettings() {
       setFailed(true);
     }
   }
-  const available = installed.some((i) => i.manifest.id === writingStatistics.id)
-    ? []
-    : [writingStatistics];
+  const available = [writingStatistics, writingTemplates].filter(
+    (m) => !installed.some((i) => i.manifest.id === m.id),
+  );
   return (
     <section aria-label={t("plugin.title")} className="flex flex-col gap-2">
       <h3 className="font-medium">{t("plugin.title")}</h3>
       {available.map((m) => (
         <div key={m.id} className="flex items-center justify-between">
           {name(m, t)}{" "}
-          <button type="button" className={button} onClick={() => setPending(m)}>
+          <button
+            type="button"
+            className={button}
+            aria-label={m.id === writingTemplates.id ? t("plugin.installTemplates") : undefined}
+            onClick={() => setPending(m)}
+          >
             {t("plugin.install")}
           </button>
         </div>
@@ -93,7 +100,7 @@ export function PluginSettings() {
       {pending && (
         <div className="rounded border border-(--mint-border) p-2">
           <strong>{name(pending, t)}</strong>
-          <p>{t("plugin.read")}</p>
+          <p>{t("templates" in pending ? "plugin.write" : "plugin.read")}</p>
           <div className="flex gap-2">
             {([true, false] as const).map((grant) => (
               <button
@@ -116,7 +123,7 @@ export function PluginSettings() {
       {installed.map((i) => (
         <div key={i.manifest.id} className="flex flex-col gap-1">
           <span>{name(i.manifest, t)}</span>
-          <small>{t("plugin.read")}</small>
+          <small>{t("templates" in i.manifest ? "plugin.write" : "plugin.read")}</small>
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
@@ -149,7 +156,7 @@ export function PluginSettings() {
 
 export function PluginEntries({ readDocument }: { readDocument: () => WordCount | null }) {
   const t = useT();
-  const items = useInstallations().filter((i) => i.enabled);
+  const items = useInstallations().filter((i) => i.enabled && "statistics" in i.manifest);
   if (items.length === 0) return null;
   return (
     <nav
