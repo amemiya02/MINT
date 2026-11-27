@@ -13,7 +13,7 @@ import { ExportDialog } from "./export/ExportDialog.tsx";
 import { FindBar, type FindMode } from "./find/FindBar.tsx";
 import { FolderTree } from "./folder/file-tree.ts";
 import { useRecent } from "./folder/recent.ts";
-import { Sidebar, type SidebarView } from "./folder/Sidebar.tsx";
+import { NavigationRail, Sidebar, type SidebarView } from "./folder/Sidebar.tsx";
 import { type Translate, useT } from "./i18n/index.ts";
 import { documentExtensions } from "./paths.ts";
 import type { Platform } from "./platform/platform.ts";
@@ -115,10 +115,25 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     },
     [],
   );
-  const [sidebarVisible, setSidebarVisible] = useState(true);
-  const [sidebarView, setSidebarView] = useState<SidebarView>("files");
-  // Without a folder the sidebar only has the outline, shown once asked for.
-  const sidebarShown = sidebarVisible && (folder !== null || sidebarView === "outline");
+  const [sidebarVisible, setSidebarVisible] = useState(false);
+  const [sidebarView, setSidebarView] = useState<SidebarView>("outline");
+  const sidebarTool = folderSearch !== null ? "search" : sidebarVisible ? sidebarView : null;
+
+  function hideSidebar() {
+    setFolderSearch(null);
+    setSidebarVisible(false);
+    if (activeId !== null) store.editor(activeId)?.focus();
+  }
+
+  function toggleTool(tool: SidebarView | "search") {
+    if (tool === sidebarTool) hideSidebar();
+    else if (tool === "search") setFolderSearch(1);
+    else {
+      setFolderSearch(null);
+      setSidebarView(tool);
+      setSidebarVisible(true);
+    }
+  }
   // Editors attach after their tab mounts; re-render so the outline finds the active one.
   const [, editorsChanged] = useReducer((n: number) => n + 1, 0);
   /** Errors from folder actions and other shell commands; document errors live in the tab store. */
@@ -154,10 +169,12 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
           setShellError(t("error.openFolder", { path, reason: reasonOf(e) }));
         return;
       }
+      setSidebarView("files");
+      setFolderSearch(null);
       setSidebarVisible(true);
       addRecent("folder", path);
     },
-    [platform, t, addRecent],
+    [platform, t, addRecent, setFolderSearch],
   );
 
   const pickFolder = useCallback(async () => {
@@ -246,18 +263,10 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     "tab.next": () => store.activateNext(),
     "tab.previous": () => store.activatePrevious(),
     "view.toggleSidebar": () => {
-      if (!sidebarShown && folder === null) setSidebarView("outline");
-      setSidebarVisible(!sidebarShown);
+      if (sidebarTool === null) setSidebarVisible(true);
+      else hideSidebar();
     },
-    "view.outline": () => {
-      setFolderSearch(null);
-      if (sidebarShown && sidebarView === "outline") {
-        setSidebarVisible(false);
-      } else {
-        setSidebarView("outline");
-        setSidebarVisible(true);
-      }
-    },
+    "view.outline": () => toggleTool("outline"),
     "view.toggleFocusMode": () =>
       void settings.set("focusMode", !settings.getSnapshot().settings.focusMode),
     "view.toggleTypewriterMode": () =>
@@ -322,6 +331,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
         </div>
       )}
       <div className="flex min-h-0 flex-1">
+        <NavigationRail active={sidebarTool} onToggle={toggleTool} />
         {folderSearch !== null && (
           <FolderSearch
             platform={platform}
@@ -334,18 +344,18 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
             }}
           />
         )}
-        {folderSearch === null && sidebarShown && (
+        {folderSearch === null && sidebarVisible && (
           <Sidebar
             tree={tree}
             view={sidebarView}
-            onViewChange={setSidebarView}
+            onOpenFolder={() => void pickFolder()}
             editor={activeId === null ? null : store.editor(activeId)}
             activePath={activePath}
             onOpenDocument={(path) => void store.openDocument(path)}
             onRenamed={(from, to) => store.pathRenamed(from, to)}
             onTrashed={(path) => store.pathTrashed(path)}
             onError={setShellError}
-            onHide={() => setSidebarVisible(false)}
+            onHide={hideSidebar}
           />
         )}
         <div className="flex min-w-0 flex-1 flex-col">

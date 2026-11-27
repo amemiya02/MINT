@@ -14,58 +14,86 @@ import { baseName, isDocumentPath, isValidName, joinPath, parentPath } from "../
 import type { DirectoryEntry } from "../platform/platform.ts";
 import type { FolderTree, TreeRow } from "./file-tree.ts";
 
-/** What the sidebar shows: the file tree of the open folder, or the outline of the active document. */
 export type SidebarView = "files" | "outline";
 
+export function NavigationRail({
+  active,
+  onToggle,
+}: {
+  readonly active: SidebarView | "search" | null;
+  readonly onToggle: (tool: SidebarView | "search") => void;
+}) {
+  const t = useT();
+  const tools = [
+    { view: "files", label: t("sidebar.files"), icon: <path d="M1.5 4h5l1.5 2h6.5v7H1.5z" /> },
+    {
+      view: "search",
+      label: t("search.label"),
+      icon: (
+        <>
+          <circle cx="6.5" cy="6.5" r="4.5" />
+          <path d="m10 10 4 4" />
+        </>
+      ),
+    },
+    { view: "outline", label: t("sidebar.outline"), icon: <path d="M2 3h12M5 8h9M5 13h9" /> },
+  ] as const;
+  return (
+    <nav
+      aria-label={t("sidebar.tools")}
+      className="flex w-10 shrink-0 flex-col items-center gap-1 border-r border-(--mint-border) bg-(--mint-sidebar-bg) py-2"
+    >
+      {tools.map(({ view, label, icon }) => (
+        <IconButton
+          key={view}
+          label={label}
+          pressed={active === view}
+          onClick={() => onToggle(view)}
+        >
+          {icon}
+        </IconButton>
+      ))}
+    </nav>
+  );
+}
+
 export interface SidebarProps extends Omit<FileTreeProps, "tree"> {
-  /** The open folder, if any; without one only the outline is offered. */
   readonly tree: FolderTree | null;
   readonly view: SidebarView;
-  readonly onViewChange: (view: SidebarView) => void;
-  /** The editor of the active document, for the outline. */
   readonly editor: MintEditor | null;
+  readonly onOpenFolder: () => void;
   readonly onHide: () => void;
 }
 
-/** The sidebar: the file tree of the open folder or the outline of the active document. */
 export function Sidebar(props: SidebarProps) {
-  const { tree, editor, onViewChange, onHide, ...fileTreeProps } = props;
+  const { tree, editor, view, onOpenFolder, onHide, ...fileTreeProps } = props;
   const t = useT();
-  const view: SidebarView = tree === null ? "outline" : props.view;
-  const views: readonly SidebarView[] = tree === null ? ["outline"] : ["files", "outline"];
   return (
     <aside
       aria-label={t("sidebar.label")}
       className="flex h-full w-60 shrink-0 flex-col border-r border-(--mint-border) bg-(--mint-sidebar-bg)"
     >
       <header className="flex items-center gap-1 border-b border-(--mint-border) px-2 py-1">
-        <div className="flex flex-1 gap-1">
-          {views.map((v) => (
-            <button
-              key={v}
-              type="button"
-              aria-pressed={v === view}
-              onClick={() => onViewChange(v)}
-              className={[
-                "rounded-sm px-2 py-0.5 text-xs font-semibold focus-visible:outline-2 focus-visible:outline-(--mint-accent)",
-                v === view
-                  ? "bg-(--mint-selected) text-(--mint-fg)"
-                  : "text-(--mint-muted) hover:bg-(--mint-hover) hover:text-(--mint-fg)",
-              ].join(" ")}
-            >
-              {t(v === "files" ? "sidebar.files" : "sidebar.outline")}
-            </button>
-          ))}
-        </div>
+        <span className="flex-1 text-xs font-semibold">
+          {t(view === "files" ? "sidebar.files" : "sidebar.outline")}
+        </span>
         <IconButton label={t("sidebar.hide")} onClick={onHide}>
           <rect x="1.5" y="2.5" width="13" height="11" rx="1" />
           <path d="M6 2.5v11M11 6.5 9.5 8l1.5 1.5" />
         </IconButton>
       </header>
-      {view === "files" && tree !== null ? (
+      {view === "outline" ? (
+        <Outline editor={editor} />
+      ) : tree ? (
         <FileTree key={tree.root} tree={tree} {...fileTreeProps} />
       ) : (
-        <Outline editor={editor} />
+        <button
+          type="button"
+          className="m-2 self-start rounded px-2 py-1 text-sm hover:bg-(--mint-hover) focus-visible:outline-2 focus-visible:outline-(--mint-accent)"
+          onClick={onOpenFolder}
+        >
+          {t("welcome.openFolder")}
+        </button>
       )}
     </aside>
   );
@@ -339,6 +367,7 @@ function FileTree(props: FileTreeProps) {
 }
 
 function IconButton(props: {
+  readonly pressed?: boolean;
   readonly label: string;
   readonly onClick: () => void;
   readonly children: ReactNode;
@@ -347,9 +376,10 @@ function IconButton(props: {
     <button
       type="button"
       aria-label={props.label}
+      aria-pressed={props.pressed}
       title={props.label}
       onClick={props.onClick}
-      className="flex h-6 w-6 items-center justify-center rounded-sm text-sm text-(--mint-muted) hover:bg-(--mint-hover) hover:text-(--mint-fg) focus-visible:outline-2 focus-visible:outline-(--mint-accent)"
+      className="flex size-6 [&[aria-pressed]]:size-8 aria-pressed:bg-(--mint-selected) aria-pressed:text-(--mint-fg) items-center justify-center rounded-sm text-sm text-(--mint-muted) hover:bg-(--mint-hover) hover:text-(--mint-fg) focus-visible:outline-2 focus-visible:outline-(--mint-accent)"
     >
       <svg
         aria-hidden="true"

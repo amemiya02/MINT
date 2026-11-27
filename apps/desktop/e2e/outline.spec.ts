@@ -130,10 +130,11 @@ test("with a folder open, the sidebar switches between the file tree and the out
   page,
 }) => {
   await openDocument(page, { folder: true });
+  const rail = page.getByRole("navigation", { name: "Document tools" });
   const sidebar = page.getByRole("complementary", { name: "Sidebar" });
   await expect(sidebar.getByRole("tree")).toBeVisible();
 
-  await sidebar.getByRole("button", { name: "Outline" }).click();
+  await rail.getByRole("button", { name: "Outline" }).click();
   await expect(outline(page)).toBeVisible();
   await expect(sidebar.getByRole("tree")).toBeHidden();
   await expect(outline(page).getByRole("link")).toHaveText([
@@ -143,10 +144,10 @@ test("with a folder open, the sidebar switches between the file tree and the out
     "Details",
   ]);
 
-  await sidebar.getByRole("button", { name: "Files" }).click();
+  await rail.getByRole("button", { name: "Files" }).click();
   await expect(sidebar.getByRole("tree")).toBeVisible();
   await sidebar.getByRole("treeitem", { name: "other.md" }).click();
-  await sidebar.getByRole("button", { name: "Outline" }).click();
+  await rail.getByRole("button", { name: "Outline" }).click();
   // The outline follows the active document.
   await expect(outline(page).getByRole("link")).toHaveText(["Other"]);
 });
@@ -170,4 +171,51 @@ test("Typora's outline shortcut toggles the outline", async ({ page }) => {
   await expect(outline(page)).toBeVisible();
   await page.keyboard.press(shortcut);
   await expect(outline(page)).toBeHidden();
+});
+
+test("the navigation rail keeps the reading position while switching and collapsing tools", async ({
+  page,
+}) => {
+  await openDocument(page);
+  const rail = page.getByRole("navigation", { name: "Document tools" });
+  await expect(rail).toBeVisible();
+  const sidebar = page.getByRole("complementary", { name: "Sidebar" });
+  await expect(sidebar).toBeHidden();
+  await expect(page.getByRole("main").getByRole("textbox")).toHaveCount(1);
+
+  const scroller = page.locator(".cm-scroller");
+  await scroller.evaluate((element) => element.scrollTo(0, 1200));
+  const paragraph = content(page).getByText("Paragraph 22.", { exact: true }).first();
+  await paragraph.scrollIntoViewIfNeeded();
+  const files = rail.getByRole("button", { name: "Files" });
+  await files.click();
+  await expect(sidebar.getByRole("button", { name: "Open Folder…" })).toBeVisible();
+  await rail.getByRole("button", { name: "Search in Folder" }).click();
+  await expect(page.getByRole("search")).toBeVisible();
+  const outlineButton = rail.getByRole("button", { name: "Outline" });
+  await outlineButton.click();
+  await expect(outline(page)).toBeVisible();
+  await outlineButton.press("Enter");
+  await expect(sidebar).toBeHidden();
+  await expect(paragraph).toBeInViewport();
+});
+
+test("the Chinese dark-theme rail supports visible keyboard focus and repeated activation", async ({
+  page,
+}) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await launch(page, { locale: "zh-CN" });
+  const rail = page.getByRole("navigation", { name: "文档工具" });
+  const files = rail.getByRole("button", { name: "文件", exact: true });
+  const search = rail.getByRole("button", { name: "在工作文件夹中搜索" });
+  await files.click();
+  await files.press("Tab");
+  await expect(search).toBeFocused();
+  await expect(search).toHaveCSS("outline-style", "solid");
+  await search.press("Space");
+  await expect(search).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("search")).toBeVisible();
+  await search.press("Space");
+  await expect(search).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByRole("search")).toBeHidden();
 });

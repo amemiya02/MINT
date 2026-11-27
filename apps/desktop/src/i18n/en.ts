@@ -225,6 +225,7 @@ export const en = {
   "quickOpen.noMatches": "No matching documents",
   "quickOpen.empty": "No documents to open",
 
+  "sidebar.tools": "Document tools",
   "sidebar.label": "Sidebar",
   "sidebar.hide": "Hide Sidebar",
   "sidebar.files": "Files",

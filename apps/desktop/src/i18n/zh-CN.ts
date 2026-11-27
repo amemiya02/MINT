@@ -220,6 +220,7 @@ export const zhCN: Messages = {
   "quickOpen.noMatches": "没有匹配的文档",
   "quickOpen.empty": "没有可打开的文档",
 
+  "sidebar.tools": "文档工具",
   "sidebar.label": "侧边栏",
   "sidebar.hide": "隐藏侧边栏",
   "sidebar.files": "文件",
