@@ -12,6 +12,7 @@ import {
   tagBrowser,
   uninstall,
   writingStatistics,
+  writingTemplates,
 } from "./host.ts";
 
 export function useInstallations() {
@@ -31,8 +32,14 @@ export function useInstallations() {
 
 const button = "rounded border border-(--mint-border) px-2 py-1 text-sm hover:bg-(--mint-hover)";
 export function pluginName(m: PluginManifest, t: Translate) {
+  if (m.id === writingTemplates.id) return t("plugin.templates");
   if (m.id === tagBrowser.id) return t("plugin.tags");
   return m.id === writingStatistics.id ? t("plugin.statistics") : m.name;
+}
+
+function permission(manifest: PluginManifest, t: Translate) {
+  if ("templates" in manifest) return t("plugin.write");
+  return t("sidebar" in manifest ? "plugin.folderRead" : "plugin.read");
 }
 
 export function PluginSettings() {
@@ -49,7 +56,7 @@ export function PluginSettings() {
       setFailed(true);
     }
   }
-  const available = [writingStatistics, tagBrowser].filter(
+  const available = [writingStatistics, writingTemplates, tagBrowser].filter(
     (m) => !installed.some((i) => i.manifest.id === m.id),
   );
   return (
@@ -62,7 +69,12 @@ export function PluginSettings() {
           className="flex items-center justify-between"
         >
           {pluginName(m, t)}{" "}
-          <button type="button" className={button} onClick={() => setPending(m)}>
+          <button
+            type="button"
+            className={button}
+            aria-label={m.id === writingTemplates.id ? t("plugin.installTemplates") : undefined}
+            onClick={() => setPending(m)}
+          >
             {t("plugin.install")}
           </button>
         </fieldset>
@@ -99,7 +111,7 @@ export function PluginSettings() {
       {pending && (
         <div className="rounded border border-(--mint-border) p-2">
           <strong>{pluginName(pending, t)}</strong>
-          <p>{t("sidebar" in pending ? "plugin.folderRead" : "plugin.read")}</p>
+          <p>{permission(pending, t)}</p>
           <div className="flex gap-2">
             {([true, false] as const).map((grant) => (
               <button
@@ -126,7 +138,7 @@ export function PluginSettings() {
           className="flex flex-col gap-1"
         >
           <span>{pluginName(i.manifest, t)}</span>
-          <small>{t("sidebar" in i.manifest ? "plugin.folderRead" : "plugin.read")}</small>
+          <small>{permission(i.manifest, t)}</small>
           <div className="flex flex-wrap gap-2">
             <button
               type="button"

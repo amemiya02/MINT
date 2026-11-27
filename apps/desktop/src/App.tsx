@@ -17,6 +17,7 @@ import { NavigationRail, Sidebar, type SidebarTool } from "./folder/Sidebar.tsx"
 import { type Translate, useT } from "./i18n/index.ts";
 import { documentExtensions } from "./paths.ts";
 import type { Platform } from "./platform/platform.ts";
+import { insertTemplate } from "./plugins/host.ts";
 import { PluginEntries, pluginName, useInstallations } from "./plugins/Plugins.tsx";
 import { TagBrowser } from "./plugins/TagBrowser.tsx";
 import { QuickOpen } from "./quick-open/QuickOpen.tsx";
@@ -444,7 +445,24 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
         }
       />
       {paletteVisible && (
-        <CommandPalette onRun={(id) => run.current(id)} onClose={() => setPaletteVisible(false)} />
+        <CommandPalette
+          onRun={(id) => run.current(id)}
+          onTemplate={(id, name) => {
+            const result = insertTemplate(id, name, (text) => {
+              const editor = activeId === null ? null : store.editor(activeId);
+              if (!editor) return false;
+              editor.execute("pastePlainText", text);
+              editor.focus();
+              return true;
+            });
+            setShellError(
+              result === "ok"
+                ? null
+                : t(result === "denied" ? "plugin.writeDenied" : "plugin.templateEmpty"),
+            );
+          }}
+          onClose={() => setPaletteVisible(false)}
+        />
       )}
       {quickOpenVisible && (
         <QuickOpen

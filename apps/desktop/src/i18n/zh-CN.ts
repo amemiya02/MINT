@@ -1,6 +1,12 @@
 import type { Messages } from "./index.ts";
 
 export const zhCN: Messages = {
+  "plugin.templates": "写作模板",
+  "plugin.installTemplates": "安装写作模板",
+  "plugin.write": "在选区修改当前文档",
+  "plugin.writeDenied": "修改当前文档的请求已被拒绝。",
+  "plugin.templateEmpty": "请先打开文档以插入模板。",
+  "plugin.insertTemplate": "插入模板 · {name}",
   "plugin.file": "从文件安装 MINT 插件",
   "plugin.invalid": "插件包不受支持，或插件已安装。",
   "plugin.title": "插件",
