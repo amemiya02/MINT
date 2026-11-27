@@ -151,6 +151,14 @@ test("the native statistics view refuses a denied read and allows an explicit gr
     ).catch(explain);
 
   await keyActions(chord(keys.control, "n"));
+  await until("the new document to receive focus", async () => {
+    const ready = await command<boolean>("POST", `/session/${session}/execute/sync`, {
+      script:
+        "return document.activeElement?.matches('.cm-content') && document.activeElement.textContent === ''",
+      args: [],
+    });
+    return ready ? true : null;
+  }).catch(explain);
   await keyActions(typing("a native draft"));
   await keyActions(chord(keys.control, ","));
   await click("Install");
