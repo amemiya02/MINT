@@ -2,9 +2,12 @@ import type { MintEditor } from "@mint/editor";
 import { isWithin, rebasePath } from "../paths.ts";
 import type { Platform } from "../platform/platform.ts";
 
+export type Pane = "primary" | "reference";
+
 /** One open document in this window. */
 export interface Tab {
   readonly id: number;
+  readonly pane: Pane;
   /** Where the document is saved; `null` for an untitled document that has not been saved yet. */
   readonly path: string | null;
   /** An untitled document's number in this window (Untitled, Untitled 2, …); `null` once it has a path. */
@@ -39,6 +42,7 @@ export interface LineRange {
 export interface TabsState {
   readonly tabs: readonly Tab[];
   readonly activeId: number | null;
+  readonly selected: Readonly<Record<Pane, number | null>>;
   readonly error: TabError | null;
 }
 
@@ -84,6 +88,9 @@ export interface TabStore {
    */
   restoreDocument(path: string | null, text: string): number;
   activate(id: number): void;
+  openInOtherPane(id: number): void;
+  focusOtherPane(): void;
+  closeReferencePane(): void;
   activateNext(): void;
   activatePrevious(): void;
   /** Close a tab, asking first if it has unsaved changes. Resolves to whether it closed. */
@@ -118,7 +125,12 @@ export interface TabStore {
 }
 
 export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOptions): TabStore {
-  let state: TabsState = { tabs: [], activeId: null, error: null };
+  let state: TabsState = {
+    tabs: [],
+    activeId: null,
+    selected: { primary: null, reference: null },
+    error: null,
+  };
   const listeners = new Set<() => void>();
   const editors = new Map<number, MintEditor>();
   /** Bumped on every change, so a save can tell whether edits arrived meanwhile. */
@@ -145,7 +157,21 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
   let nextUntitled = 1;
 
   function set(next: Partial<TabsState>) {
-    state = { ...state, ...next };
+    let tabs = next.tabs ?? state.tabs;
+    if (tabs.length && !tabs.some((tab) => tab.pane === "primary")) {
+      tabs = tabs.map((tab) => ({ ...tab, pane: "primary" }));
+    }
+    const activeId = next.activeId === undefined ? state.activeId : next.activeId;
+    const selected = { ...state.selected };
+    for (const pane of ["primary", "reference"] as const) {
+      const members = tabs.filter((tab) => tab.pane === pane);
+      selected[pane] =
+        members.find((tab) => tab.id === activeId)?.id ??
+        members.find((tab) => tab.id === selected[pane])?.id ??
+        members.at(-1)?.id ??
+        null;
+    }
+    state = { ...state, ...next, tabs, selected };
     for (const listener of listeners) listener();
   }
 
@@ -153,8 +179,13 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
     set({ tabs: state.tabs.map((t) => (t.id === id ? { ...t, ...patch } : t)) });
   }
 
+  function activePane(): Pane {
+    return state.tabs.find((tab) => tab.id === state.activeId)?.pane ?? "primary";
+  }
+
   function step(offset: number) {
-    const { tabs, activeId } = state;
+    const { activeId } = state;
+    const tabs = state.tabs.filter((tab) => tab.pane === activePane());
     if (tabs.length < 2) return;
     const index = tabs.findIndex((t) => t.id === activeId);
     const target = tabs[(index + offset + tabs.length) % tabs.length];
@@ -169,7 +200,15 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
         set({ activeId: existing.id, error: null });
         return;
       }
-      const tab: Tab = { id: nextId++, path, untitled: null, text, dirty: false, external: null };
+      const tab: Tab = {
+        id: nextId++,
+        pane: activePane(),
+        path,
+        untitled: null,
+        text,
+        dirty: false,
+        external: null,
+      };
       versions.set(tab.id, 0);
       cleanVersions.set(tab.id, 0);
       diskTexts.set(tab.id, text);
@@ -347,6 +386,7 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
     newDocument() {
       const tab: Tab = {
         id: nextId++,
+        pane: activePane(),
         path: null,
         untitled: nextUntitled++,
         text: "",
@@ -367,7 +407,15 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
         return existing.id;
       }
       const untitled = path === null ? nextUntitled++ : null;
-      const tab: Tab = { id: nextId++, path, untitled, text, dirty: true, external: null };
+      const tab: Tab = {
+        id: nextId++,
+        pane: activePane(),
+        path,
+        untitled,
+        text,
+        dirty: true,
+        external: null,
+      };
       // Unsaved work: the tab has edits of its own, so a change on disk is a conflict.
       versions.set(tab.id, 0);
       cleanVersions.set(tab.id, -1);
@@ -393,6 +441,29 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
     activate(id) {
       if (state.tabs.some((t) => t.id === id)) set({ activeId: id });
     },
+    openInOtherPane(id) {
+      const tab = state.tabs.find((item) => item.id === id);
+      if (!tab || state.tabs.length < 2) return;
+      const pane = tab.pane === "primary" ? "reference" : "primary";
+      set({
+        tabs: state.tabs.map((item) => (item.id === id ? { ...item, pane } : item)),
+        activeId: id,
+      });
+      editors.get(id)?.focus();
+    },
+    focusOtherPane() {
+      const id = state.selected[activePane() === "primary" ? "reference" : "primary"];
+      if (id !== null) {
+        store.activate(id);
+        editors.get(id)?.focus();
+      }
+    },
+    closeReferencePane() {
+      const id = state.selected.primary;
+      if (id === null || state.selected.reference === null) return;
+      set({ tabs: state.tabs.map((tab) => ({ ...tab, pane: "primary" })), activeId: id });
+      editors.get(id)?.focus();
+    },
     activateNext: () => step(1),
     activatePrevious: () => step(-1),
 
@@ -412,7 +483,12 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
       const index = state.tabs.findIndex((t) => t.id === id);
       const tabs = state.tabs.filter((t) => t.id !== id);
       let { activeId } = state;
-      if (activeId === id) activeId = (tabs[index] ?? tabs[index - 1])?.id ?? null;
+      if (activeId === id) {
+        const neighbours = [...tabs.slice(index), ...tabs.slice(0, index).reverse()];
+        activeId =
+          neighbours.find((item) => item.pane === tab.pane)?.id ??
+          state.selected[tab.pane === "primary" ? "reference" : "primary"];
+      }
       editors.delete(id);
       versions.delete(id);
       cleanVersions.delete(id);

@@ -32,6 +32,10 @@ export const zhCN: Messages = {
   "command.view.toggleTypewriterMode": "切换打字机模式",
 
   "command.tab.close": "关闭标签页",
+  "command.view.openInOtherPane": "在另一栏打开",
+  "command.view.focusOtherPane": "切换到另一栏",
+  "command.view.closeReferencePane": "关闭参考栏",
+  "tabs.otherPane": "在另一栏打开 {name}",
   "command.tab.next": "显示下一个标签页",
   "command.tab.previous": "显示上一个标签页",
   "command.window.new": "新建窗口",

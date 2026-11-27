@@ -84,7 +84,7 @@ interface WindowProps {
 function Window({ platform, store, recovery, onEdited }: WindowProps) {
   const t = useT();
   const settings = useSettingsStore();
-  const { tabs, activeId, error } = useTabsState();
+  const { tabs, activeId, selected, error } = useTabsState();
   const {
     settingsOpen,
     setSettingsOpen,
@@ -237,6 +237,11 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
       if (activeId !== null) void store.close(activeId);
       else void platform.closeWindow();
     },
+    "view.openInOtherPane": () => {
+      if (activeId !== null) store.openInOtherPane(activeId);
+    },
+    "view.focusOtherPane": () => store.focusOtherPane(),
+    "view.closeReferencePane": () => store.closeReferencePane(),
     "tab.next": () => store.activateNext(),
     "tab.previous": () => store.activatePrevious(),
     "view.toggleSidebar": () => {
@@ -343,7 +348,18 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
           />
         )}
         <div className="flex min-w-0 flex-1 flex-col">
-          {tabs.length > 0 && <TabBar />}
+          {tabs.length > 0 && (
+            <div
+              className={
+                selected.reference === null
+                  ? "grid"
+                  : "grid grid-cols-2 divide-x divide-(--mint-border)"
+              }
+            >
+              <TabBar pane="primary" />
+              {selected.reference !== null && <TabBar pane="reference" />}
+            </div>
+          )}
           {find && active && (
             <FindBar
               mode={find.mode}
@@ -353,12 +369,15 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
               onClose={() => setFind(null)}
             />
           )}
-          <main className="min-h-0 flex-1">
+          <main
+            className={`grid min-h-0 flex-1 grid-rows-1 ${selected.reference === null ? "grid-cols-1" : "grid-cols-2"}`}
+          >
             {tabs.map((tab) => (
               <TabPanel
                 key={tab.id}
                 tab={tab}
                 active={tab.id === activeId}
+                visible={selected[tab.pane] === tab.id}
                 platform={platform}
                 onModeChange={modeChanged}
                 onEditorChange={editorsChanged}
