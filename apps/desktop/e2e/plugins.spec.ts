@@ -12,7 +12,10 @@ test("a writer controls access to the active draft and manages the statistics pl
     return page.getByRole("dialog", { name: "Settings" });
   };
   const dialog = await settings();
-  await dialog.getByRole("button", { name: "Install", exact: true }).click();
+  await dialog
+    .getByRole("group", { name: "Writing statistics" })
+    .getByRole("button", { name: "Install", exact: true })
+    .click();
   await expect(dialog.getByText("Read the current document")).toBeVisible();
   await dialog.getByRole("button", { name: "Deny access" }).click();
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
@@ -43,7 +46,11 @@ test("a writer controls access to the active draft and manages the statistics pl
   await page.reload();
   await expect(entry).toHaveCount(0);
   await settings();
-  await expect(dialog.getByRole("button", { name: "Install", exact: true })).toBeVisible();
+  await expect(
+    dialog
+      .getByRole("group", { name: "Writing statistics" })
+      .getByRole("button", { name: "Install", exact: true }),
+  ).toBeVisible();
 });
 
 test("a local MINT plugin contributes the document metrics its author selected", async ({
@@ -86,7 +93,10 @@ test("another window can revoke a live view, and enabling it again leaves it clo
   await page.keyboard.press("ControlOrMeta+n");
   await page.locator(".cm-content").fill("draft");
   await page.keyboard.press("ControlOrMeta+,");
-  await page.getByRole("button", { name: "Install", exact: true }).click();
+  await page
+    .getByRole("group", { name: "Writing statistics" })
+    .getByRole("button", { name: "Install", exact: true })
+    .click();
   await page.getByRole("button", { name: "Allow access" }).click();
   await page.getByRole("button", { name: "Close", exact: true }).click();
   await page.getByRole("button", { name: "Writing statistics" }).click();

@@ -1,15 +1,33 @@
 import type { WordCount } from "@mint/editor";
 
 /** A declarative MINT document view. Packages select host operations and never execute script. */
-export interface PluginManifest {
+interface BaseManifest {
   apiVersion: 1;
   id: string;
   name: string;
+}
+
+export interface StatisticsManifest extends BaseManifest {
   permissions: ["document.read"];
   statistics: (keyof WordCount)[];
 }
 
-export const writingStatistics: PluginManifest = {
+export interface SidebarManifest extends BaseManifest {
+  permissions: ["folder.read"];
+  sidebar: "tags";
+}
+
+export type PluginManifest = StatisticsManifest | SidebarManifest;
+
+export const tagBrowser: SidebarManifest = {
+  apiVersion: 1,
+  id: "mint.tag-browser",
+  name: "Tag browser",
+  permissions: ["folder.read"],
+  sidebar: "tags",
+};
+
+export const writingStatistics: StatisticsManifest = {
   apiVersion: 1,
   id: "mint.writing-statistics",
   name: "Writing statistics",
@@ -28,16 +46,21 @@ const metrics = new Set(["words", "characters", "readingMinutes"]);
 
 export function isManifest(value: unknown): value is PluginManifest {
   if (!value || typeof value !== "object") return false;
-  const m = value as Partial<PluginManifest>;
+  const m = value as Record<string, unknown>;
+  if (
+    m.apiVersion !== 1 ||
+    typeof m.id !== "string" ||
+    !/^[a-z0-9][a-z0-9.-]{0,79}$/.test(m.id) ||
+    typeof m.name !== "string" ||
+    !m.name.trim() ||
+    m.name.length > 120 ||
+    !Array.isArray(m.permissions) ||
+    m.permissions.length !== 1
+  )
+    return false;
+  if ("sidebar" in m)
+    return m.sidebar === "tags" && m.permissions[0] === "folder.read" && !("statistics" in m);
   return (
-    m.apiVersion === 1 &&
-    typeof m.id === "string" &&
-    /^[a-z0-9][a-z0-9.-]{0,79}$/.test(m.id) &&
-    typeof m.name === "string" &&
-    m.name.trim().length > 0 &&
-    m.name.length <= 120 &&
-    Array.isArray(m.permissions) &&
-    m.permissions.length === 1 &&
     m.permissions[0] === "document.read" &&
     Array.isArray(m.statistics) &&
     m.statistics.length > 0 &&
@@ -94,11 +117,17 @@ export function uninstall(id: string) {
 
 export function readStatistics(id: string, readDocument: () => WordCount | null) {
   const item = installed(id);
-  if (!item?.enabled || !item.granted) return { status: "denied" } as const;
+  if (!item?.enabled || !item.granted || !("statistics" in item.manifest))
+    return { status: "denied" } as const;
   const counts = readDocument();
   if (!counts) return { status: "empty" } as const;
   return {
     status: "ok",
     rows: item.manifest.statistics.map((metric) => ({ metric, value: counts[metric] })),
   } as const;
+}
+
+export function canReadFolder(id: string): boolean {
+  const item = installed(id);
+  return Boolean(item?.enabled && item.granted && "sidebar" in item.manifest);
 }
