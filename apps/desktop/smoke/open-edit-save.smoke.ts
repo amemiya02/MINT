@@ -518,9 +518,10 @@ async function clickPath(xpath: string) {
     );
     // XPath also matches hidden panes and content behind a modal. WebKitWebDriver
     // can find a control in a scroll area before its center can receive a click.
+    // WebKitGTK 2.50 resolves element references only at the top level of args.
     return command<Record<string, string> | null>("POST", `/session/${session}/execute/sync`, {
       script: `const modalOpen = document.querySelector('dialog:modal') !== null;
-        for (const element of arguments[0]) {
+        for (const element of arguments) {
           if ((modalOpen && !element.closest('dialog:modal')) || element.matches(':disabled') ||
               element.closest('[hidden], [inert]') || !element.getClientRects().length) continue;
           element.scrollIntoView({ block: 'center', inline: 'nearest' });
@@ -533,7 +534,7 @@ async function clickPath(xpath: string) {
           if (element.contains(hit)) return element;
         }
         return null;`,
-      args: [matches],
+      args: matches,
     });
   }).catch(explain);
   await command("POST", `/session/${session}/element/${element[elementKey]}/click`, {}).catch(
