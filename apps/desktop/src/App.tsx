@@ -1,7 +1,16 @@
 import type { AnnotationTarget, WordCount } from "@mint/editor";
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 import { DraftComposer } from "./ai/DraftComposer.tsx";
 import { ExternalAgentDialog } from "./ai/ExternalAgentPanel.tsx";
+import { inlineCompletionSender } from "./ai/inline-completion.ts";
 import { AnnotationDialog, AnnotationPanel } from "./annotations/Annotations.tsx";
 import { createAnnotationStorage } from "./annotations/annotation-storage.ts";
 import { createAutosave } from "./autosave/autosave.ts";
@@ -128,7 +137,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     folderSearch,
     setFolderSearch,
   } = useOverlays();
-  const { shortcuts, wikilinkFolders } = useSettings().settings;
+  const { shortcuts, wikilinkFolders, inlineCompletionModel } = useSettings().settings;
   const active = tabs.find((tab) => tab.id === activeId) ?? null;
   const [draftTabs, setDraftTabs] = useState<ReadonlySet<number>>(() => new Set());
   const [writingRequest, setWritingRequest] = useState<{ tabId: number; sequence: number } | null>(
@@ -224,6 +233,18 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   }
   // Editors attach after their tab mounts; re-render so the outline finds the active one.
   const [, editorsChanged] = useReducer((n: number) => n + 1, 0);
+  const activeEditor = activeId === null ? null : store.editor(activeId);
+  useLayoutEffect(() => {
+    if (!activeEditor || !inlineCompletionModel) return;
+    const send = inlineCompletionSender(platform.sendModelMessage, inlineCompletionModel);
+    activeEditor.setInlineCompletion((context) =>
+      store.getState().activeId === activeId &&
+      settings.getSnapshot().settings.inlineCompletionModel === inlineCompletionModel
+        ? send(context)
+        : Promise.resolve(null),
+    );
+    return () => activeEditor.setInlineCompletion(null);
+  }, [activeEditor, activeId, inlineCompletionModel, platform, settings, store]);
   /** Errors from folder actions and other shell commands; document errors live in the tab store. */
   const [shellError, setShellError] = useState<string | null>(null);
   const dialect = useDialect();

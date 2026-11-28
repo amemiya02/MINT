@@ -28,6 +28,7 @@ const keys = {
   home: "\uE011",
   shift: "\uE008",
   enter: "\uE007",
+  tab: "\uE004",
 } as const;
 /** The element reference key of the WebDriver protocol. */
 const elementKey = "element-6066-11e4-a52e-4f735466cecf";
@@ -1224,6 +1225,119 @@ test("a model receives only the sample or the chosen selection through the nativ
       "one undo to restore the original bytes",
       async () => (await readFile(draft, "utf8")) === manuscript || null,
     ).catch(explain);
+  } finally {
+    endpoint.closeAllConnections();
+    await new Promise<void>((resolve) => endpoint.close(() => resolve()));
+  }
+});
+
+test("inline completion sends the live manuscript excerpt through the native model connection", async () => {
+  const draft = join(dir, "inline-completion.md");
+  const initial = "\uFEFF# Route\r\n\r\nThe";
+  const continuation = " leads to the ridge.";
+  const name = "Completion fixture";
+  await writeFile(draft, initial);
+  const requests: {
+    method?: string;
+    path?: string;
+    authorization?: string;
+    body: { model: string; stream: boolean; messages: { role: string; content: string }[] };
+  }[] = [];
+  const endpoint = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(chunk);
+    requests.push({
+      method: request.method,
+      path: request.url,
+      authorization: request.headers.authorization,
+      body: JSON.parse(Buffer.concat(chunks).toString("utf8")),
+    });
+    response.writeHead(200, { "Content-Type": "application/json" }).end(
+      JSON.stringify({
+        choices: [{ message: { content: continuation }, finish_reason: "stop" }],
+      }),
+    );
+  });
+  await new Promise<void>((resolve, reject) => {
+    endpoint.once("error", reject);
+    endpoint.listen(0, "127.0.0.1", resolve);
+  });
+
+  const chooseCompletionModel = (label: string) =>
+    until(`the Inline completion setting to have an option for ${label}`, () =>
+      command<boolean>("POST", `/session/${session}/execute/sync`, {
+        script: `const select = [...document.querySelectorAll('dialog[open] label')]
+          .find(label => label.textContent.trim() === 'Inline completion')?.control;
+          const option = select && [...select.options].find(item => item.text === arguments[0]);
+          if (!option) return false;
+          select.value = option.value;
+          select.dispatchEvent(new Event('change', { bubbles: true }));
+          return true;`,
+        args: [label],
+      }).then((chosen) => chosen || null),
+    ).catch(explain);
+
+  try {
+    const address = endpoint.address();
+    assert.ok(address && typeof address !== "string");
+    await restart([draft]);
+    await openSettings();
+    await click("Model connections");
+    for (const [label, value] of [
+      ["API address", `http://127.0.0.1:${address.port}/v1`],
+      ["Model name", "completion-fixture"],
+      ["API key", "mint-smoke-completion-fixture"],
+      ["Connection name", name],
+    ] as const) {
+      await clickPath(`//dialog[@open]//label[normalize-space(.)='${label}']/input`);
+      await keyActions(typing(value));
+    }
+    await clickPath("//button[not(@disabled) and normalize-space(.)='Use for this launch']");
+    await chooseCompletionModel(name);
+    await click("Close");
+    await clickPath("//main//div[@role='textbox']");
+    await keyActions([...chord(keys.control, keys.end), ...typing(" trail")]);
+    await until("the inline suggestion at the focused editor", () =>
+      command<string>("POST", `/session/${session}/execute/sync`, {
+        script:
+          "return document.activeElement.querySelector('.cm-mint-inline-completion')?.textContent",
+        args: [],
+      }).then((text) => (text === continuation ? text : null)),
+    ).catch(explain);
+    assert.equal(requests.length, 1);
+    const [sent] = requests;
+    assert.ok(sent);
+    assert.equal(sent.method, "POST");
+    assert.equal(sent.path, "/v1/chat/completions");
+    assert.equal(sent.authorization, "Bearer mint-smoke-completion-fixture");
+    assert.equal(sent.body.model, "completion-fixture");
+    assert.equal(sent.body.stream, false);
+    assert.deepEqual(
+      sent.body.messages.filter(({ role }) => role === "user"),
+      [{ role: "user", content: JSON.stringify({ before: "# Route\n\nThe trail", after: "" }) }],
+    );
+    assert.ok(!(await readFile(draft, "utf8")).includes(continuation));
+
+    await keyActions(typing(keys.tab));
+    await nativeShortcut("ctrl+s");
+    await until(
+      "Tab to save the continuation with the original line endings",
+      async () => (await readFile(draft, "utf8")) === `${initial} trail${continuation}` || null,
+    ).catch(explain);
+
+    await openSettings();
+    await chooseCompletionModel("Off");
+    await click("Close");
+    await clickPath("//main//div[@role='textbox']");
+    await keyActions([...chord(keys.control, keys.end), ...typing(" Today.")]);
+    await nativeShortcut("ctrl+s");
+    await until(
+      "writing after switching inline completion off",
+      async () =>
+        (await readFile(draft, "utf8")) === `${initial} trail${continuation} Today.` || null,
+    ).catch(explain);
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    assert.equal(requests.length, 1, "switching inline completion off stops subsequent requests");
   } finally {
     endpoint.closeAllConnections();
     await new Promise<void>((resolve) => endpoint.close(() => resolve()));

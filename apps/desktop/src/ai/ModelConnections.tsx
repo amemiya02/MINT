@@ -18,17 +18,7 @@ const fieldClass =
 const buttonClass =
   "rounded-md border border-(--mint-border) px-3 py-1 hover:bg-(--mint-hover) focus-visible:outline-2 focus-visible:outline-(--mint-accent) disabled:opacity-50";
 
-export function ModelConnections({ platform }: { readonly platform: Platform }) {
-  const t = useT();
-  return (
-    <ConnectionSection title={t("models.title")}>
-      <ConnectionList platform={platform} />
-    </ConnectionSection>
-  );
-}
-
-function ConnectionList({ platform }: { readonly platform: Platform }) {
-  const t = useT();
+export function useModelConnections(platform: Platform) {
   const [connections, setConnections] = useState<readonly SavedModelConnection[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   useEffect(() => {
@@ -48,19 +38,33 @@ function ConnectionList({ platform }: { readonly platform: Platform }) {
       active = false;
     };
   }, [platform]);
-  if (!connections) return null;
+  return {
+    connections,
+    loadFailed,
+    add: (saved: SavedModelConnection) =>
+      setConnections((previous) => [...(previous ?? []), saved]),
+    remove: (id: string) =>
+      setConnections((previous) => previous?.filter((item) => item.id !== id) ?? []),
+  };
+}
+
+export function ModelConnections({
+  platform,
+  models: { connections, loadFailed, add, remove },
+}: {
+  readonly platform: Platform;
+  readonly models: ReturnType<typeof useModelConnections>;
+}) {
+  const t = useT();
   return (
-    <>
+    <ConnectionSection title={t("models.title")}>
       {loadFailed && (
         <p role="alert" className="px-3">
           {t("models.error.connections")}
         </p>
       )}
-      <ModelTrial
-        platform={platform}
-        onSaved={(saved) => setConnections((previous) => [...(previous ?? []), saved])}
-      />
-      {connections.map((connection) => (
+      {connections && <ModelTrial platform={platform} onSaved={add} />}
+      {connections?.map((connection) => (
         <section
           key={connection.id}
           aria-label={connection.name}
@@ -77,13 +81,11 @@ function ConnectionList({ platform }: { readonly platform: Platform }) {
           <ModelTrial
             platform={platform}
             connection={connection}
-            onDisconnected={() =>
-              setConnections((previous) => previous?.filter(({ id }) => id !== connection.id) ?? [])
-            }
+            onDisconnected={() => remove(connection.id)}
           />
         </section>
       ))}
-    </>
+    </ConnectionSection>
   );
 }
 
