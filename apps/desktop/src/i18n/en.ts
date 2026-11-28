@@ -18,6 +18,9 @@ export const en = {
   "plugin.timingWidth":
     "Invalid timing diagram on line {line}. Each signal needs the same number of samples.",
   "plugin.timingEmpty": "Invalid timing diagram. Add a signal, e.g. CLK: 0101.",
+  "export.plugin.saveTitle": "Export as {format}",
+  "export.plugin.unavailable": "Format unavailable",
+  "plugin.epub": "EPUB export",
   "plugin.timing": "Digital timing diagrams",
   "plugin.tags": "Tag browser",
   "plugin.folderRead": "Read Markdown documents in the current folder",

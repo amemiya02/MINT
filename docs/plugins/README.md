@@ -78,3 +78,19 @@ A local MINT package can contribute the same renderer with this manifest.
   "diagram": "timing"
 }
 ```
+
+## EPUB export
+
+Install **EPUB export** in Settings → Plugins and allow it to read the current document. Choose **Export… → EPUB** to save a reflowable EPUB 3 book with a linked contents page built from the headings in the active draft. Image captions are included as text.
+
+A package can contribute the same format through the host codec registry. Each enabled format appears once in the Export dialog. The host asks the writer to choose the destination and checks the current document grant before giving the draft to the codec.
+
+```json
+{
+  "apiVersion": 1,
+  "id": "example.ebook",
+  "name": "Ebook publishing",
+  "permissions": ["document.read"],
+  "exportFormat": "epub"
+}
+```

@@ -1,5 +1,7 @@
 import type { WordCount } from "@mint/editor";
 
+import { isPluginFormat, type PluginFormat } from "./export-formats.ts";
+
 export type Permission = "document.read" | "document.write" | "folder.read";
 
 /** Packages declare the host operations they use. */
@@ -10,9 +12,18 @@ export interface PluginManifest {
   permissions: Permission[];
   statistics?: (keyof WordCount)[];
   templates?: { name: string; text: string }[];
+  exportFormat?: PluginFormat;
   sidebar?: "tags";
   diagram?: "timing";
 }
+
+export const epubExport: PluginManifest = {
+  apiVersion: 1,
+  id: "mint.epub-export",
+  name: "EPUB export",
+  permissions: ["document.read"],
+  exportFormat: "epub",
+};
 
 export const timingDiagrams: PluginManifest = {
   apiVersion: 1,
@@ -85,6 +96,10 @@ export function isManifest(value: unknown): value is PluginManifest {
   )
     return false;
   const required = new Set<Permission>();
+  if ("exportFormat" in m) {
+    if (!isPluginFormat(m.exportFormat)) return false;
+    required.add("document.read");
+  }
   if ("diagram" in m) {
     if (m.diagram !== "timing") return false;
     required.add("document.read");
@@ -224,4 +239,16 @@ export function canReadFolder(id: string): boolean {
   return Boolean(
     item?.enabled && item.grants.includes("folder.read") && "sidebar" in item.manifest,
   );
+}
+
+export function activeExportFormats(items = installations()): PluginFormat[] {
+  return [
+    ...new Set(
+      items.flatMap(({ manifest, enabled, grants }) =>
+        enabled && grants.includes("document.read") && manifest.exportFormat
+          ? [manifest.exportFormat]
+          : [],
+      ),
+    ),
+  ];
 }
