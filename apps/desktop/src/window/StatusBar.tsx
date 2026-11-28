@@ -9,6 +9,9 @@ export function StatusBar(props: {
   readonly tab: Tab;
   readonly name: string;
   readonly openHistory: () => void;
+  readonly addAnnotation: () => void;
+  readonly toggleAnnotations: () => void;
+  readonly annotationsOpen: boolean;
   readonly mode: EditorMode;
   readonly wordCount: WordCount | null;
 }) {
@@ -70,9 +73,25 @@ export function StatusBar(props: {
           ))}
         </section>
       )}
-      <footer className="flex items-center justify-between border-t border-(--mint-border) px-4 py-1 text-xs text-(--mint-muted)">
+      <footer className="flex flex-wrap items-center justify-between gap-x-4 border-t border-(--mint-border) px-4 py-1 text-xs text-(--mint-muted)">
         <span title={tab.path ?? undefined}>{name}</span>
-        <span className="flex gap-4">
+        <span className="flex flex-wrap gap-x-4">
+          <button
+            type="button"
+            className="hover:underline"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={props.addAnnotation}
+          >
+            {t("command.edit.addAnnotation")}
+          </button>
+          <button
+            type="button"
+            className="hover:underline"
+            aria-expanded={props.annotationsOpen}
+            onClick={props.toggleAnnotations}
+          >
+            {t("command.view.annotations")}
+          </button>
           <button
             type="button"
             className="hover:underline"
