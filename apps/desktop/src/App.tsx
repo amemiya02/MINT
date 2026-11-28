@@ -13,12 +13,14 @@ import {
 import { ExportDialog } from "./export/ExportDialog.tsx";
 import { FindBar, type FindMode } from "./find/FindBar.tsx";
 import { FolderTree } from "./folder/file-tree.ts";
+import { MoveDialog } from "./folder/MoveDialog.tsx";
+import { applyMove, inverse, type MovePreview, previewMove } from "./folder/move-links.ts";
 import { useRecent } from "./folder/recent.ts";
 import { NavigationRail, Sidebar, type SidebarTool } from "./folder/Sidebar.tsx";
 import { HistoryDialog } from "./history/HistoryDialog.tsx";
 import { type Translate, useT } from "./i18n/index.ts";
 import { documentExtensions } from "./paths.ts";
-import type { Platform } from "./platform/platform.ts";
+import type { DocumentEdit, Platform } from "./platform/platform.ts";
 import { insertTemplate } from "./plugins/host.ts";
 import { PluginEntries, pluginName, useInstallations } from "./plugins/Plugins.tsx";
 import { TagBrowser } from "./plugins/TagBrowser.tsx";
@@ -28,6 +30,7 @@ import { createRecovery, type Recovery } from "./recovery/recovery.ts";
 import { FolderSearch } from "./search/FolderSearch.tsx";
 import { SettingsDialog } from "./settings/SettingsDialog.tsx";
 import { SettingsIssues } from "./settings/SettingsIssues.tsx";
+import { useDialect } from "./settings/useDialect.ts";
 import { useSettings, useSettingsStore } from "./settings/useSettings.ts";
 import { TabStoreContext, useTabsState } from "./tabs/context.ts";
 import { TabBar } from "./tabs/TabBar.tsx";
@@ -169,6 +172,45 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   const [, editorsChanged] = useReducer((n: number) => n + 1, 0);
   /** Errors from folder actions and other shell commands; document errors live in the tab store. */
   const [shellError, setShellError] = useState<string | null>(null);
+  const dialect = useDialect();
+  const [preview, setPreview] = useState<MovePreview | null>(null);
+  const [undoMove, setUndoMove] = useState<DocumentEdit[] | null>(null);
+  const moving = useRef(false);
+  async function performMove(edits: DocumentEdit[], undo = false) {
+    if (moving.current) return;
+    moving.current = true;
+    setPreview(null);
+    try {
+      await applyMove(platform, edits, (path) =>
+        store.getState().tabs.some((tab) => tab.path === path && tab.dirty),
+      );
+      const relocated = edits.find((edit) => edit.from !== edit.to);
+      if (relocated) store.pathRenamed(relocated.from, relocated.to);
+      setShellError(null);
+      setUndoMove(undo ? null : inverse(edits));
+    } catch (error) {
+      setShellError(reasonOf(error));
+    } finally {
+      moving.current = false;
+    }
+  }
+  async function moveDocument(from: string, to: string) {
+    if (!folder || moving.current) return;
+    moving.current = true;
+    const request = openFolderState.current.request;
+    let planned: MovePreview;
+    try {
+      planned = await previewMove(platform, folder, from, to, dialect);
+    } catch (error) {
+      setShellError(reasonOf(error));
+      return;
+    } finally {
+      moving.current = false;
+    }
+    if (request !== openFolderState.current.request) return;
+    if (planned.references.length) setPreview(planned);
+    else await performMove(planned.edits);
+  }
   const { recent, add: addRecent } = useRecent(platform);
 
   // Every document shown in this window, however it was opened, counts as recent.
@@ -195,6 +237,8 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
         openFolderState.current.tree?.dispose();
         openFolderState.current.tree = opened;
         setTree(opened);
+        setPreview(null);
+        setUndoMove(null);
       } catch (e) {
         if (request === openFolderState.current.request)
           setShellError(t("error.openFolder", { path, reason: reasonOf(e) }));
@@ -361,6 +405,30 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
       <UpdateNotice updates={updates} />
       <SettingsIssues />
       <ThemeIssue />
+      {undoMove && (
+        <button
+          className="self-end px-3 py-1 text-sm underline"
+          type="button"
+          onClick={() => void performMove(undoMove, true)}
+        >
+          {t("move.undo")}
+        </button>
+      )}
+      {preview && folder && (
+        <MoveDialog
+          preview={preview}
+          folder={folder}
+          onClose={() => setPreview(null)}
+          onChoose={(update) => {
+            const edits = update
+              ? preview.edits
+              : preview.edits
+                  .filter((edit) => edit.from !== edit.to)
+                  .map((edit) => ({ ...edit, after: edit.before }));
+            void performMove(edits);
+          }}
+        />
+      )}
       {(shellError || error) && (
         <div
           role="alert"
@@ -423,6 +491,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
               editor={activeId === null ? null : store.editor(activeId)}
               activePath={activePath}
               onOpenDocument={(path) => void store.openDocument(path)}
+              onMoveDocument={moveDocument}
               onRenamed={(from, to) => store.pathRenamed(from, to)}
               onTrashed={(path) => store.pathTrashed(path)}
               onError={setShellError}
@@ -524,9 +593,10 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
           onClose={() => setQuickOpenVisible(false)}
         />
       )}
-      {historyPath && (
+      {historyPath && active?.path === historyPath && (
         <HistoryDialog
           path={historyPath}
+          editor={store.editor(active.id)}
           platform={platform}
           onClose={() => {
             setHistoryPath(null);

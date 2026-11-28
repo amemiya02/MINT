@@ -36,9 +36,9 @@ export function imagePath(destination: string): string {
  * A URL the page can load for an image source as written: web URLs as they
  * are, local paths through the host's resolver; `null` if it cannot be shown.
  */
-export function resolveImageSource(state: EditorState, destination: string): string | null {
+function resolveImageSource(resolve: ImageUrlResolver, destination: string): string | null {
   if (webUrl.test(destination)) return destination;
-  return state.facet(imageUrlResolver)(imagePath(destination));
+  return resolve(imagePath(destination));
 }
 
 /** The visible label of an image: its alt text as written. */
@@ -62,14 +62,14 @@ function imagePlaceholder(alt: string, title: string): HTMLElement {
 
 /** Install the resolved source and keep the editor layout in sync with the image. */
 function displayImage(
-  view: EditorView,
   img: HTMLImageElement,
   url: string | null,
   fallback: string,
+  onResize?: () => void,
 ) {
   const missing = () => {
     img.replaceWith(imagePlaceholder(img.alt, fallback));
-    view.requestMeasure();
+    onResize?.();
   };
   if (url === null) {
     missing();
@@ -77,12 +77,21 @@ function displayImage(
   }
   img.draggable = false;
   img.addEventListener("error", missing, { once: true });
-  img.addEventListener("load", () => view.requestMeasure(), { once: true });
+  if (onResize) img.addEventListener("load", onResize, { once: true });
   img.setAttribute("src", url);
 }
 
 /** Prepare already-sanitised widget HTML while its document-relative URLs are still inert. */
 export function previewFragment(view: EditorView, html: string): DocumentFragment {
+  return documentFragment(html, view.state.facet(imageUrlResolver), () => view.requestMeasure());
+}
+
+/** Mount sanitised Markdown HTML with images resolved relative to the document being read. */
+export function documentFragment(
+  html: string,
+  resolve: ImageUrlResolver,
+  onResize?: () => void,
+): DocumentFragment {
   const template = document.createElement("template");
   template.innerHTML = html;
   const content = template.content;
@@ -95,7 +104,7 @@ export function previewFragment(view: EditorView, html: string): DocumentFragmen
   }
   for (const img of content.querySelectorAll("img")) {
     const src = img.getAttribute("src") ?? "";
-    displayImage(view, img, src ? resolveImageSource(view.state, src) : null, src);
+    displayImage(img, src ? resolveImageSource(resolve, src) : null, src, onResize);
   }
   return content;
 }
@@ -126,7 +135,7 @@ class ImageWidget extends WidgetType {
     img.alt = this.alt;
     if (this.title) img.title = this.title;
     wrapper.append(img);
-    displayImage(view, img, this.url, this.title);
+    displayImage(img, this.url, this.title, () => view.requestMeasure());
     return wrapper;
   }
 
@@ -142,7 +151,7 @@ function widgetFor(state: EditorState, node: SyntaxNode, block: boolean): ImageW
   const destination = state.sliceDoc(url.from, url.to);
   const title = node.getChild("LinkTitle");
   return new ImageWidget(
-    resolveImageSource(state, destination),
+    resolveImageSource(state.facet(imageUrlResolver), destination),
     altText(state, node),
     // The tooltip: the Markdown title if there is one, otherwise the path.
     title ? state.sliceDoc(title.from + 1, title.to - 1) : imagePath(destination),
