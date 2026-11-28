@@ -127,6 +127,9 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   } = useOverlays();
   const { shortcuts, wikilinkFolders } = useSettings().settings;
   const active = tabs.find((tab) => tab.id === activeId) ?? null;
+  const [writingRequest, setWritingRequest] = useState<{ tabId: number; sequence: number } | null>(
+    null,
+  );
   const [agentSelection, setAgentSelection] = useState<{ tabId: number; text: string } | null>(
     null,
   );
@@ -375,6 +378,18 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     "edit.find": () => showFind("find"),
     "edit.replace": () => showFind("replace"),
     "edit.searchFolder": () => setFolderSearch((request) => (request ?? 0) + 1),
+    "edit.askAI": () => {
+      const selection = activeId === null ? undefined : store.editor(activeId)?.getSelection();
+      if (activeId === null || !selection || selection.anchor === selection.head) {
+        setShellError(t("writing.needSelection"));
+        return;
+      }
+      setShellError(null);
+      setWritingRequest((previous) => ({
+        tabId: activeId,
+        sequence: (previous?.sequence ?? 0) + 1,
+      }));
+    },
     "edit.askExternalAgent": () => {
       const editor = activeId === null ? undefined : store.editor(activeId);
       const range = editor?.getSelection();
@@ -622,6 +637,10 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
                 visible={selected[tab.pane] === tab.id}
                 toolbarPosition={toolbarPositions[tab.pane]}
                 platform={platform}
+                askWriting={writingRequest?.tabId === tab.id ? writingRequest.sequence : null}
+                settingsOpen={settingsOpen}
+                onAskWriting={() => run.current("edit.askAI")}
+                onOpenSettings={() => run.current("app.settings")}
                 onModeChange={modeChanged}
                 onEditorChange={editorsChanged}
                 onEdited={onEdited}

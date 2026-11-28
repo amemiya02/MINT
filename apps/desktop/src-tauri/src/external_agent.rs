@@ -38,6 +38,15 @@ pub struct WritingRequest {
     instruction: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     selected_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    history: Option<Vec<WritingTurn>>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct WritingTurn {
+    instruction: String,
+    reply: String,
 }
 
 #[derive(Serialize)]
@@ -285,7 +294,7 @@ pub async fn send_external_agent(
 }
 
 /// Codex exec: https://learn.chatgpt.com/docs/non-interactive-mode
-/// Arguments are fixed; the two task fields travel through stdin. Configured
+/// Arguments are fixed; task material and conversation travel through stdin. Configured
 /// mode deliberately leaves the CLI's policy in place, including its tools.
 fn run_codex(
     path: &Path,

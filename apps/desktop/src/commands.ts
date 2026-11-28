@@ -104,6 +104,12 @@ export const commands = [
   },
   { id: "edit.find", title: "command.edit.find", accelerator: "CmdOrCtrl+F", menu: "edit" },
   {
+    id: "edit.askAI",
+    title: "writing.ask",
+    menu: "edit",
+    group: "writing",
+  },
+  {
     id: "edit.askExternalAgent",
     title: "command.edit.askExternalAgent",
     menu: "edit",

@@ -1,7 +1,13 @@
+export interface WritingTurn {
+  readonly instruction: string;
+  readonly reply: string;
+}
+
 /** The material a writing connection receives for a text task. */
 export interface WritingRequest {
   readonly instruction: string;
   readonly selectedText?: string;
+  readonly history?: readonly WritingTurn[];
 }
 
 export interface WritingReply {
