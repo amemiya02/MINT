@@ -54,6 +54,10 @@ A folder plugin contributes a sidebar entry. The bundled **Tag browser** uses th
 
 The host reads Markdown documents in the current folder when the authorized view opens. It uses the top-level YAML front matter field `tags`, accepting a string or a sequence such as `tags: [research, travel]`. Select a tag and click a document's relative path to open the original file.
 
+## Property table
+
+Install **Property table** in Settings → Plugins and allow it to read Markdown documents in the current folder. Open its sidebar entry to see one row per document and a column for each top-level YAML front matter property. A dash marks a missing property. Select a document’s relative path to open its original Markdown. A local package can contribute the same view with `"sidebar": "properties"` and `"permissions": ["folder.read"]`.
+
 ## Digital timing diagrams
 
 Install **Digital timing diagrams** in Settings → Plugins and allow it to read the current document. Paste the following example into a document and move the caret outside the block to see the clock and acknowledge signals on a shared time scale.

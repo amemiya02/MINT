@@ -13,7 +13,7 @@ export interface PluginManifest {
   statistics?: (keyof WordCount)[];
   templates?: { name: string; text: string }[];
   exportFormat?: PluginFormat;
-  sidebar?: "tags";
+  sidebar?: "tags" | "properties";
   diagram?: "timing";
   importer?: "notion";
 }
@@ -40,6 +40,14 @@ export const timingDiagrams: PluginManifest = {
   name: "Digital timing diagrams",
   permissions: ["document.read"],
   diagram: "timing",
+};
+
+export const propertyTable: PluginManifest = {
+  apiVersion: 1,
+  id: "mint.property-table",
+  name: "Property table",
+  permissions: ["folder.read"],
+  sidebar: "properties",
 };
 
 export const tagBrowser: PluginManifest = {
@@ -118,7 +126,7 @@ export function isManifest(value: unknown): value is PluginManifest {
     required.add("document.read");
   }
   if ("sidebar" in m) {
-    if (m.sidebar !== "tags") return false;
+    if (m.sidebar !== "tags" && m.sidebar !== "properties") return false;
     required.add("folder.read");
   }
   if ("statistics" in m) {

@@ -12,6 +12,7 @@ import {
   notionImporter,
   type Permission,
   type PluginManifest,
+  propertyTable,
   readStatistics,
   tagBrowser,
   timingDiagrams,
@@ -42,6 +43,7 @@ export function pluginName(m: PluginManifest, t: Translate) {
   if (m.id === epubExport.id) return t("plugin.epub");
   if (m.id === timingDiagrams.id) return t("plugin.timing");
   if (m.id === writingTemplates.id) return t("plugin.templates");
+  if (m.id === propertyTable.id) return t("plugin.properties");
   if (m.id === tagBrowser.id) return t("plugin.tags");
   return m.id === writingStatistics.id ? t("plugin.statistics") : m.name;
 }
@@ -73,6 +75,7 @@ export function PluginSettings() {
     writingStatistics,
     writingTemplates,
     tagBrowser,
+    propertyTable,
     timingDiagrams,
     notionImporter,
     epubExport,
