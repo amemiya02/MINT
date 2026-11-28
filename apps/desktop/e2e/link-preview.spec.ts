@@ -233,7 +233,7 @@ test("a whole-document preview from the right returns to the start of the open d
   await page.keyboard.press("ControlOrMeta+S");
   await expect
     .poll(() => readFile(page, draft))
-    .toBe(original.replace("# Draft", "# Draft revised") + " amended");
+    .toBe(`${original.replace("# Draft", "# Draft revised")} amended`);
 });
 
 test("preview a section of an untitled manuscript and edit it alongside its citation", async ({

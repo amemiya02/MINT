@@ -285,12 +285,11 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
   function showInPane(tab: Tab, pane: Pane, selected = state.selected) {
     const existing = state.tabs.find((t) => t.documentId === tab.documentId && t.pane === pane);
     if (existing) {
-      if (state.activeId !== existing.id || state.error)
-        set({ activeId: existing.id, error: null });
+      if (state.activeId !== existing.id) set({ activeId: existing.id });
       return existing.id;
     }
     const view = { ...tab, id: nextId++, pane };
-    set({ tabs: [...state.tabs, view], activeId: view.id, selected, error: null });
+    set({ tabs: [...state.tabs, view], activeId: view.id, selected });
     return view.id;
   }
 
@@ -325,6 +324,7 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
   }
 
   async function openDocument(path: string, select?: DocumentLocation, pane?: Pane) {
+    if (state.error) set({ error: null });
     let tab = state.tabs.find((t) => t.path === path);
     if (!tab) {
       let pending = opening.get(path);
