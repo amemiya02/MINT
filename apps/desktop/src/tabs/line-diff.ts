@@ -12,8 +12,10 @@ const MAX_CELLS = 4_000_000;
  * are only in `before`, `added` lines only in `after`.
  */
 export function diffLines(before: string, after: string): DiffLine[] {
-  const a = before.split(/\r\n|\r|\n/);
-  const b = after.split(/\r\n|\r|\n/);
+  return compareLines(before.split(/\r\n|\r|\n/), after.split(/\r\n|\r|\n/));
+}
+
+export function compareLines(a: string[], b: string[]): DiffLine[] {
   let start = 0;
   while (start < a.length && start < b.length && a[start] === b[start]) start++;
   let end = 0;
