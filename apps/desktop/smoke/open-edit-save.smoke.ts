@@ -11,6 +11,11 @@ import { after, before, test } from "node:test";
 import { promisify } from "node:util";
 import JSZip from "jszip";
 import type { SavedWritingTask } from "../src/ai/writing-tasks.ts";
+import {
+  selectedPageText,
+  writingMaterialChart,
+  writingMaterialPdf,
+} from "../test-fixtures/writing-materials.ts";
 
 const driver = process.env.TAURI_DRIVER_URL ?? "http://127.0.0.1:4444";
 const application = process.env.MINT_APP;
@@ -140,7 +145,7 @@ async function openSettings() {
 }
 
 /** WebDriver selects a real disk file directly on the WebView's upload control. */
-async function choosePackage(button: string, path: string) {
+async function chooseWebViewFile(button: string, path: string, owner = "dialog[open]") {
   await command("POST", `/session/${session}/execute/sync`, {
     script: `document.addEventListener('click', function intercept(event) {
       if (!event.target.matches?.('input[type=file]')) return;
@@ -152,7 +157,7 @@ async function choosePackage(button: string, path: string) {
   await click(button);
   const input = await command<Record<string, string>>("POST", `/session/${session}/element`, {
     using: "css selector",
-    value: "dialog[open] input[type=file]",
+    value: `${owner} input[type=file]`,
   });
   await command("POST", `/session/${session}/element/${input[elementKey]}/value`, { text: path });
 }
@@ -426,7 +431,7 @@ test("import a hidden Notion attachment and embed its granted bytes in a native 
     );
   };
   await chooseFormat("Notion import");
-  await choosePackage("Notion export (.zip)", archive);
+  await chooseWebViewFile("Notion export (.zip)", archive);
   await chooseNativePath("Import", "Choose the parent folder for the import", folder, "Open");
   await click("Open imported folder");
   await clickPath("//*[@role='treeitem' and @aria-label='Map.md']");
@@ -833,7 +838,7 @@ test("declining a plugin update keeps its native read grant and withholds its wr
   const upload = async (manifest: object) => {
     const path = join(dir, "smoke.mint.json");
     await writeFile(path, JSON.stringify(manifest));
-    await choosePackage("Install a MINT plugin file", path);
+    await chooseWebViewFile("Install a MINT plugin file", path);
   };
   const path = join(dir, "update.md");
   await writeFile(path, "plugin update draft");
@@ -2689,6 +2694,141 @@ test("native writing sends only the approved excerpt after a model capacity erro
   }
 });
 
+test("a native first model receives the selected PDF page and image crop as inline PNGs", async () => {
+  const folder = await mkdtemp(join(dir, "material-ranges-"));
+  const pdf = join(folder, "field-notes.pdf");
+  const chart = join(folder, "chart.png");
+  await writeFile(pdf, writingMaterialPdf());
+  await writeFile(chart, Buffer.from(writingMaterialChart, "base64"));
+  const instruction = "Describe the marked evidence.";
+  const generated = "The selected chart region is blue.";
+  type Part = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
+  const received: { path?: string; model: string; content: Part[] }[] = [];
+  const endpoint = createServer(async (request, response) => {
+    let body = "";
+    for await (const chunk of request) body += chunk;
+    const { model, messages } = JSON.parse(body);
+    received.push({ path: request.url, model, content: messages.at(-1).content });
+    const content = received.length === 1 ? "green,yellow" : generated;
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ choices: [{ message: { content }, finish_reason: "stop" }] }));
+  });
+
+  async function fillMaterial(label: string, value: string) {
+    await clickPath(`//form//label[normalize-space(text()[1])='${label}']/input`);
+    await keyActions([...chord(keys.control, "a"), ...typing(value)]);
+  }
+
+  async function acceptVisual(name: string) {
+    await waitForView(
+      `image pixels to be available for ${name}`,
+      `const fieldset = [...document.querySelectorAll('form fieldset')]
+        .find(group => group.querySelector(':scope > legend')?.textContent === ${JSON.stringify(name)});
+        const option = fieldset?.querySelector('option[value=image]:enabled');
+        if (!option) return false;
+        option.parentElement.value = 'image';
+        option.parentElement.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;`,
+    );
+    await clickPath(
+      `//form//fieldset[legend[normalize-space(.)='${name}']]//button[not(@disabled) and normalize-space(.)='Use selected material']`,
+    );
+  }
+
+  async function sentPixel(url: string, x: number, y: number) {
+    assert.match(url, /^data:image\/png;base64,/);
+    const result = await command<number[] | null>("POST", `/session/${session}/execute/async`, {
+      script: `const [url, x, y, done] = arguments;
+        const image = new Image();
+        image.onerror = () => done(null);
+        image.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = image.width;
+          canvas.height = image.height;
+          const drawing = canvas.getContext('2d');
+          drawing.drawImage(image, 0, 0);
+          done([image.width, image.height, ...drawing.getImageData(x, y, 1, 1).data]);
+        };
+        image.src = url;`,
+      args: [url, x, y],
+    });
+    assert.ok(result, "the transmitted PNG decodes");
+    return result;
+  }
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      endpoint.once("error", reject);
+      endpoint.listen(0, "127.0.0.1", resolve);
+    });
+    const address = endpoint.address();
+    assert.ok(address && typeof address !== "string");
+    await restart([document]);
+    await nativeShortcut("ctrl+n");
+    await click("Draft with AI");
+    for (const [label, value] of [
+      ["API address", `http://127.0.0.1:${address.port}/v1`],
+      ["Model name", "native-vision-fixture"],
+      ["Drafting instruction", instruction],
+    ] as const) {
+      await clickPath(`//form//label[normalize-space(.)='${label}']/input`);
+      await keyActions(typing(value));
+    }
+    await clickPath("//form//summary[normalize-space(.)='Add files or paste text']");
+    await chooseWebViewFile("Choose material file", pdf, "body");
+    await chooseWebViewFile("Choose material file", chart, "body");
+    await fillMaterial("PDF page", "2");
+    await fillMaterial("Left (px)", "5");
+    await fillMaterial("Top (px)", "1");
+    await fillMaterial("Width (px)", "2");
+    await fillMaterial("Height (px)", "2");
+    assert.equal(received.length, 0, "selecting ranges performs no model requests");
+    await click("Check image support");
+    await waitForView(
+      "the preview model's verified image support",
+      "return document.querySelector('form')?.innerText.includes('Image support verified');",
+    );
+    assert.equal(received.length, 1);
+    assert.doesNotMatch(JSON.stringify(received[0]), /field-notes|chart\.png|marked evidence/);
+    await acceptVisual("field-notes.pdf");
+    await acceptVisual("chart.png");
+    await waitForView(
+      "the exact page and crop in the native draft send list",
+      `const list = document.querySelector('form')?.innerText;
+        return list?.includes('field-notes.pdf · Page 2 of 2 · Image pixels') &&
+          list.includes('chart.png · x 5, y 1 · 2 × 2 px · Image pixels');`,
+    );
+    await clickPath("//form//button[not(@disabled) and normalize-space(.)='Generate draft']");
+    await waitForView(
+      "the visual model response in the untitled editor",
+      `return document.querySelector('[role=tabpanel]:not([hidden]) .cm-content')?.textContent === ${JSON.stringify(generated)};`,
+    );
+    assert.equal(received.length, 2);
+    const request = received[1];
+    assert.equal(request?.path, "/v1/chat/completions");
+    assert.equal(request?.model, "native-vision-fixture");
+    assert.equal(request?.content.length, 3);
+    const [prompt, pageImage, cropImage] = request?.content ?? [];
+    assert.ok(
+      prompt?.type === "text" && pageImage?.type === "image_url" && cropImage?.type === "image_url",
+    );
+    assert.deepEqual(JSON.parse(prompt.text).taskContext.materials, [
+      { name: "field-notes.pdf", range: { kind: "pdf", page: 2, pages: 2 }, format: "image" },
+      {
+        name: "chart.png",
+        range: { kind: "image", x: 5, y: 1, width: 2, height: 2 },
+        format: "image",
+      },
+    ]);
+    assert.deepEqual(await sentPixel(pageImage.image_url.url, 4, 155), [640, 160, 0, 255, 0, 255]);
+    assert.deepEqual(await sentPixel(cropImage.image_url.url, 0, 0), [2, 2, 0, 0, 255, 255]);
+  } finally {
+    endpoint.closeAllConnections();
+    await new Promise<void>((resolve) => endpoint.close(() => resolve()));
+    await rm(folder, { recursive: true, force: true });
+  }
+});
+
 const credentialPolicy = process.env.MINT_SMOKE_CREDENTIAL_POLICY;
 test("model keys survive a restart only when remembered and disconnect removes the OS credential", {
   skip: !credentialPolicy && "requires the hosted smoke suite's isolated Secret Service",
@@ -2990,7 +3130,7 @@ const readable = fs.readFileSync(${JSON.stringify(draft)}, "utf8");
 fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify({
   args, prompt, pid: process.pid, cwd: process.cwd(), entries: fs.readdirSync(process.cwd()), readable,
 }) + "\\n");
-if (prompt.instruction === "Is the selected line clear?") fs.writeFileSync("review-copy.md", prompt.selectedText);
+if (prompt.instruction.startsWith("Is the selected line clear?")) fs.writeFileSync("review-copy.md", prompt.selectedText);
 if (prompt.instruction.startsWith(${JSON.stringify(temporaryInstruction)})) {
   const copy = require("node:path").join(process.cwd(), "..", "retained-task-copy.md");
   fs.writeFileSync(copy, prompt.taskContext.materials[0].text);
@@ -3070,7 +3210,24 @@ if (prompt.instruction === ${JSON.stringify(cancelInstruction)}) {
       action.dispatchEvent(new Event('change', { bubbles: true }));`,
     args: [],
   });
-  await clickPath("//section[@aria-label='Ask AI']//input");
+  const pdf = join(fixture, "field-notes.pdf");
+  await writeFile(pdf, writingMaterialPdf());
+  await clickPath(
+    "//section[@aria-label='Ask AI']//summary[normalize-space(.)='Add files or paste text']",
+  );
+  await chooseWebViewFile("Choose material file", pdf, "body");
+  await clickPath(
+    "//section[@aria-label='Ask AI']//label[normalize-space(text()[1])='PDF page']/input",
+  );
+  await keyActions([...chord(keys.control, "a"), ...typing("2")]);
+  await clickPath(
+    "//section[@aria-label='Ask AI']//button[not(@disabled) and normalize-space(.)='Use selected material']",
+  );
+  await waitForView(
+    "the selected PDF page and text format before the CLI send",
+    `return document.querySelector('section[aria-label="Ask AI"]')?.innerText.includes('field-notes.pdf · Page 2 of 2 · Extracted text');`,
+  );
+  await clickPath("//section[@aria-label='Ask AI']//input[not(@type='checkbox')]");
   await keyActions([...typing("Is the selected line clear?"), ...typing(keys.enter)]);
   await waitForView(
     "the inline reply from the CLI",
@@ -3078,6 +3235,9 @@ if (prompt.instruction === ${JSON.stringify(cancelInstruction)}) {
       !document.querySelector('aside[aria-label="Writing Assistant"]');`,
   );
   await click("Continue in sidebar");
+  await clickPath(
+    "//aside[@aria-label='Writing Assistant']//button[normalize-space(.)='Remove field-notes.pdf']",
+  );
   await command("POST", `/session/${session}/execute/sync`, {
     script: `const scope = [...document.querySelectorAll('aside[aria-label="Writing Assistant"] select')]
       .find((select) => select.querySelector('option[value="instruction"]'));
@@ -3102,16 +3262,26 @@ if (prompt.instruction === ${JSON.stringify(cancelInstruction)}) {
     .split("\n")
     .slice(1)
     .map((line) => JSON.parse(line));
-  assert.deepEqual(
-    selectedCalls.map((entry) => entry.prompt),
-    [
-      { instruction: "Is the selected line clear?", selectedText: "On-disk sentence." },
-      {
-        instruction: "What would help?",
-        history: [{ instruction: "Is the selected line clear?", reply: "Fixture Agent reply." }],
-      },
-    ],
-  );
+  assert.equal(selectedCalls.length, 2);
+  const { instruction: selectedInstruction, ...selectedPayload } = selectedCalls[0].prompt;
+  assert.match(selectedInstruction, /^Is the selected line clear\?/);
+  assert.deepEqual(selectedPayload, {
+    selectedText: "On-disk sentence.",
+    taskContext: {
+      materials: [
+        {
+          name: "field-notes.pdf",
+          text: selectedPageText,
+          range: { kind: "pdf", page: 2, pages: 2 },
+          format: "extractedText",
+        },
+      ],
+    },
+  });
+  assert.deepEqual(selectedCalls[1].prompt, {
+    instruction: "What would help?",
+    history: [{ instruction: "Is the selected line clear?", reply: "Fixture Agent reply." }],
+  });
   assert.ok(selectedCalls.every((entry) => entry.entries.length === 0));
   const taskDir = dirname(selectedCalls[0].cwd);
   assert.ok(process.env.XDG_DATA_HOME);

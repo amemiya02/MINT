@@ -1,5 +1,7 @@
 import { createContext, useContext, useEffect, useId, useRef, useState } from "react";
 import { type Translate, useT } from "../i18n/index.ts";
+import { materialLabel } from "./material-display.ts";
+import { MaterialPreview } from "./TaskContext.tsx";
 import type { AttemptStatus } from "./writing-attempt.ts";
 import type { NamedMaterial, WritingRequest } from "./writing-sender.ts";
 
@@ -218,11 +220,11 @@ export function WritingTaskMaterials({
     <details aria-label={t("writing.task.materials")} className="space-y-1 text-xs wrap-anywhere">
       <summary className="cursor-pointer">{t("writing.task.materials")}</summary>
       {folder && <p>{folder}</p>}
-      {materials.map(({ name, text }, position) => (
+      {materials.map((material, position) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: The material list is append-only and names may repeat.
-        <details key={`${name}:${position}`}>
-          <summary className="cursor-pointer">{name}</summary>
-          <pre className="max-h-28 overflow-auto whitespace-pre-wrap wrap-anywhere">{text}</pre>
+        <details key={`${material.name}:${position}`}>
+          <summary className="cursor-pointer">{materialLabel(material, t)}</summary>
+          <MaterialPreview material={material} />
         </details>
       ))}
     </details>

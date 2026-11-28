@@ -486,7 +486,7 @@ function ExternalAgentPanel({
             className="flex flex-col gap-2 border-t border-(--mint-border) pt-3"
             onSubmit={(event) => {
               event.preventDefault();
-              if (busy || named.loading) return;
+              if (busy || named.loading || named.unconfirmed) return;
               const request = {
                 instruction: selection === undefined ? sampleInstruction : instruction.trim(),
                 selectedText: material,
@@ -560,7 +560,12 @@ function ExternalAgentPanel({
                 type="submit"
                 ref={sendButton}
                 className={buttonClass}
-                disabled={busy || named.loading || (selection !== undefined && !instruction.trim())}
+                disabled={
+                  busy ||
+                  named.loading ||
+                  named.unconfirmed ||
+                  (selection !== undefined && !instruction.trim())
+                }
               >
                 {t(selection === undefined ? "agent.try" : "agent.send")}
               </button>

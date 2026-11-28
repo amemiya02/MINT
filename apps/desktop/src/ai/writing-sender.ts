@@ -6,13 +6,45 @@ export interface WritingTurn {
 export interface NamedMaterial {
   readonly name: string;
   readonly text: string;
+  readonly range?: MaterialRange;
+  readonly format?: "extractedText" | "caption" | "image" | "summary";
+  /** A locally prepared PNG of the selected range. The original file is never part of a request. */
+  readonly image?: string;
 }
+
+export interface ImageRegion {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+export type MaterialRange =
+  | { readonly kind: "pdf"; readonly page: number; readonly pages: number }
+  | ({ readonly kind: "image" } & ImageRegion);
+
+export const materialImageLimit = 4 * 1024 * 1024;
+export const taskImageLimit = 12 * 1024 * 1024;
 
 export interface TaskContext {
   readonly currentDraft?: NamedMaterial;
   readonly materials?: readonly NamedMaterial[];
   readonly folderSearch?: true;
   readonly materialDecisions?: readonly MaterialDecision[];
+}
+
+export function contextMaterials(context?: TaskContext): NamedMaterial[] {
+  return [
+    ...(context?.currentDraft ? [context.currentDraft] : []),
+    ...(context?.materials ?? []),
+    ...(context?.materialDecisions ?? []).flatMap((decision) =>
+      decision.outcome === "allowed" ? [decision.material] : [],
+    ),
+  ];
+}
+
+export function hasTaskImages(...contexts: readonly (TaskContext | undefined)[]): boolean {
+  return contexts.some((context) => contextMaterials(context).some(({ image }) => !!image));
 }
 
 export type MaterialDecision = {

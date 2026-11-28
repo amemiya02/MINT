@@ -35,7 +35,52 @@ pub(crate) struct ConnectedCompletion {
 #[derive(Deserialize, Serialize)]
 struct Message {
     role: String,
-    content: String,
+    content: MessageContent,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(untagged)]
+enum MessageContent {
+    Text(String),
+    Parts(Vec<MessagePart>),
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+enum MessagePart {
+    Text { text: String },
+    ImageUrl { image_url: ImageUrl },
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ImageUrl {
+    url: String,
+}
+
+fn validate_images(messages: &[Message]) -> Result<(), ModelError> {
+    let mut total = 0;
+    for message in messages {
+        if let MessageContent::Parts(parts) = &message.content {
+            if message.role != "user" || parts.is_empty() {
+                return Err(ModelError::Request("invalidRequest"));
+            }
+            for part in parts {
+                let MessagePart::ImageUrl { image_url } = part else {
+                    continue;
+                };
+                let url = &image_url.url;
+                total += url.len();
+                if url.len() > 4 * 1024 * 1024
+                    || total > 12 * 1024 * 1024
+                    || !url.starts_with("data:image/png;base64,")
+                {
+                    return Err(ModelError::Request("invalidRequest"));
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 #[derive(Serialize)]
@@ -200,6 +245,7 @@ async fn send(
     completion: Completion,
     on_event: Channel<ModelEvent>,
 ) -> Result<(), ModelError> {
+    validate_images(&completion.messages)?;
     let mut client = Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(10))
