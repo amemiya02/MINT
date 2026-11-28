@@ -380,6 +380,7 @@ function failureMessage(error: unknown): MessageKey {
     case 404:
       return "models.error.notFound";
     case 429:
+    case "limit":
       return "models.error.rateLimit";
     case "invalidAddress":
       return "models.error.address";

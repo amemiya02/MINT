@@ -1,17 +1,20 @@
 //! Run the installed Codex CLI with its own sign-in. The scope MINT authorizes
 //! is tied to the executable and the requested Codex policy, not the payload.
+use crate::writing_requests::Registration;
 use crate::{app_data, app_data_dir, blocking};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::env;
 use std::fs::{self, File};
-use std::io::{Read, Seek};
+use std::io::{BufRead, BufReader, Read, Seek};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Manager};
+use tauri::ipc::{Channel, JavaScriptChannelId};
+use tauri::{AppHandle, Manager, WebviewWindow};
 
 const REGISTRY: &str = "external-agents.json";
 const POLICY_REVISION: &str = "codex-exec-1";
@@ -100,6 +103,19 @@ struct WritingTurn {
 #[derive(Serialize)]
 pub struct WritingReply {
     text: String,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub(crate) enum AgentEvent {
+    Started,
+    Text {
+        text: String,
+    },
+    Done {
+        reply: Option<WritingReply>,
+        error: Option<String>,
+    },
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -306,15 +322,34 @@ pub async fn forget_external_agent(app: AppHandle, path: PathBuf) -> Result<(), 
 }
 
 #[tauri::command]
-pub async fn send_external_agent(
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn send_external_agent(
     app: AppHandle,
+    window: WebviewWindow,
     path: PathBuf,
     revision: String,
     access: AgentAccess,
     request: WritingRequest,
     task_id: Option<String>,
-) -> Result<WritingReply, String> {
-    blocking(move || {
+    request_id: Option<String>,
+    on_event: Option<JavaScriptChannelId>,
+) -> Result<Option<WritingReply>, String> {
+    crate::model::require_document_window(&window).map_err(|_| "denied".to_owned())?;
+    let on_event = on_event.map(|id| id.channel_on::<_, AgentEvent>(window.as_ref().clone()));
+    let stopped = Arc::new(AtomicBool::new(false));
+    let _registration = if let Some(id) = request_id {
+        let event = on_event.as_ref().ok_or("invalidRequest")?;
+        let cancel = Arc::clone(&stopped);
+        let registration = Registration::start(&window, id, move || {
+            cancel.store(true, Ordering::Relaxed);
+        })?;
+        event.send(AgentEvent::Started).map_err(|_| "stopped")?;
+        Some(registration)
+    } else {
+        None
+    };
+    let progress = on_event.clone();
+    let result = blocking(move || {
         let current = restore(inspect(&path)?, registry(&app)?);
         same_revision(&current, &revision)?;
         if !current.approved.contains(&access) {
@@ -328,6 +363,8 @@ pub async fn send_external_agent(
             &request,
             scratch.path(),
             cli_paths(&app),
+            &stopped,
+            progress.as_ref(),
         )?;
         // Forgetting or replacing a connection during a request must not restore its access.
         let _ = update_registry(&app, |records| {
@@ -347,7 +384,19 @@ pub async fn send_external_agent(
         });
         Ok(reply)
     })
-    .await
+    .await;
+    if let Some(events) = on_event {
+        let (reply, error) = match result {
+            Ok(reply) => (Some(reply), None),
+            Err(error) => (None, Some(error)),
+        };
+        events
+            .send(AgentEvent::Done { reply, error })
+            .map_err(|_| "stopped".to_owned())?;
+        Ok(None)
+    } else {
+        result.map(Some)
+    }
 }
 
 /// Codex exec: https://learn.chatgpt.com/docs/non-interactive-mode
@@ -359,16 +408,20 @@ fn run_codex(
     request: &WritingRequest,
     scratch: &Path,
     paths: Vec<PathBuf>,
+    stopped: &AtomicBool,
+    events: Option<&Channel<AgentEvent>>,
 ) -> Result<WritingReply, String> {
     let failed = || FAILED.to_owned();
     let input = serde_json::to_vec(request).map_err(|_| failed())?;
     if request.instruction.trim().is_empty() || input.len() > MAX_INPUT {
         return Err(failed());
     }
-    // Anonymous files let the CLI read the prompt and write JSONL without pipe
-    // backpressure or retaining named copies of either on disk.
+    let private = tempfile::tempdir().map_err(|_| failed())?;
+    // Independent offsets allow live reads. Keep the spool outside the Agent task copy.
     let stdin = temporary_input(&input).map_err(|_| failed())?;
-    let mut stdout = tempfile::tempfile().map_err(|_| failed())?;
+    let output = tempfile::NamedTempFile::new_in(private.path()).map_err(|_| failed())?;
+    let stdout = output.reopen().map_err(|_| failed())?;
+    let mut reader = BufReader::new(output.reopen().map_err(|_| failed())?);
     let mut command = Command::new(path);
     command.args([
         "--ask-for-approval",
@@ -395,59 +448,110 @@ fn run_codex(
         const CREATE_NO_WINDOW: u32 = 0x08000000;
         command.creation_flags(CREATE_NO_WINDOW);
     }
+    if stopped.load(Ordering::Relaxed) {
+        return Err("stopped".to_owned());
+    }
     let mut child = command
         .arg("-")
         .current_dir(scratch)
         .stdin(Stdio::from(stdin))
-        .stdout(Stdio::from(stdout.try_clone().map_err(|_| failed())?))
+        .stdout(Stdio::from(stdout))
         .stderr(Stdio::null())
         .spawn()
         .map_err(|_| failed())?;
     let start = Instant::now();
-    loop {
-        let status = child.try_wait();
-        let output_ok = stdout.metadata().is_ok_and(|meta| meta.len() <= MAX_OUTPUT);
-        match status {
-            Ok(Some(status)) if status.success() && output_ok => break,
-            Ok(Some(_)) => return Err(failed()),
-            Ok(None) if output_ok && start.elapsed() < TIMEOUT => {
-                std::thread::sleep(Duration::from_millis(40));
-            }
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(failed());
-            }
+    let mut output = AgentOutput::default();
+    let result = loop {
+        if stopped.load(Ordering::Relaxed) {
+            break Err("stopped".to_owned());
         }
+        if start.elapsed() >= TIMEOUT {
+            break Err("timeout".to_owned());
+        }
+        let status = child.try_wait().map_err(|_| failed());
+        if let Err(error) = output.read(&mut reader, events) {
+            break Err(error);
+        }
+        match status {
+            Err(error) => break Err(error),
+            Ok(Some(status)) => {
+                break match output.text {
+                    Some(text) if status.success() && output.completed => Ok(WritingReply { text }),
+                    Some(_) => Err("interrupted".to_owned()),
+                    None => Err(failed()),
+                };
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(40)),
+        }
+    };
+    if result.is_err() {
+        let _ = child.kill();
+        let _ = child.wait();
     }
-    stdout.rewind().map_err(|_| failed())?;
-    let mut json_lines = String::new();
-    stdout
-        .take(MAX_OUTPUT)
-        .read_to_string(&mut json_lines)
-        .map_err(|_| failed())?;
-    let mut text = None;
-    let mut completed = false;
-    for line in json_lines.lines() {
-        let Ok(event) = serde_json::from_str::<Value>(line) else {
-            continue;
-        };
-        match event["type"].as_str() {
-            Some("item.completed") if event["item"]["type"] == "agent_message" => {
-                if let Some(message) = event["item"]["text"].as_str() {
-                    if !message.trim().is_empty() {
-                        text = Some(message.to_owned());
+    result
+}
+
+#[derive(Default)]
+struct AgentOutput {
+    line: Vec<u8>,
+    bytes: u64,
+    text: Option<String>,
+    completed: bool,
+}
+
+impl AgentOutput {
+    fn read(
+        &mut self,
+        reader: &mut BufReader<File>,
+        events: Option<&Channel<AgentEvent>>,
+    ) -> Result<(), String> {
+        loop {
+            let bytes = (&mut *reader)
+                .take(MAX_OUTPUT - self.bytes + 1)
+                .read_until(b'\n', &mut self.line)
+                .map_err(|_| FAILED.to_owned())?;
+            self.bytes += bytes as u64;
+            if self.bytes > MAX_OUTPUT {
+                return Err(FAILED.to_owned());
+            }
+            if bytes == 0 || self.line.last() != Some(&b'\n') {
+                return Ok(());
+            }
+            if let Ok(event) = serde_json::from_slice::<Value>(&self.line) {
+                match event["type"].as_str() {
+                    Some("item.completed") if event["item"]["type"] == "agent_message" => {
+                        if let Some(text) = event["item"]["text"]
+                            .as_str()
+                            .filter(|s| !s.trim().is_empty())
+                        {
+                            if let Some(events) = events {
+                                let delta = if self.text.is_some() {
+                                    format!("\n\n{text}")
+                                } else {
+                                    text.to_owned()
+                                };
+                                events
+                                    .send(AgentEvent::Text { text: delta })
+                                    .map_err(|_| "stopped")?;
+                            }
+                            self.text = Some(text.to_owned());
+                        }
                     }
+                    Some("turn.completed") => self.completed = true,
+                    Some("turn.failed") => {
+                        return Err(if self.text.is_some() {
+                            "interrupted"
+                        } else {
+                            FAILED
+                        }
+                        .to_owned())
+                    }
+                    _ => {}
                 }
             }
-            Some("turn.completed") => completed = true,
-            Some("turn.failed") => return Err(failed()),
-            _ => {}
+            self.line.clear();
         }
     }
-    text.filter(|_| completed)
-        .map(|text| WritingReply { text })
-        .ok_or_else(failed)
 }
 
 fn temporary_input(input: &[u8]) -> std::io::Result<File> {

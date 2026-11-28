@@ -1,6 +1,5 @@
-import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { type MessageKey, useT } from "../i18n/index.ts";
-import { useModalDialog } from "../window/useModalDialog.ts";
 import { ConnectionSection } from "./ConnectionSection.tsx";
 import {
   type AgentAccess,
@@ -8,6 +7,8 @@ import {
   type ExternalAgentPlatform,
   externalAgentSender,
 } from "./external-agent.ts";
+import { useWritingTask } from "./WritingTasks.tsx";
+import { type AttemptStatus, failureStatus, replyStatus } from "./writing-attempt.ts";
 import type { WritingRequest } from "./writing-sender.ts";
 
 const buttonClass =
@@ -45,30 +46,78 @@ export function ExternalAgentSettings({ platform }: { readonly platform: Externa
   );
 }
 
+interface AgentTaskTarget {
+  readonly name: string;
+  readonly reveal: () => void;
+  readonly engaged: { current: boolean };
+}
+
 export function ExternalAgentDialog({
   onClose,
+  onHide,
+  onReveal,
+  name,
+  visible,
   renderReply,
   ...props
 }: Props & {
   readonly onClose: () => void;
+  readonly onHide: () => void;
+  readonly onReveal: () => void;
+  readonly name: string;
+  readonly visible: boolean;
   readonly renderReply: (reply: string, close: () => void) => ReactNode;
 }) {
   const t = useT();
   const title = useId();
-  const dialog = useModalDialog(onClose);
+  const dialog = useRef<HTMLDialogElement>(null);
+  const engaged = useRef(false);
+  const reveal = useRef(onReveal);
+  reveal.current = onReveal;
+  const target = useMemo(
+    () => ({
+      name,
+      engaged,
+      reveal: () => reveal.current(),
+    }),
+    [name],
+  );
+  useEffect(() => {
+    if (visible) dialog.current?.showModal();
+    else dialog.current?.close();
+  }, [visible]);
+
+  function close() {
+    dialog.current?.close();
+    if (engaged.current) onHide();
+    else onClose();
+  }
   return (
     <dialog
-      {...dialog.props}
+      ref={dialog}
+      onCancel={(event) => {
+        event.preventDefault();
+        close();
+      }}
       aria-labelledby={title}
       className="m-auto max-h-[85vh] w-[min(32rem,calc(100%-2rem))] rounded-lg border border-(--mint-border) bg-(--mint-bg) p-4 text-(--mint-fg) shadow-xl backdrop:bg-black/30"
     >
       <div className="mb-3 flex items-center justify-between gap-3">
         <h2 id={title}>{t("agent.askTitle")}</h2>
-        <button type="button" className={buttonClass} onClick={dialog.close}>
+        <button type="button" className={buttonClass} onClick={close}>
           {t("settings.close")}
         </button>
       </div>
-      <ExternalAgentPanel {...props} renderReply={(reply) => renderReply(reply, dialog.close)} />
+      <ExternalAgentPanel
+        {...props}
+        target={target}
+        renderReply={(reply) =>
+          renderReply(reply, () => {
+            dialog.current?.close();
+            onClose();
+          })
+        }
+      />
     </dialog>
   );
 }
@@ -77,7 +126,11 @@ function ExternalAgentPanel({
   platform,
   selection,
   renderReply,
-}: Props & { readonly renderReply?: (reply: string) => ReactNode }) {
+  target,
+}: Props & {
+  readonly renderReply?: (reply: string) => ReactNode;
+  readonly target?: AgentTaskTarget;
+}) {
   const t = useT();
   const [path, setPath] = useState("");
   const [agent, setAgent] = useState<ExternalAgent | null>(null);
@@ -90,6 +143,50 @@ function ExternalAgentPanel({
   const [status, setStatus] = useState<MessageKey | null>(null);
   const [error, setError] = useState<MessageKey | null>(null);
   const [reply, setReply] = useState("");
+  const [streaming, setStreaming] = useState("");
+  const [partial, setPartial] = useState<readonly { id: string; text: string }[]>([]);
+  const [attempt, setAttempt] = useState<{ recipient: string; status: AttemptStatus } | null>(null);
+  const controller = useRef<AbortController | null>(null);
+  const lastRequest = useRef<{
+    agent: ExternalAgent;
+    access: AgentAccess;
+    request: WritingRequest;
+  } | null>(null);
+  const mounted = useRef(true);
+  const taskStatus = pending ? "approval" : attempt?.status;
+  if (target) target.engaged.current = !!taskStatus && taskStatus !== "complete";
+  const taskRecipient = pending ? agent?.path : attempt?.recipient;
+  const stop = useCallback(() => {
+    if (controller.current) controller.current.abort();
+    else if (taskRecipient) {
+      setPending(null);
+      setAttempt({ recipient: taskRecipient, status: "stopped" });
+    }
+  }, [taskRecipient]);
+  const task = useMemo(
+    () =>
+      target && taskStatus && taskRecipient
+        ? {
+            name: target.name,
+            recipient: t("writing.recipient.agent", { path: taskRecipient }),
+            material: t("writing.scope.selection"),
+            status: taskStatus,
+            count: 0,
+            stop: taskStatus === "working" || taskStatus === "approval" ? stop : undefined,
+            reveal: target.reveal,
+          }
+        : null,
+    [stop, t, target, taskRecipient, taskStatus],
+  );
+  useWritingTask(task);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      controller.current?.abort();
+    };
+  }, []);
   const declineButton = useRef<HTMLButtonElement>(null);
   const sendButton = useRef<HTMLButtonElement>(null);
   const sampleInstruction = t("agent.sampleInstruction");
@@ -151,27 +248,86 @@ function ExternalAgentPanel({
     });
   }
 
+  function retainPartial(text: string) {
+    if (!text) return;
+    const reply = { id: crypto.randomUUID(), text };
+    setPartial((previous) => [...previous, reply]);
+  }
+
   function send(current: ExternalAgent, request: WritingRequest, approve: boolean) {
+    if (controller.current) return;
     setPending(null);
     setReply("");
+    setStreaming("");
+    lastRequest.current = { agent: current, access, request };
+    const running = target ? new AbortController() : null;
+    const signal = running?.signal;
+    controller.current = running;
+    if (running) setAttempt({ recipient: current.path, status: "working" });
     void run(async () => {
-      const connection = approve ? await platform.approve(current, access) : current;
-      if (approve) {
-        setAgent(connection);
-        setSaved((list) => [connection, ...list.filter((item) => item.path !== connection.path)]);
+      let text = "";
+      try {
+        const connection = approve ? await platform.approve(current, access) : current;
+        if (!mounted.current) return;
+        if (approve) {
+          setAgent(connection);
+          setSaved((list) => [connection, ...list.filter((item) => item.path !== connection.path)]);
+        }
+        if (signal?.aborted) throw "stopped";
+        const result = await externalAgentSender(
+          platform,
+          connection,
+          access,
+        )(
+          request,
+          signal
+            ? {
+                signal,
+                onDelta(delta) {
+                  if (signal.aborted) return;
+                  text += delta;
+                  setStreaming(text);
+                },
+              }
+            : undefined,
+        );
+        if (!mounted.current) return;
+        const outcome = signal?.aborted ? "stopped" : replyStatus(result);
+        if (running) setAttempt({ recipient: current.path, status: outcome });
+        if (outcome !== "complete") {
+          retainPartial(result.text);
+          return;
+        }
+        const verified = {
+          ...connection,
+          preferredAccess: access,
+          verified: [...new Set([...connection.verified, access])],
+        };
+        setAgent(verified);
+        setSaved((list) => [verified, ...list.filter((item) => item.path !== verified.path)]);
+        setReply(result.text);
+      } catch (problem) {
+        if (!mounted.current) return;
+        if (!signal) throw problem;
+        const outcome = failureStatus(problem, signal);
+        setAttempt({ recipient: current.path, status: outcome });
+        retainPartial(text);
+        if (outcome === "failed") throw problem;
+      } finally {
+        controller.current = null;
+        if (mounted.current) setStreaming("");
       }
-      const result = await externalAgentSender(platform, connection, access)(request);
-      const verified = {
-        ...connection,
-        preferredAccess: access,
-        verified: [...new Set([...connection.verified, access])],
-      };
-      setAgent(verified);
-      setSaved((list) => [verified, ...list.filter((item) => item.path !== verified.path)]);
-      setReply(result.text);
     });
   }
 
+  const retry =
+    !busy && !pending && attempt && attempt.status !== "complete" ? lastRequest.current : null;
+  const sameConnection =
+    agent &&
+    retry &&
+    agent.path === retry.agent.path &&
+    agent.revision === retry.agent.revision &&
+    access === retry.access;
   return (
     <div className="flex min-w-0 flex-col gap-3 text-sm">
       <fieldset disabled={pending !== null} className="flex min-w-0 flex-col gap-3">
@@ -256,6 +412,7 @@ function ExternalAgentPanel({
                 setStatus(null);
                 setError(null);
                 setReply("");
+                lastRequest.current = { agent, access, request };
                 setPending(request);
               }
             }}
@@ -342,6 +499,37 @@ function ExternalAgentPanel({
             </button>
           </div>
         </fieldset>
+      )}
+      {target && (taskStatus === "approval" || taskStatus === "working") && (
+        <button type="button" className={buttonClass} onClick={stop}>
+          {t("writing.task.stop")}
+        </button>
+      )}
+      {attempt && !busy && !pending && attempt.status !== "complete" && (
+        <p role="status">{t(`writing.task.${attempt.status}`)}</p>
+      )}
+      {sameConnection && (
+        <button
+          type="button"
+          className={buttonClass}
+          onClick={() => {
+            if (agent.approved.includes(access)) send(agent, retry.request, false);
+            else setPending(retry.request);
+          }}
+        >
+          {t("writing.task.retry")}
+        </button>
+      )}
+      {(partial.length > 0 || streaming) && (
+        <section
+          aria-label={t("writing.task.partial")}
+          className="whitespace-pre-wrap wrap-anywhere"
+        >
+          {partial.map(({ id, text }) => (
+            <p key={id}>{text}</p>
+          ))}
+          {streaming && <p>{streaming}</p>}
+        </section>
       )}
       {(busy || status || (reply && !renderReply)) && (
         <div role="status" className="whitespace-pre-wrap break-words">

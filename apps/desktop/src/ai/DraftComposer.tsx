@@ -1,20 +1,51 @@
-import { type FormEvent, useEffect, useId, useRef, useState } from "react";
+import { type FormEvent, useEffect, useId, useMemo, useRef, useState } from "react";
 import { type MessageKey, useT } from "../i18n/index.ts";
 import type { Platform } from "../platform/platform.ts";
+import { useTabStore } from "../tabs/context.ts";
 import { ExternalAgentAccessNotice } from "./ExternalAgentPanel.tsx";
 import { type ExternalAgent, externalAgentSender } from "./external-agent.ts";
 import { MaterialRequestNotice, useMaterialRequests } from "./MaterialRequest.tsx";
 import { modelEndpoint, modelWritingSender, type SavedModelConnection } from "./model.ts";
 import { TaskContextChecklist, useNamedMaterials } from "./TaskContext.tsx";
+import { useWritingTask, WritingTaskMaterials } from "./WritingTasks.tsx";
+import {
+  type AttemptStatus,
+  failureStatus,
+  replyStatus,
+  writingMaterialNames,
+} from "./writing-attempt.ts";
+import type { NamedMaterial, WritingRequest, WritingSender } from "./writing-sender.ts";
 
 const field =
   "w-full rounded-md border border-(--mint-border) bg-(--mint-bg) px-2 py-1 focus-visible:outline-2 focus-visible:outline-(--mint-accent)";
 const button =
   "rounded-md border border-(--mint-border) px-3 py-1 hover:bg-(--mint-hover) focus-visible:outline-2 focus-visible:outline-(--mint-accent) disabled:opacity-50";
 
+interface DraftConnection {
+  readonly id: string;
+  readonly label: string;
+  readonly send: WritingSender;
+}
+
+interface DraftTask {
+  readonly request: WritingRequest;
+  readonly folder: string | null;
+}
+
+interface DraftAttempt {
+  readonly task: DraftTask;
+  readonly connection: DraftConnection;
+  readonly status: AttemptStatus;
+  readonly partial: string;
+  readonly approved: readonly NamedMaterial[];
+}
+
 export function DraftComposer({
   platform,
   folder,
+  tabId,
+  name,
+  active,
   settingsOpen,
   canApplyDraft,
   onDraft,
@@ -22,6 +53,9 @@ export function DraftComposer({
 }: {
   readonly platform: Platform;
   readonly folder: string | null;
+  readonly tabId: number;
+  readonly name: string;
+  readonly active: boolean;
   readonly settingsOpen: boolean;
   readonly canApplyDraft: () => boolean;
   readonly onDraft: (text: string) => boolean;
@@ -30,7 +64,13 @@ export function DraftComposer({
   const t = useT();
   const id = useId();
   const input = useRef<HTMLInputElement>(null);
-  const generation = useRef(0);
+  const store = useTabStore();
+  const controller = useRef<AbortController | null>(null);
+  const mounted = useRef(true);
+  const [collapsed, setCollapsed] = useState(false);
+  const [attempt, setAttempt] = useState<DraftAttempt | null>(null);
+  const [partials, setPartials] = useState<readonly { id: string; text: string }[]>([]);
+  const [retryId, setRetryId] = useState("");
   const [instruction, setInstruction] = useState("");
   const [address, setAddress] = useState("");
   const [model, setModel] = useState("");
@@ -38,7 +78,7 @@ export function DraftComposer({
   const [agents, setAgents] = useState<ExternalAgent[]>([]);
   const [models, setModels] = useState<readonly SavedModelConnection[]>([]);
   const [choice, setChoice] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const busy = attempt?.status === "working" || attempt?.status === "approval";
   const [error, setError] = useState<MessageKey | null>(null);
   const [unapplied, setUnapplied] = useState("");
   const named = useNamedMaterials();
@@ -64,11 +104,16 @@ export function DraftComposer({
       : undefined;
 
   useEffect(() => {
-    input.current?.focus();
+    mounted.current = true;
     return () => {
-      generation.current++;
+      mounted.current = false;
+      controller.current?.abort();
     };
   }, []);
+
+  useEffect(() => {
+    if (store.getState().activeId === tabId && !collapsed && !settingsOpen) input.current?.focus();
+  }, [collapsed, settingsOpen, store, tabId]);
 
   useEffect(() => {
     if (settingsOpen) return;
@@ -104,25 +149,40 @@ export function DraftComposer({
     !named.loading &&
     (!!agent || (!!endpoint && (!!remembered || (custom && !!model.trim()))));
 
+  const connections: DraftConnection[] = [
+    ...models.map((item) => ({
+      id: `model:${item.id}`,
+      label: t("writing.recipient.model", {
+        name: item.name,
+        endpoint: modelEndpoint(item.address),
+      }),
+      send: modelWritingSender(platform.sendModelMessage, item),
+    })),
+    ...agents.map((item) => ({
+      id: `agent:${item.path}`,
+      label: t("writing.recipient.agent", { path: item.path }),
+      send: externalAgentSender(platform.externalAgent, item, item.preferredAccess),
+    })),
+  ];
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy || !canSend || unapplied) return;
+    if (busy || !canSend || unapplied || !recipient) return;
     if (!canApplyDraft()) {
       setError("draft.requiresEmptyUntitled");
       return;
     }
-    const request = ++generation.current;
-    setError(null);
-    setBusy(true);
-    try {
-      const send = agent
-        ? externalAgentSender(platform.externalAgent, agent, agent.preferredAccess)
-        : remembered
-          ? modelWritingSender(platform.sendModelMessage, remembered)
-          : modelWritingSender(platform.sendModelMessage, { address, model }, { apiKey: key });
-      const reply = await materialRequests.send(
-        send,
-        {
+    const connection = custom
+      ? {
+          id: "",
+          label: recipient,
+          send: modelWritingSender(platform.sendModelMessage, { address, model }, { apiKey: key }),
+        }
+      : connections.find(({ id }) => id === choice);
+    if (!connection) return;
+    await runDraft(
+      {
+        request: {
           instruction: t("draft.prompt", { instruction: instruction.trim() }),
           taskContext:
             named.materials.length || searchFolder
@@ -132,35 +192,131 @@ export function DraftComposer({
                 }
               : undefined,
         },
-        recipient ?? "",
-        searchFolder,
+        folder: searchFolder,
+      },
+      connection,
+    );
+  }
+
+  async function runDraft(task: DraftTask, connection: DraftConnection) {
+    if (controller.current) return;
+    const running = new AbortController();
+    const { signal } = running;
+    controller.current = running;
+    const entry = { task, connection };
+    let partial = "";
+    let approved: NamedMaterial[] = [];
+    let status: AttemptStatus;
+    setError(null);
+    setRetryId("");
+    setAttempt({ ...entry, approved, partial, status: "working" });
+    try {
+      const reply = await materialRequests.send(
+        connection.send,
+        task.request,
+        connection.label,
+        task.folder,
+        {
+          signal,
+          onDelta(delta) {
+            if (signal.aborted) return;
+            partial += delta;
+            setAttempt({ ...entry, approved, partial, status: "working" });
+          },
+          onApproval() {
+            partial = "";
+            setAttempt({ ...entry, approved, partial, status: "approval" });
+          },
+          onResume(decision) {
+            if (decision?.outcome === "allowed") approved = [...approved, decision.material];
+            if (!signal.aborted) setAttempt({ ...entry, approved, partial, status: "working" });
+          },
+        },
       );
-      if (request !== generation.current) return;
-      if (
-        !reply.text.trim() ||
-        ("finishReason" in reply && reply.finishReason !== null && reply.finishReason !== "stop")
-      ) {
-        throw "incomplete";
-      }
-      if (onDraft(reply.text)) onClose();
-      else {
+      if (!mounted.current) return;
+      status = signal.aborted ? "stopped" : replyStatus(reply);
+      partial = reply.text;
+      if (status === "complete") {
+        controller.current = null;
+        if (onDraft(reply.text)) {
+          onClose();
+          return;
+        }
         setUnapplied(reply.text);
         setError("draft.changed");
+        partial = "";
       }
     } catch (error) {
-      if (request !== generation.current) return;
-      const code = error instanceof Error ? error.message : error;
-      setError(
-        code === "agentChanged" || code === "agentAccessRequired"
-          ? "agent.reviewAgain"
-          : code === "connectionMissing"
-            ? "draft.connectionUnavailable"
-            : "draft.failed",
-      );
-    } finally {
-      if (request === generation.current) setBusy(false);
+      if (!mounted.current) return;
+      status = failureStatus(error, signal);
+      if (status === "failed") {
+        const code = error instanceof Error ? error.message : error;
+        setError(
+          code === "agentChanged" || code === "agentAccessRequired"
+            ? "agent.reviewAgain"
+            : code === "connectionMissing"
+              ? "draft.connectionUnavailable"
+              : "draft.failed",
+        );
+      }
+    }
+    if (!mounted.current) return;
+    if (partial) {
+      const reply = { id: crypto.randomUUID(), text: partial };
+      setPartials((previous) => [...previous, reply]);
+    }
+    setAttempt({ ...entry, approved, status, partial: "" });
+    controller.current = null;
+  }
+
+  const pending = materialRequests.pending;
+  const report = useMemo(
+    () =>
+      attempt && {
+        name,
+        recipient: attempt.connection.label,
+        material: [
+          t("writing.scope.untitled"),
+          ...writingMaterialNames(attempt.task.request),
+          ...attempt.approved.map(({ name }) => name),
+          ...(pending ? [pending.name] : []),
+        ].join(" · "),
+        status: attempt.status,
+        count: 0,
+        stop: busy ? () => controller.current?.abort() : undefined,
+        reveal: () => {
+          setCollapsed(false);
+          store.activate(tabId);
+        },
+      },
+    [attempt, busy, name, pending, store, t, tabId],
+  );
+  useWritingTask(report);
+
+  function close() {
+    if (!attempt || (!busy && attempt.status === "complete")) onClose();
+    else {
+      setCollapsed(true);
+      if (active) store.editor(tabId)?.focus();
     }
   }
+
+  const retry = attempt && !busy && attempt.status !== "complete" ? attempt : null;
+  const alternatives = retry ? connections.filter(({ id }) => id !== retry.connection.id) : [];
+  const alternate = alternatives.find(({ id }) => id === retryId);
+
+  if (collapsed)
+    return (
+      active && (
+        <button
+          type="button"
+          className={`${button} self-start`}
+          onClick={() => setCollapsed(false)}
+        >
+          {t("writing.resume")}
+        </button>
+      )
+    );
 
   return (
     <form
@@ -172,7 +328,7 @@ export function DraftComposer({
         <h2 id={id} className="font-medium">
           {t("command.file.draftWithAi")}
         </h2>
-        <button type="button" className={button} onClick={onClose}>
+        <button type="button" className={button} onClick={close}>
           {t("settings.close")}
         </button>
       </div>
@@ -294,6 +450,71 @@ export function DraftComposer({
         />
       ) : (
         busy && <p role="status">{t("draft.generating")}</p>
+      )}
+      {attempt && (
+        <WritingTaskMaterials
+          request={attempt.task.request}
+          approved={attempt.approved}
+          folder={attempt.task.folder}
+        />
+      )}
+      {busy && (
+        <button type="button" className={button} onClick={() => controller.current?.abort()}>
+          {t("writing.task.stop")}
+        </button>
+      )}
+      {retry && (
+        <div className="space-y-2">
+          <p role="status">{t(`writing.task.${retry.status}`)}</p>
+          <button
+            type="button"
+            className={button}
+            onClick={() => void runDraft(retry.task, retry.connection)}
+          >
+            {t("writing.task.retry")}
+          </button>
+          {alternatives.length > 0 && (
+            <>
+              <label>
+                {t("writing.task.retryConnection")}
+                <select
+                  className={field}
+                  value={retryId}
+                  onChange={(event) => setRetryId(event.target.value)}
+                >
+                  <option value="">{t("writing.chooseRecipient")}</option>
+                  {alternatives.map(({ id, label }) => (
+                    <option key={id} value={id}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                className={button}
+                disabled={!alternate}
+                onClick={() => alternate && void runDraft(retry.task, alternate)}
+              >
+                {t("writing.task.retryOther")}
+              </button>
+            </>
+          )}
+        </div>
+      )}
+      {(partials.length > 0 || attempt?.partial) && (
+        <section aria-label={t("writing.task.partial")} className="space-y-2">
+          {partials.map(({ id, text }) => (
+            <pre key={id} className="max-h-32 overflow-auto whitespace-pre-wrap wrap-anywhere">
+              {text}
+            </pre>
+          ))}
+          {attempt?.partial && (
+            <pre className="max-h-32 overflow-auto whitespace-pre-wrap wrap-anywhere">
+              {attempt.partial}
+            </pre>
+          )}
+        </section>
       )}
       {error && <p role="alert">{t(error)}</p>}
       {unapplied && (

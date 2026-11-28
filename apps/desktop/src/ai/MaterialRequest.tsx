@@ -10,6 +10,7 @@ import {
 } from "./TaskContext.tsx";
 import type {
   MaterialDecision,
+  WritingOptions,
   WritingReply,
   WritingRequest,
   WritingSender,
@@ -82,22 +83,40 @@ export function useMaterialRequests() {
       request: WritingRequest,
       recipient: string,
       folder: string | null,
+      options?: WritingOptions & {
+        readonly onApproval?: () => void;
+        readonly onResume?: (decision: MaterialDecision | null) => void;
+      },
     ) {
       const id = ++sequence.current;
       let outbound = request;
       while (true) {
-        const reply = await send(outbound);
+        if (options?.signal?.aborted) throw "stopped";
+        const reply = await send(outbound, options);
         const extra = requestedMaterial(reply);
         if (!extra) return reply;
+        if (options?.signal?.aborted) throw "stopped";
         // A skipped or supplied request is already resolved for this task.
         const previous = outbound.taskContext?.materialDecisions ?? [];
         if (id !== sequence.current || previous.some(({ name }) => name === extra.name))
           throw new Error("unresolvedMaterialRequest");
 
         const response = await new Promise<MaterialDecision | null>((resolve) => {
-          decision.current = resolve;
+          const signal = options?.signal;
+          const abort = () => decision.current?.(null);
+          decision.current = (value) => {
+            signal?.removeEventListener("abort", abort);
+            resolve(value);
+          };
+          signal?.addEventListener("abort", abort, { once: true });
           setPending({ ...extra, id: previous.length, recipient, folder });
+          options?.onApproval?.();
         });
+        if (id === sequence.current) {
+          decision.current = null;
+          setPending(null);
+          options?.onResume?.(response);
+        }
         if (!response || id !== sequence.current) throw new Error("cancelled");
         outbound = {
           ...outbound,
