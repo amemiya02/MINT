@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useId, useMemo, useRef, useState } from "react";
 import { type MessageKey, useT } from "../i18n/index.ts";
 import type { Platform } from "../platform/platform.ts";
+import { useSettings } from "../settings/useSettings.ts";
 import { useTabStore } from "../tabs/context.ts";
 import { ExternalAgentAccessNotice } from "./ExternalAgentPanel.tsx";
 import { type ExternalAgent, externalAgentSender } from "./external-agent.ts";
@@ -112,6 +113,7 @@ export function DraftComposer({
   const [agents, setAgents] = useState<ExternalAgent[]>([]);
   const [models, setModels] = useState<readonly SavedModelConnection[]>([]);
   const [choice, setChoice] = useState<string | null>(null);
+  const { settings } = useSettings();
   const busy = attempt?.status === "working" || attempt?.status === "approval";
   const [error, setError] = useState<MessageKey | null>(null);
   const [unapplied, setUnapplied] = useState("");
@@ -128,9 +130,14 @@ export function DraftComposer({
   const materialRequests = useMaterialRequests(platform.sendMcpRequest);
   const toolPicker = useWritingToolPicker(platform.sendMcpRequest);
   const toolApproval = materialRequests.externalTool;
-  const agent = agents.find(({ path }) => `agent:${path}` === choice);
-  const remembered = models.find(({ id }) => `model:${id}` === choice);
-  const custom = !choice;
+  const defaultConnection = settings.defaultWritingConnection;
+  const selected =
+    choice ??
+    (defaultConnection ||
+      (models[0] ? `model:${models[0].id}` : agents[0] ? `agent:${agents[0].path}` : ""));
+  const agent = agents.find(({ path }) => `agent:${path}` === selected);
+  const remembered = models.find(({ id }) => `model:${id}` === selected);
+  const custom = !selected;
   const unavailable = !custom && !agent && !remembered;
   let endpoint = "";
   try {
@@ -181,8 +188,6 @@ export function DraftComposer({
       (saved) => {
         if (!mounted) return;
         setModels(saved);
-        const first = saved[0];
-        if (first) setChoice((previous) => previous ?? `model:${first.id}`);
       },
       () => {
         if (mounted) setError("models.error.connections");
@@ -257,7 +262,7 @@ export function DraftComposer({
           }),
           visionTarget: inlineTarget,
         }
-      : connections.find(({ id }) => id === choice);
+      : connections.find(({ id }) => id === selected);
     if (!connection) return;
     await runDraft(
       {
@@ -563,7 +568,7 @@ export function DraftComposer({
             {t("draft.connection")}
             <select
               className={field}
-              value={choice ?? ""}
+              value={selected}
               onChange={(event) => {
                 setChoice(event.target.value);
                 setKey("");
@@ -573,7 +578,7 @@ export function DraftComposer({
             >
               <option value="">{t("models.custom")}</option>
               {unavailable && (
-                <option value={choice ?? ""} disabled>
+                <option value={selected} disabled>
                   {t("draft.connectionUnavailable")}
                 </option>
               )}

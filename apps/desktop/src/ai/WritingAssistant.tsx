@@ -13,6 +13,7 @@ import {
 import { useT } from "../i18n/index.ts";
 import { isWithin, parentPath } from "../paths.ts";
 import type { Platform } from "../platform/platform.ts";
+import { useSettings } from "../settings/useSettings.ts";
 import { useTabStore } from "../tabs/context.ts";
 import { useModalDialog } from "../window/useModalDialog.ts";
 import { FocusedWritingReview, type ReviewEntry } from "./FocusedWritingReview.tsx";
@@ -49,7 +50,12 @@ import {
   replyStatus,
   writingMaterialNames,
 } from "./writing-attempt.ts";
-import { loadWritingRecipients, type WritingRecipient } from "./writing-recipients.ts";
+import {
+  effectiveWritingRecipient,
+  loadWritingRecipients,
+  type WritingRecipient,
+  writingConnectionChoice,
+} from "./writing-recipients.ts";
 import { captureWritingSelection, type WritingSelection } from "./writing-selection.ts";
 import {
   contextMaterials,
@@ -82,6 +88,12 @@ const fieldClass =
 
 const scopes = ["selection", "document", "instruction"] as const;
 type Scope = (typeof scopes)[number] | "folder";
+
+function connectionSettingForScope(scope: Scope) {
+  if (scope === "folder") return "multiFileWritingConnection";
+  if (scope === "document") return "reviewWritingConnection";
+  return "defaultWritingConnection";
+}
 const actions = ["comment", "preview", "direct"] as const;
 type Action = (typeof actions)[number];
 
@@ -439,6 +451,7 @@ function Composer({
 }) {
   const t = useT();
   const [instruction, setInstruction] = useState("");
+  const { settings } = useSettings();
   const [scope, setScope] = useState<Scope>(origin.folder ? "folder" : "selection");
   const [actionOverride, setActionOverride] = useState<Action | null>(null);
   const [includeDraft, setIncludeDraft] = useState(false);
@@ -492,7 +505,10 @@ function Composer({
   const returnTab = useRef(tabId);
   const reading = useRef<ReturnType<MintEditor["captureReadingPosition"]> | null>(null);
   const [draft, setDraft] = useState(() => origin.editor.getText());
-  const recipient = recipients.find((candidate) => candidate.id === recipientId);
+  const connectionChoice = writingConnectionChoice(settings, connectionSettingForScope(scope));
+  const recipient = recipientId
+    ? recipients.find(({ id }) => id === recipientId)
+    : effectiveWritingRecipient(recipients, connectionChoice);
   const checkVision = useModelVision(platform.sendModelMessage);
   const visionFor = (candidate?: WritingRecipient) =>
     checkVision(
@@ -703,7 +719,6 @@ function Composer({
     void loadWritingRecipients(platform).then(({ available, failed }) => {
       if (!current) return;
       setRecipients(available);
-      setRecipientId((previous) => previous ?? available[0]?.id ?? null);
       setLoadFailed(failed);
       setLoading(false);
     });
@@ -2050,7 +2065,22 @@ function Composer({
                 <select
                   className={fieldClass}
                   value={scope}
-                  onChange={(event) => setScope(event.target.value as Scope)}
+                  onChange={(event) => {
+                    const next = event.target.value as Scope;
+                    setScope(next);
+                    const choice = writingConnectionChoice(
+                      settings,
+                      connectionSettingForScope(next),
+                    );
+                    if (
+                      !recipientId &&
+                      effectiveWritingRecipient(recipients, choice)?.id !== recipient?.id
+                    ) {
+                      setAllowedFolder(null);
+                      setIncludeHistory(false);
+                      toolPicker.clear();
+                    }
+                  }}
                 >
                   {(origin.folder ? (["folder"] as const) : scopes).map((id) => (
                     <option key={id} value={id}>
@@ -2074,7 +2104,13 @@ function Composer({
                 >
                   {!recipient && (
                     <option value="">
-                      {t(loading ? "writing.loading" : "writing.chooseRecipient")}
+                      {t(
+                        loading
+                          ? "writing.loading"
+                          : connectionChoice || recipientId
+                            ? "settings.modelUnavailable"
+                            : "writing.chooseRecipient",
+                      )}
                     </option>
                   )}
                   {recipients.map((candidate) => (

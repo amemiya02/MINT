@@ -1,9 +1,16 @@
 import type { Annotation, MintEditor, SharedDocument } from "@mint/editor";
 import { useEffect, useRef, useState } from "react";
 import { ProposedSelectionEdit } from "../ai/ProposedSelectionEdit.tsx";
-import { loadWritingRecipients, type WritingRecipient } from "../ai/writing-recipients.ts";
+import {
+  effectiveWritingRecipient,
+  loadWritingRecipients,
+  type WritingRecipient,
+  writingConnectionChoice,
+  writingRecipientLabel,
+} from "../ai/writing-recipients.ts";
 import { useT } from "../i18n/index.ts";
 import type { Platform } from "../platform/platform.ts";
+import { useSettings } from "../settings/useSettings.ts";
 import type { TabStore } from "../tabs/tab-store.ts";
 import {
   type AnnotationResult,
@@ -48,6 +55,7 @@ export function AnnotationReview({
   readonly onResolve: (id: string) => void;
 }) {
   const t = useT();
+  const { settings } = useSettings();
   const [recipients, setRecipients] = useState<readonly WritingRecipient[]>([]);
   const [recipientId, setRecipientId] = useState("");
   const [loading, setLoading] = useState(true);
@@ -84,9 +92,6 @@ export function AnnotationReview({
       ({ available, failed }) => {
         if (!current) return;
         setRecipients(available);
-        setRecipientId((previous) =>
-          available.some(({ id }) => id === previous) ? previous : (available[0]?.id ?? ""),
-        );
         setLoading(false);
         setLoadFailed(failed);
       },
@@ -99,11 +104,12 @@ export function AnnotationReview({
   const available = isDocument
     ? recipients.filter((item) => item.kind === "model" || item.access === "readOnly")
     : recipients;
-  const recipient = available.find(({ id }) => id === recipientId);
+  const connectionChoice = writingConnectionChoice(settings, "reviewWritingConnection");
+  const recipient = recipientId
+    ? available.find(({ id }) => id === recipientId)
+    : effectiveWritingRecipient(available, connectionChoice);
   function label(candidate: WritingRecipient) {
-    return candidate.kind === "model"
-      ? t("writing.recipient.model", { name: candidate.name, endpoint: candidate.endpoint })
-      : t("writing.recipient.agent", { path: candidate.path });
+    return writingRecipientLabel(t, candidate);
   }
 
   function clearTrackedRanges() {
@@ -280,12 +286,20 @@ export function AnnotationReview({
           {t("writing.recipient")}
           <select
             className="min-w-0 rounded border border-(--mint-border) bg-(--mint-bg) p-1"
-            value={recipientId}
+            value={recipient?.id ?? ""}
             disabled={loading || busy}
             onChange={(event) => setRecipientId(event.currentTarget.value)}
           >
             {!recipient && (
-              <option value="">{t(loading ? "writing.loading" : "writing.chooseRecipient")}</option>
+              <option value="">
+                {t(
+                  loading
+                    ? "writing.loading"
+                    : connectionChoice || recipientId
+                      ? "settings.modelUnavailable"
+                      : "writing.chooseRecipient",
+                )}
+              </option>
             )}
             {available.map((candidate) => (
               <option key={candidate.id} value={candidate.id}>
