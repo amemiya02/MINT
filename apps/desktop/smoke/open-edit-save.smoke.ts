@@ -520,9 +520,19 @@ async function clickPath(xpath: string) {
 const click = (label: string, by: "text" | "aria-label" = "text") =>
   clickPath(`//button[${by === "text" ? "normalize-space(.)" : "@aria-label"}='${label}']`);
 const clickSettingsButton = (label: string) =>
-  clickPath(
-    `//dialog[@open][.//h2[normalize-space(.)='Settings']]//button[normalize-space(.)='${label}' and not(@disabled) and not(ancestor::fieldset[@disabled])]`,
-  );
+  until(`the ${label} button in Settings to be clickable`, async () => {
+    const button = await command<Record<string, string>>("POST", `/session/${session}/element`, {
+      using: "xpath",
+      value: `//dialog[@open][.//h2[normalize-space(.)='Settings']]//button[normalize-space(.)='${label}' and not(@disabled) and not(ancestor::*[@hidden] or ancestor::fieldset[@disabled])]`,
+    });
+    // WebKitWebDriver can find an enabled button while it is still clipped by the Settings scroller.
+    await command("POST", `/session/${session}/execute/sync`, {
+      script: "arguments[0].scrollIntoView({ block: 'center' })",
+      args: [button],
+    });
+    await command("POST", `/session/${session}/element/${button[elementKey]}/click`, {});
+    return true;
+  }).catch(explain);
 const shows = (text: string) =>
   until(text, () =>
     command<boolean>("POST", `/session/${session}/execute/sync`, {
@@ -2177,10 +2187,11 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   await click("Try example");
   await shows("Agent access changed. Review its permissions before sending.");
   assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, 6);
-  // The warning can render before reinspection finishes and enables the retry.
   await clickSettingsButton("Try example");
-  await click("Decline");
+  await shows("Use Codex’s configured permissions and send the task shown above.");
+  await clickSettingsButton("Decline");
   await shows("Agent access declined.");
-  await click("Forget Agent");
-  await click("Close");
+  assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, 6);
+  await clickSettingsButton("Forget Agent");
+  await clickSettingsButton("Close");
 });

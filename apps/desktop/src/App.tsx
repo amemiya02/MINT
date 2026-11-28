@@ -481,6 +481,8 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
       const { proofreading, proofreadingModel } = settings.getSnapshot().settings;
       void settings.set("proofreading", !proofreading);
       if (!proofreading && !proofreadingModel) setSettingsOpen(true);
+      // Closing the Command Palette restores focus. Refresh the editor's DOM selection too.
+      else if (activeId !== null) store.editor(activeId)?.focus();
     },
     "view.toggleVimMode": () =>
       void settings.set("vimMode", !settings.getSnapshot().settings.vimMode),

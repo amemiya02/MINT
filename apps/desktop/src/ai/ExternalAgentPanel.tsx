@@ -87,11 +87,14 @@ function ExternalAgentPanel({ platform, selection }: Props) {
   const sampleInstruction = t("agent.sampleInstruction");
   const material = selection ?? t("agent.sampleText");
 
-  const select = useCallback((next: ExternalAgent | null) => {
-    setAgent(next);
-    setAccess(next?.preferredAccess ?? "readOnly");
-    setReply("");
-  }, []);
+  const select = useCallback(
+    (next: ExternalAgent | null, requestedAccess = next?.preferredAccess) => {
+      setAgent(next);
+      setAccess(requestedAccess ?? "readOnly");
+      setReply("");
+    },
+    [],
+  );
 
   useEffect(() => {
     let closed = false;
@@ -127,8 +130,8 @@ function ExternalAgentPanel({ platform, selection }: Props) {
     } catch (problem) {
       const code = problem instanceof Error ? problem.message : problem;
       if (code === "agentChanged" || code === "agentAccessRequired") {
+        if (agent) select(await platform.inspect(agent.path).catch(() => null), access);
         setError("agent.reviewAgain");
-        if (agent) select(await platform.inspect(agent.path).catch(() => null));
       } else {
         setError(code === "agentUnavailable" ? "agent.unavailable" : "agent.failed");
       }

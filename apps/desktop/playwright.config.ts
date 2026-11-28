@@ -4,6 +4,8 @@ import { defineConfig, devices } from "@playwright/test";
 const port = Number(process.env.MINT_E2E_PORT ?? 4319);
 const host = "127.0.0.1";
 const serverUrl = `http://${host}:${port}`;
+// Hosted tests serve the built frontend without the dev server's optimizer or hot reloads.
+const preview = process.env.MINT_E2E_PREVIEW === "1";
 
 // Seam 3: the shell runs in a plain browser with the in-memory platform injected.
 export default defineConfig({
@@ -17,8 +19,8 @@ export default defineConfig({
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    command: `pnpm exec vite --host ${host} --port ${port} --strictPort`,
+    command: `pnpm exec vite${preview ? " preview" : ""} --host ${host} --port ${port} --strictPort`,
     url: serverUrl,
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: !preview && !process.env.CI,
   },
 });
