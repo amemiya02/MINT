@@ -2926,6 +2926,167 @@ test("a slash writing skill sends the approved plan and remembers its folder act
   }
 });
 
+test("a shared writing skill uses fresh materials and the recipient's native connection", async () => {
+  const folder = await mkdtemp(join(dir, "shared-writing-skill-"));
+  const authorDraft = join(folder, "author-agreement.md");
+  const recipientDraft = join(folder, "recipient-agreement.md");
+  const exported = join(folder, "agreement-review.mint-skill.json");
+  const source = "The authors is ready.";
+  const theirText = "The reviewers is ready.";
+  const oldMaterial = "Author's private writing material";
+  const trialMaterial = "Fresh trial reference";
+  const recipientMaterial = "Recipient's approved writing material";
+  const authorKey = "fixture-author-key";
+  const recipientKey = "fixture-recipient-key";
+  const format = "Report each issue as a short bullet.";
+  const received: {
+    path?: string;
+    authorization?: string;
+    prompt: { instruction: string; selectedText?: string; taskContext?: unknown };
+  }[] = [];
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(chunk);
+    const { messages } = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    received.push({
+      path: request.url,
+      authorization: request.headers.authorization,
+      prompt: JSON.parse(messages.at(-1).content),
+    });
+    response.writeHead(200, { "Content-Type": "application/json" }).end(
+      JSON.stringify({
+        choices: [{ message: { content: "Check the subject and verb." }, finish_reason: "stop" }],
+      }),
+    );
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  await writeFile(authorDraft, source);
+  await writeFile(recipientDraft, theirText);
+  const composer = "section[aria-label='Ask AI']";
+  const fill = async (label: string, element: "textarea" | "input", value: string) => {
+    await clickPath(
+      `//section[@aria-label='Ask AI']//label[normalize-space(.)='${label}']/${element}`,
+    );
+    await keyActions([...chord(keys.control, "a"), ...typing(value)]);
+  };
+  async function start(path: string, name: string, route: string, secret: string) {
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const base = `http://127.0.0.1:${address.port}/${route}/v1`;
+    await restart([path]);
+    await invokeNative("save_model_connection", {
+      connection: {
+        name,
+        address: base,
+        model: "skill-fixture",
+        apiKey: secret,
+        lifetime: "session",
+      },
+    });
+    await clickPath("//div[contains(concat(' ', normalize-space(@class), ' '), ' cm-content ')]");
+    await keyActions(chord(keys.control, "a"));
+    return `Comment only · Current selection · ${name} · ${base}/chat/completions`;
+  }
+  const skillsMenu = async () => {
+    await exec(
+      "/usr/bin/python3",
+      ["smoke/activate-gtk-menu.py", await instancePid(), "Edit", "Writing Skills…"],
+      { timeout: 35_000 },
+    ).catch(explain);
+  };
+  const expectReply = () =>
+    waitForView(
+      "the native model comment",
+      `return document.querySelector(${JSON.stringify(`${composer} textarea[aria-label="AI reply"]`)})?.value === 'Check the subject and verb.';`,
+    );
+
+  try {
+    const authorSend = await start(authorDraft, "Author skill fixture", "author", authorKey);
+    await click("Ask AI");
+    await fill("Instruction", "input", "/copyedit");
+    await showsIn(composer, "Correct spelling, punctuation, and grammar.");
+    await waitForView(
+      "comment-only action can be selected",
+      `
+      const select = document.querySelector("section[aria-label='Ask AI'] select:has(option[value='comment'])");
+      if (!select) return false;
+      select.value = 'comment';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    `,
+    );
+    await addPastedWritingMaterial(oldMaterial);
+    await click(authorSend);
+    await expectReply();
+    await click("Save as writing skill");
+    await fill("Skill name", "input", "Agreement review");
+    await fill("Result format", "textarea", format);
+    await addPastedWritingMaterial(trialMaterial);
+    await clickPath(
+      "//section[@aria-label='Ask AI']//button[starts-with(normalize-space(.), 'Trial run ·')]",
+    );
+    await showsIn(composer, "Trial result");
+    assert.equal(received.length, 2);
+    assert.deepEqual(received[1]?.prompt.taskContext, {
+      materials: [{ name: "Pasted text", text: trialMaterial }],
+    });
+    assert.equal(await readFile(authorDraft, "utf8"), source);
+    await click("Save skill");
+    await showsIn(composer, "Saved /agreement-review.");
+    await clickPath("//section[@aria-label='Ask AI']//button[normalize-space(.)='Close']");
+    await clickPath("//div[contains(concat(' ', normalize-space(@class), ' '), ' cm-content ')]");
+    await keyActions(chord(keys.control, "a"));
+    await skillsMenu();
+    await click("/agreement-review · Agreement review");
+    await chooseNativePath("Export skill", "Export skill", exported, "Save");
+    const bytes = await until("the writing skill to be written", () =>
+      readFile(exported, "utf8").catch(() => null),
+    );
+    assert.ok(bytes.includes("Correct spelling, punctuation, and grammar."));
+    assert.ok(bytes.includes(format));
+    for (const privateValue of [source, oldMaterial, trialMaterial, authorKey, "/author/v1"]) {
+      assert.ok(!bytes.includes(privateValue));
+    }
+
+    const recipientSend = await start(
+      recipientDraft,
+      "Recipient skill fixture",
+      "recipient",
+      recipientKey,
+    );
+    await skillsMenu();
+    await chooseWebViewFile("Import skill", exported, "body");
+    await showsIn(composer, "Review imported skill");
+    await showsIn(composer, "Material scope · Current selection");
+    await showsIn(composer, "Default action · Comment only");
+    await showsIn(composer, "This skill requires no tools.");
+    assert.equal(received.length, 2);
+    await click("Save skill");
+    await click("/agreement-review-2 · Agreement review");
+    await addPastedWritingMaterial(recipientMaterial);
+    await click(recipientSend);
+    await expectReply();
+    assert.equal(received.length, 3);
+    assert.equal(received[0]?.authorization, `Bearer ${authorKey}`);
+    assert.equal(received[2]?.authorization, `Bearer ${recipientKey}`);
+    assert.equal(received[2]?.path, "/recipient/v1/chat/completions");
+    const prompt = received[2]?.prompt;
+    assert.equal(prompt?.selectedText, theirText);
+    assert.deepEqual(prompt?.taskContext, {
+      materials: [{ name: "Pasted text", text: recipientMaterial }],
+    });
+    assert.ok(prompt?.instruction.includes("Correct spelling, punctuation, and grammar."));
+    assert.ok(prompt?.instruction.includes(format));
+    assert.equal(await readFile(recipientDraft, "utf8"), theirText);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
 test("native writing sends only the approved excerpt after a model capacity error", async () => {
   const publicLine = "Ridge is open.\n";
   const privateLine = "Private ranger contact details.";

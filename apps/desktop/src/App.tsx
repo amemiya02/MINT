@@ -555,9 +555,8 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
       setWritingRequest({ tabId: activeId ?? store.newDocument(), folder });
     },
     "edit.writingSkills": () => {
-      if (activeId === null || !store.editor(activeId)) return;
       setShellError(null);
-      setWritingRequest({ tabId: activeId, startWithSkills: true });
+      setWritingRequest({ tabId: activeId ?? store.newDocument(), startWithSkills: true });
     },
     "edit.writingTasks": () => setTaskDialog(activeId === null ? "all" : "current"),
     "edit.allWritingTasks": () => setTaskDialog("all"),

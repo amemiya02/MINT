@@ -37,6 +37,7 @@ export function useNamedMaterials() {
   const [entries, setEntries] = useState<readonly MaterialEntry[]>([]);
   const [ranges, setRanges] = useState<readonly RangeEntry[]>([]);
   const nextId = useRef(0);
+  const generation = useRef(0);
   const [loading, setLoading] = useState(0);
   const [error, setError] = useState(false);
   const confirmed = useMemo(
@@ -74,6 +75,12 @@ export function useNamedMaterials() {
         previous.map((range) => (range.id === id ? { ...range, editing: false, selected } : range)),
       );
     },
+    clear() {
+      generation.current++;
+      setError(false);
+      setEntries([]);
+      setRanges([]);
+    },
     remove(id: MaterialEntry["id"]) {
       setEntries((previous) => previous.filter((entry) => entry.id !== id));
       setRanges((previous) => previous.filter((entry) => entry.id !== id));
@@ -88,6 +95,7 @@ export function useNamedMaterials() {
       return valid;
     },
     async read(pick: () => Promise<readonly File[]>) {
+      const started = generation.current;
       setLoading((count) => count + 1);
       setError(false);
       try {
@@ -100,6 +108,7 @@ export function useNamedMaterials() {
             return { id, material: { name: file.name, text: await readMaterialText(file) } };
           }),
         );
+        if (generation.current !== started) return;
         const added: MaterialEntry[] = [];
         const sources: RangeEntry[] = [];
         for (const result of parsed) {
@@ -110,7 +119,7 @@ export function useNamedMaterials() {
         if (added.length) setEntries((previous) => [...previous, ...added]);
         if (sources.length) setRanges((previous) => [...previous, ...sources]);
       } catch {
-        setError(true);
+        if (generation.current === started) setError(true);
       } finally {
         setLoading((count) => count - 1);
       }
