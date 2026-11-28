@@ -119,8 +119,10 @@ jobs:
           Copy-Item smoke/windows-pdf-probe.js dist/windows-pdf-probe.js
           $dir = [Net.WebUtility]::HtmlEncode("$env:RUNNER_TEMP/mint-webview2-proof")
           $probe = "<script defer src='/windows-pdf-probe.js' data-proof='$dir'></script>"
-          $html = Get-Content dist/index.html -Raw
-          $html.Replace('</body>', "$probe</body>") | Set-Content dist/index.html -NoNewline
+          foreach ($page in 'dist/index.html', 'dist/print.html') {
+            $html = Get-Content $page -Raw
+            $html.Replace('</body>', "$probe</body>") | Set-Content $page -NoNewline
+          }
       - name: Build MINT for WebView2 PDF verification
         working-directory: apps/desktop/src-tauri
         run: cargo build --locked --features tauri/custom-protocol --bin mint

@@ -7,6 +7,18 @@
       path: `${directory}/${name}`,
       text: JSON.stringify(value),
     });
+  const errors = new MutationObserver(() => {
+    const alert = document.querySelector('[role="alert"]')?.textContent;
+    if (alert) {
+      errors.disconnect();
+      void write("error.json", `${location.pathname}: ${alert}`);
+    }
+  });
+  errors.observe(document, { childList: true, subtree: true, characterData: true });
+  if (location.pathname === "/print.html") {
+    await write("print-window.json", true);
+    return;
+  }
   const until = async (description, find) => {
     const deadline = Date.now() + 30_000;
     while (Date.now() < deadline) {

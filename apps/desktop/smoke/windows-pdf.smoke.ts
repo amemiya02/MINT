@@ -2,7 +2,7 @@
 // The acceptance observer records the real preview. MINT's Rust backend writes the PDF.
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
@@ -80,6 +80,9 @@ test("WebView2 saves the previewed A5 pages with the chosen margins and embedded
       "-Command",
       "Get-Process mint,msedgewebview2 -ErrorAction SilentlyContinue | Format-Table Id,Name,SessionId,MainWindowTitle | Out-String",
     ]).catch(() => ({ stdout: "" }));
+    const files = await readdir(dir);
+    const message = await readFile(join(dir, "error.json"), "utf8").catch(() => null);
+    console.error(`Proof files: ${files.join(", ")}; application error: ${message}`);
     console.error(`MINT exit code ${app.exitCode}; native processes:\n${stdout}`);
     throw error;
   } finally {
