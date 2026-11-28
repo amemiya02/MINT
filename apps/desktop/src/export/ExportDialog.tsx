@@ -2,6 +2,8 @@ import { useEffect, useId, useMemo, useState } from "react";
 import { useT } from "../i18n/index.ts";
 import { baseName } from "../paths.ts";
 import type { Platform } from "../platform/platform.ts";
+import { NotionImport } from "../plugins/NotionImport.tsx";
+import { pluginName, useInstallations } from "../plugins/Plugins.tsx";
 import type { PageLayout, PreviewWindow } from "../print/preview.ts";
 import { useSettings } from "../settings/useSettings.ts";
 import { findBuiltinTheme } from "../theme/catalog.ts";
@@ -16,7 +18,8 @@ interface ExportDialogProps {
   readonly platform: Platform;
   readonly initialFormat: ExportFormat | undefined;
   /** The document to export. */
-  readonly path: string;
+  readonly path: string | null;
+  readonly onOpenFolder: (path: string) => Promise<void>;
   /** Its current text, unsaved edits included. */
   readonly getText: () => string;
   readonly onClose: () => void;
@@ -40,6 +43,7 @@ export function ExportDialog({
   initialFormat,
   path,
   getText,
+  onOpenFolder,
   onClose,
 }: ExportDialogProps) {
   const t = useT();
@@ -48,7 +52,15 @@ export function ExportDialog({
   const { close, props: dialogProps } = useModalDialog(onClose);
   const titleId = useId();
   const formatId = useId();
-  const [format, setFormat] = useState<ExportFormat>(initialFormat ?? "html");
+  const importers = useInstallations().filter((i) => i.enabled && "importer" in i.manifest);
+  const [selectedFormat, setFormat] = useState<string>(
+    initialFormat ?? (path ? "html" : `import:${importers[0]?.manifest.id ?? ""}`),
+  );
+  const removed =
+    selectedFormat.startsWith("import:") &&
+    !importers.some(({ manifest }) => `import:${manifest.id}` === selectedFormat);
+  const format = removed && path ? "html" : selectedFormat;
+  const importing = format.startsWith("import:");
   const themeId = useId();
   const appearanceId = useId();
   const imagesId = useId();
@@ -66,9 +78,13 @@ export function ExportDialog({
     // The print window has no folder to resolve images against: PDFs always embed them.
     embedImages: true,
   }));
-  const choice = { ...options, appearance: appearances[format === "docx" ? "html" : format] };
+  const choice = { ...options, appearance: appearances[format === "pdf" ? "pdf" : "html"] };
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!busy && !path && removed) close();
+  }, [busy, path, removed, close]);
 
   const [layout, setLayout] = useState<PageLayout>({
     paper: "A4",
@@ -80,7 +96,7 @@ export function ExportDialog({
   const theme = choice.theme;
   const request = useMemo(
     () =>
-      pdfText === null
+      pdfText === null || !path
         ? null
         : {
             source: {
@@ -121,6 +137,7 @@ export function ExportDialog({
   const ready = source?.request === request && preview?.key === layoutKey;
 
   const exportFile = async () => {
+    if (!path || importing) return;
     setBusy(true);
     setError(null);
     try {
@@ -201,15 +218,39 @@ export function ExportDialog({
                 value={format}
                 disabled={busy}
                 className={fieldClass}
-                onChange={(event) => setFormat(event.target.value as ExportFormat)}
+                onChange={(event) => setFormat(event.target.value)}
               >
-                <option value="html">HTML</option>
-                <option value="pdf">PDF</option>
-                <option value="docx">DOCX</option>
+                <option disabled={!path} value="html">
+                  HTML
+                </option>
+                <option disabled={!path} value="pdf">
+                  PDF
+                </option>
+                <option disabled={!path} value="docx">
+                  DOCX
+                </option>
+                {importers.map(({ manifest }) => (
+                  <option key={manifest.id} value={`import:${manifest.id}`}>
+                    {pluginName(manifest, t)}
+                  </option>
+                ))}
               </select>
             </div>
           )}
-          {format !== "docx" && (
+          {importing && (
+            <NotionImport
+              key={format}
+              id={format.slice(7)}
+              platform={platform}
+              busy={busy}
+              setBusy={setBusy}
+              onOpenFolder={async (folder) => {
+                await onOpenFolder(folder);
+                close();
+              }}
+            />
+          )}
+          {(format === "html" || format === "pdf") && (
             <>
               <div className="flex items-center justify-between gap-4">
                 <label htmlFor={themeId}>{t("settings.theme")}</label>
@@ -316,7 +357,7 @@ export function ExportDialog({
               <p className="text-(--mint-muted)">{t("export.pdf.hint")}</p>
             </>
           )}
-          {error && (
+          {error && !importing && (
             <p
               role="alert"
               className="rounded-md bg-(--mint-error-bg) px-3 py-2 text-(--mint-error-fg)"
@@ -329,19 +370,21 @@ export function ExportDialog({
           <button type="button" disabled={busy} onClick={close} className={buttonClass}>
             {t("export.html.cancel")}
           </button>
-          <button
-            type="submit"
-            disabled={busy || (format === "pdf" && !ready)}
-            className={`${buttonClass} border-(--mint-accent) font-medium`}
-          >
-            {t(
-              busy
-                ? "export.html.exporting"
-                : format === "pdf"
-                  ? "export.pdf.print"
-                  : "export.html.export",
-            )}
-          </button>
+          {!importing && (
+            <button
+              type="submit"
+              disabled={busy || (format === "pdf" && !ready)}
+              className={`${buttonClass} border-(--mint-accent) font-medium`}
+            >
+              {t(
+                busy
+                  ? "export.html.exporting"
+                  : format === "pdf"
+                    ? "export.pdf.print"
+                    : "export.html.export",
+              )}
+            </button>
+          )}
         </div>
       </form>
     </dialog>

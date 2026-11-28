@@ -5,5 +5,5 @@ export { defaultDialect } from "./dialect.ts";
 export type { ExportImage, ExportOptions } from "./document.ts";
 export { exportHtml } from "./document.ts";
 export { renderHtml } from "./export.ts";
-export { matchingHeadings } from "./heading-anchor.ts";
+export { headingAnchors, markdownHeadings, matchingHeadings } from "./heading-anchor.ts";
 export { htmlToMarkdown } from "./html-to-markdown.ts";

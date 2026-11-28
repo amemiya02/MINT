@@ -175,6 +175,9 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@lezer/markdown':
+        specifier: 1.8.1
+        version: 1.8.1
       '@mint/editor':
         specifier: workspace:*
         version: link:../../packages/editor
@@ -202,6 +205,9 @@ importers:
       docx:
         specifier: 9.16.1
         version: 9.16.1
+      fflate:
+        specifier: 0.8.3
+        version: 0.8.3
       pagedjs:
         specifier: 0.4.3
         version: 0.4.3

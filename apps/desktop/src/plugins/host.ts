@@ -1,6 +1,6 @@
 import type { WordCount } from "@mint/editor";
 
-export type Permission = "document.read" | "document.write" | "folder.read";
+export type Permission = "document.read" | "document.write" | "folder.read" | "archive.import";
 
 /** Packages declare the host operations they use. */
 export interface PluginManifest {
@@ -12,7 +12,16 @@ export interface PluginManifest {
   templates?: { name: string; text: string }[];
   sidebar?: "tags";
   diagram?: "timing";
+  importer?: "notion";
 }
+
+export const notionImporter: PluginManifest = {
+  apiVersion: 1,
+  id: "mint.notion-import",
+  name: "Notion import",
+  permissions: ["archive.import"],
+  importer: "notion",
+};
 
 export const timingDiagrams: PluginManifest = {
   apiVersion: 1,
@@ -85,6 +94,10 @@ export function isManifest(value: unknown): value is PluginManifest {
   )
     return false;
   const required = new Set<Permission>();
+  if ("importer" in m) {
+    if (m.importer !== "notion") return false;
+    required.add("archive.import");
+  }
   if ("diagram" in m) {
     if (m.diagram !== "timing") return false;
     required.add("document.read");
@@ -223,5 +236,12 @@ export function canReadFolder(id: string): boolean {
   const item = installed(id);
   return Boolean(
     item?.enabled && item.grants.includes("folder.read") && "sidebar" in item.manifest,
+  );
+}
+
+export function canImportArchive(id: string): boolean {
+  const item = installed(id);
+  return Boolean(
+    item?.enabled && item.grants.includes("archive.import") && item.manifest.importer === "notion",
   );
 }

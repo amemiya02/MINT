@@ -306,7 +306,8 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     },
     "file.history": () => setHistoryPath(active?.path ?? null),
     "file.export": () => {
-      if (activeId !== null) setExporting({ tab: activeId });
+      if (activeId !== null || plugins.some((i) => i.enabled && "importer" in i.manifest))
+        setExporting({ tab: activeId });
     },
     "file.exportHtml": () => {
       if (activeId !== null) setExporting({ tab: activeId, format: "html" });
@@ -609,15 +610,18 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
           }}
         />
       )}
-      {exportedTab && (
+      {exporting && (
         <ExportDialog
           platform={platform}
           initialFormat={exporting?.format}
-          path={exportedTab.path ?? tabName(t, exportedTab)}
-          getText={() => store.editor(exportedTab.id)?.getText() ?? exportedTab.text}
+          onOpenFolder={openFolder}
+          path={exportedTab ? (exportedTab.path ?? tabName(t, exportedTab)) : null}
+          getText={() =>
+            exportedTab ? (store.editor(exportedTab.id)?.getText() ?? exportedTab.text) : ""
+          }
           onClose={() => {
             setExporting(null);
-            store.editor(exportedTab.id)?.focus();
+            if (exportedTab) store.editor(exportedTab.id)?.focus();
           }}
         />
       )}
