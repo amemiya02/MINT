@@ -38,6 +38,7 @@ export function writingMaterialNames(request: WritingRequest): string[] {
   const context = request.taskContext;
   return [
     ...(context?.currentDraft ? [context.currentDraft.name] : []),
+    ...(request.folderDocuments?.map(({ path }) => path) ?? []),
     ...(context?.materials?.map(({ name }) => name) ?? []),
   ];
 }

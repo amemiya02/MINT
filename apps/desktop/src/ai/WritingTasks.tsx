@@ -212,6 +212,7 @@ export function WritingTaskMaterials({
       ? []
       : [{ name: t("writing.scope.selection"), text: request.selectedText }]),
     ...(context?.currentDraft ? [context.currentDraft] : []),
+    ...(request.folderDocuments?.map(({ path, text }) => ({ name: path, text })) ?? []),
     ...(context?.materials ?? []),
     ...approved,
   ];

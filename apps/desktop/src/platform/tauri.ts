@@ -249,6 +249,7 @@ export function createTauriPlatform(): Platform {
     createFile: (path) => invoke<void>("create_file", { path }),
     createDirectory: (path) => invoke<void>("create_directory", { path }),
     applyDocumentEdit: (edit) => invoke<void>("apply_document_edit", { ...edit }),
+    applyFolderDocumentEdit: (root, edit) => invoke<void>("apply_document_edit", { ...edit, root }),
     rename: (from, to) => invoke<void>("rename_path", { from, to }),
     moveToTrash: (path) => invoke<void>("move_to_trash", { path }),
     async watchFolder(path, onChange) {

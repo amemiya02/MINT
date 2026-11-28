@@ -16,6 +16,7 @@ export function ProposedSelectionEdit({
   blocked,
   replyExcerpt,
   busy,
+  applyDisabled,
   conversation,
   recipient,
   onApply,
@@ -36,6 +37,7 @@ export function ProposedSelectionEdit({
   readonly blocked?: "disk" | "boundaries" | undefined;
   readonly replyExcerpt?: boolean;
   readonly busy?: boolean;
+  readonly applyDisabled?: boolean;
   readonly conversation?: ReactNode;
   readonly recipient?: string;
   readonly onApply?: (() => void) | undefined;
@@ -178,7 +180,7 @@ export function ProposedSelectionEdit({
           <button
             type="button"
             className="rounded border border-(--mint-border) px-2 py-1"
-            disabled={busy}
+            disabled={busy || applyDisabled}
             onClick={onApply}
           >
             {t(current === undefined ? "writing.edit.apply" : "writing.edit.applyCompared")}

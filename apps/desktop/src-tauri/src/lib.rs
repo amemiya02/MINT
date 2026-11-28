@@ -467,12 +467,33 @@ async fn apply_document_edit(
     app: AppHandle,
     from: PathBuf,
     to: PathBuf,
-    before: String,
+    before: Option<String>,
     after: String,
+    root: Option<PathBuf>,
 ) -> Result<(), String> {
     blocking(move || {
+        if let Some(root) = &root {
+            let grants = app.state::<Grants>();
+            granted(&grants, root)?;
+            for path in [&from, &to] {
+                let resolved = grants.check(path).map_err(|e| e.to_string())?;
+                document_edit::check_folder_path(root, path, &resolved)
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+        let apply = || match before {
+            Some(ref before) => {
+                document_edit::apply(&from, &to, before.as_bytes(), after.as_bytes())
+            }
+            None if root.is_some() && from == to => document_edit::create(&to, after.as_bytes()),
+            None => Err(std::io::Error::other("missing document baseline")),
+        };
         relocate_entry(&app, &from, &to, || {
-            document_edit::apply(&from, &to, before.as_bytes(), after.as_bytes())
+            if root.is_some() {
+                document_edit::with_destination(&to, apply)
+            } else {
+                apply()
+            }
         })
         .map_err(|e| format!("{} → {}: {e}", from.display(), to.display()))
     })

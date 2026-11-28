@@ -194,7 +194,9 @@ export function WritingTasksDialog({
               record?.turns.reduce(
                 (count, turn) =>
                   count +
-                  (turn.suggestions?.filter(({ status }) => status === "preview").length ?? 0),
+                  ((turn.suggestions ?? turn.folderChanges)?.filter(
+                    ({ status }) => status === "preview",
+                  ).length ?? 0),
                 0,
               ) ??
               0;

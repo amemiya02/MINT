@@ -1,7 +1,9 @@
-//! Stage task context and import only the manuscript written by Codex.
+//! Stage approved writing materials and import changes to Markdown task copies.
 use super::{WritingRequest, FAILED, MAX_OUTPUT, SANDBOX_UNAVAILABLE};
+use crate::document_edit::{valid_folder_document, valid_folder_path};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::{self, Read};
 use std::path::Path;
@@ -12,6 +14,10 @@ use std::time::{Duration, Instant};
 const PROFILE: &str = "mint-task-copy";
 const DRAFT: &str = "draft.md";
 const MATERIALS: &str = "materials";
+const DOCUMENTS: &str = "documents";
+const MOVES: &str = "moves.json";
+const MAX_DOCUMENTS: usize = 256;
+const MAX_ENTRIES: usize = 2048;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Clone, Copy, Deserialize, Serialize)]
@@ -20,6 +26,35 @@ pub(super) enum Mode {
     Edit,
     Draft,
 }
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct Document {
+    path: String,
+    text: String,
+}
+
+#[derive(Serialize)]
+pub(super) struct Change {
+    path: String,
+    text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    from: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Move {
+    from: String,
+    to: String,
+}
+
+enum Baseline {
+    Manuscript(String),
+    Folder(BTreeMap<String, String>),
+}
+
+type Changes = (Option<String>, Option<Vec<Change>>, bool);
 
 pub(super) const SUPPORTED: bool = cfg!(any(target_os = "linux", target_os = "macos"));
 
@@ -133,7 +168,7 @@ printf verified > check-inside &&
 
 pub(super) struct TaskCopy<'a> {
     workspace: &'a Path,
-    baseline: String,
+    baseline: Baseline,
     materials: Vec<String>,
 }
 
@@ -141,7 +176,6 @@ impl<'a> TaskCopy<'a> {
     pub(super) fn stage(
         workspace: &'a Path,
         request: &WritingRequest,
-        mode: Mode,
     ) -> Result<(Self, Vec<u8>), String> {
         let failed = || FAILED.to_owned();
         let mut payload = serde_json::to_value(request).map_err(|_| failed())?;
@@ -151,18 +185,29 @@ impl<'a> TaskCopy<'a> {
             .as_object_mut()
             .ok_or_else(failed)?
             .remove("selectedText");
-        let current_draft = payload.pointer_mut("/taskContext/currentDraft");
-        let baseline = match (mode, selection, current_draft) {
-            (Mode::Draft, _, _) => String::new(),
-            (Mode::Edit, Some(Value::String(text)), _) => text,
-            (Mode::Edit, _, Some(draft)) => {
-                let text = take_text(draft)?;
-                draft["file"] = json!(DRAFT);
-                text
-            }
-            _ => return Err(failed()),
+        let baseline = if let Some(documents) = &request.folder_documents {
+            let (baseline, files) = stage_folder(workspace, documents)?;
+            payload["folderDocuments"] = json!(files);
+            Baseline::Folder(baseline)
+        } else {
+            let current_draft = payload.pointer_mut("/taskContext/currentDraft");
+            let baseline = match (request.task_copy, selection, current_draft) {
+                (Some(Mode::Draft), _, _) => String::new(),
+                (Some(Mode::Edit), Some(Value::String(text)), _) => text,
+                (Some(Mode::Edit), _, Some(draft)) => {
+                    let text = take_text(draft)?;
+                    draft["file"] = json!(DRAFT);
+                    text
+                }
+                _ => return Err(failed()),
+            };
+            fs::write(workspace.join(DRAFT), &baseline).map_err(|_| failed())?;
+            Baseline::Manuscript(baseline)
         };
-        fs::write(workspace.join(DRAFT), &baseline).map_err(|_| failed())?;
+        let instructions = match &baseline {
+            Baseline::Manuscript(_) => "Work on draft.md in the current directory. Write the resulting Markdown to draft.md. Use the listed material files as references. If asking MINT for more material, leave draft.md unchanged. Do not write the revised Markdown in your reply.",
+            Baseline::Folder(_) => r#"Use only the listed document files and reference materials. Edit Markdown files under documents/ in place, and create new Markdown files under documents/ as needed. For each move or rename, move the file and record the operation in moves.json in the current directory, as an array such as [{"from":"old.md","to":"chapter/new.md"}]. Paths in moves.json are relative to documents/. Record moves even when you also edit the moved file. Use folder-relative filenames and update affected links in the included documents. Do not delete documents, edit reference material, or modify any files outside the task copy. If asking MINT for additional material, leave all files unchanged. Briefly describe the result in your reply."#,
+        };
         let mut copy = Self {
             workspace,
             baseline,
@@ -195,9 +240,7 @@ impl<'a> TaskCopy<'a> {
             }
         }
         let task = payload["instruction"].as_str().ok_or_else(failed)?;
-        payload["instruction"] = json!(format!(
-            "{task}\n\nWork on draft.md in the current directory. Write the resulting Markdown to draft.md. Use the listed material files as references. If asking MINT for more material, leave draft.md unchanged. Do not write the revised Markdown in your reply."
-        ));
+        payload["instruction"] = json!(format!("{task}\n\n{instructions}"));
         // The CLI sees only the relative paths and metadata. Material text stays in the copy.
         payload
             .as_object_mut()
@@ -221,12 +264,27 @@ impl<'a> TaskCopy<'a> {
         Ok(())
     }
 
-    pub(super) fn result(&self) -> Result<(Option<String>, bool), String> {
+    pub(super) fn result(&self) -> Result<Changes, String> {
         let failed = || FAILED.to_owned();
-        // A missing, linked or non-regular target is a failed edit, never a deletion.
-        let text = read_regular(&self.workspace.join(DRAFT)).map_err(|_| failed())?;
-        let workspace_entries = fs::read_dir(self.workspace).map_err(|_| failed())?.count();
-        let mut ignored = workspace_entries != 1 + usize::from(!self.materials.is_empty());
+        let (manuscript, files, target, ignored_files) = match &self.baseline {
+            Baseline::Manuscript(baseline) => {
+                // A missing, linked or non-regular target is a failed edit, never a deletion.
+                let text = read_regular(&self.workspace.join(DRAFT)).map_err(|_| failed())?;
+                ((text != *baseline).then_some(text), None, DRAFT, false)
+            }
+            Baseline::Folder(baseline) => {
+                let (changes, ignored) =
+                    folder_changes(self.workspace, baseline).map_err(|_| failed())?;
+                (None, Some(changes), DOCUMENTS, ignored)
+            }
+        };
+        let mut ignored = ignored_files;
+        for entry in fs::read_dir(self.workspace).map_err(|_| failed())? {
+            let name = entry.map_err(|_| failed())?.file_name();
+            ignored |= name != target
+                && (name != MATERIALS || self.materials.is_empty())
+                && (target != DOCUMENTS || name != MOVES);
+        }
         if !self.materials.is_empty() {
             let references = self.workspace.join(MATERIALS);
             ignored |= !fs::symlink_metadata(&references).is_ok_and(|info| info.is_dir())
@@ -237,8 +295,120 @@ impl<'a> TaskCopy<'a> {
                     read_regular(&file).ok().as_ref() != Some(original)
                 });
         }
-        Ok(((text != self.baseline).then_some(text), ignored))
+        Ok((manuscript, files, ignored))
     }
+}
+
+fn stage_folder(
+    workspace: &Path,
+    documents: &[Document],
+) -> Result<(BTreeMap<String, String>, Vec<String>), String> {
+    let failed = || FAILED.to_owned();
+    if documents.len() > MAX_DOCUMENTS {
+        return Err("materialCapacity".to_owned());
+    }
+    let root = workspace.join(DOCUMENTS);
+    fs::create_dir(&root).map_err(|_| failed())?;
+    let mut baseline = BTreeMap::new();
+    let mut files = Vec::with_capacity(documents.len());
+    for Document { path, text } in documents {
+        if path.len() > 1024 || !valid_folder_document(path) || baseline.contains_key(path) {
+            return Err(failed());
+        }
+        let file = root.join(path);
+        fs::create_dir_all(file.parent().ok_or_else(failed)?).map_err(|_| failed())?;
+        crate::document_edit::create(&file, text.as_bytes()).map_err(|_| failed())?;
+        baseline.insert(path.clone(), text.clone());
+        files.push(format!("{DOCUMENTS}/{path}"));
+    }
+    Ok((baseline, files))
+}
+
+fn folder_changes(
+    workspace: &Path,
+    baseline: &BTreeMap<String, String>,
+) -> io::Result<(Vec<Change>, bool)> {
+    let root = workspace.join(DOCUMENTS);
+    if !fs::symlink_metadata(&root)?.is_dir() {
+        return Err(io::Error::other("invalid folder copy"));
+    }
+    let mut changed = BTreeMap::new();
+    let mut pending = vec![(root, String::new())];
+    let mut total_bytes = 0;
+    let mut entries = 0;
+    let mut ignored = false;
+    while let Some((dir, prefix)) = pending.pop() {
+        for entry in fs::read_dir(dir)? {
+            entries += 1;
+            if entries > MAX_ENTRIES {
+                return Err(io::Error::other("too many entries in folder copy"));
+            }
+            let entry = entry?;
+            let kind = entry.file_type()?;
+            let Ok(name) = entry.file_name().into_string() else {
+                ignored = true;
+                continue;
+            };
+            let path = format!("{prefix}{name}");
+            if path.len() > 1024 || !valid_folder_path(&path) {
+                ignored = true;
+            } else if kind.is_dir() {
+                pending.push((entry.path(), format!("{path}/")));
+            } else if kind.is_file() && valid_folder_document(&path) {
+                let Ok(text) = read_regular(&entry.path()) else {
+                    ignored = true;
+                    continue;
+                };
+                total_bytes += text.len() as u64;
+                if total_bytes > MAX_OUTPUT || changed.len() >= MAX_DOCUMENTS {
+                    return Err(io::Error::other("folder copy output too large"));
+                }
+                changed.insert(path, text);
+            } else {
+                ignored = true;
+            }
+        }
+    }
+
+    let mut moves = BTreeMap::new();
+    let mut moved = std::collections::BTreeSet::new();
+    let manifest = workspace.join(MOVES);
+    if fs::symlink_metadata(&manifest).is_ok() {
+        if let Some(entries) = read_regular(&manifest)
+            .ok()
+            .and_then(|text| serde_json::from_str::<Vec<Move>>(&text).ok())
+            .filter(|entries| entries.len() <= MAX_DOCUMENTS)
+        {
+            for Move { from, to } in entries {
+                if baseline.contains_key(&from)
+                    && !baseline.contains_key(&to)
+                    && !changed.contains_key(&from)
+                    && changed.contains_key(&to)
+                    && !moves.contains_key(&to)
+                    && moved.insert(from.clone())
+                {
+                    moves.insert(to, from);
+                } else {
+                    ignored = true;
+                }
+            }
+        } else {
+            ignored = true;
+        }
+    }
+    ignored |= baseline
+        .keys()
+        .any(|path| !changed.contains_key(path) && !moved.contains(path));
+    let changes = changed
+        .into_iter()
+        .filter(|(path, text)| baseline.get(path) != Some(text))
+        .map(|(path, text)| Change {
+            from: moves.remove(&path),
+            path,
+            text,
+        })
+        .collect();
+    Ok((changes, ignored))
 }
 
 fn take_text(material: &mut Value) -> Result<String, String> {
