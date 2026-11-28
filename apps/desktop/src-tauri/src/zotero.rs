@@ -77,19 +77,23 @@ pub(crate) async fn list_zotero_items(
         .timeout(Duration::from_secs(5))
         .build()
         .map_err(|e| e.to_string())?;
-    let mut request = client
-        .get("http://127.0.0.1:23119/api/users/0/items/top")
-        .query(&[
+    let mut url = reqwest::Url::parse("http://127.0.0.1:23119/api/users/0/items/top")
+        .map_err(|e| e.to_string())?;
+    {
+        let mut parameters = url.query_pairs_mut();
+        parameters.extend_pairs([
             ("v", "3"),
             ("limit", "51"),
             ("sort", "title"),
             ("direction", "asc"),
             ("start", &start.to_string()),
         ]);
-    if !query.is_empty() {
-        request = request.query(&[("q", query), ("qmode", "titleCreatorYear")]);
+        if !query.is_empty() {
+            parameters.append_pair("q", query);
+            parameters.append_pair("qmode", "titleCreatorYear");
+        }
     }
-    let mut response = request.send().await.map_err(|e| e.to_string())?;
+    let mut response = client.get(url).send().await.map_err(|e| e.to_string())?;
     if !response.status().is_success() {
         return Err("unavailable".into());
     }
