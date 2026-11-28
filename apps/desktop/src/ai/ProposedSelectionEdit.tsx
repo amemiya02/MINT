@@ -14,6 +14,7 @@ export function ProposedSelectionEdit({
   source,
   current,
   blocked,
+  replyExcerpt,
   busy,
   conversation,
   recipient,
@@ -30,6 +31,7 @@ export function ProposedSelectionEdit({
   readonly source: boolean;
   readonly current?: string | undefined;
   readonly blocked?: "disk" | "boundaries" | undefined;
+  readonly replyExcerpt?: boolean;
   readonly busy?: boolean;
   readonly conversation?: ReactNode;
   readonly recipient?: string;
@@ -70,25 +72,43 @@ export function ProposedSelectionEdit({
       {status === "applied" && <p>{t("writing.edit.applied")}</p>}
       {(current !== undefined || blocked) && (
         <p role="alert">
-          {t(status === "applied" ? "writing.edit.revertConflict" : "writing.edit.conflict")}
+          {t(
+            replyExcerpt
+              ? "writing.reply.conflict"
+              : status === "applied"
+                ? "writing.edit.revertConflict"
+                : "writing.edit.conflict",
+          )}
         </p>
       )}
       {blocked && <p>{t(`writing.edit.blocked.${blocked}`)}</p>}
       <div className="grid gap-2 sm:grid-cols-2">
         <div className="min-w-0 rounded bg-(--mint-diff-removed-bg) p-1">
           <p className="text-xs font-medium">
-            {t(current === undefined ? "writing.edit.before" : "writing.edit.current")}
+            {t(
+              replyExcerpt
+                ? "writing.reply.current"
+                : current === undefined
+                  ? "writing.edit.before"
+                  : "writing.edit.current",
+            )}
           </p>
-          <Excerpt text={current ?? before} source={source} />
+          {replyExcerpt && current === "" ? (
+            <p className="text-(--mint-muted)">{t("writing.reply.emptySelection")}</p>
+          ) : (
+            <Excerpt text={current ?? before} source={source} />
+          )}
         </div>
         <div className="min-w-0 rounded bg-(--mint-diff-added-bg) p-1">
           <p className="text-xs font-medium">
             {t(
-              comparingReversion
-                ? "writing.edit.before"
-                : status === "applied"
-                  ? "writing.edit.appliedText"
-                  : "writing.edit.after",
+              replyExcerpt
+                ? "writing.reply.selected"
+                : comparingReversion
+                  ? "writing.edit.before"
+                  : status === "applied"
+                    ? "writing.edit.appliedText"
+                    : "writing.edit.after",
             )}
           </p>
           <Excerpt text={comparingReversion ? before : after} source={source} />
@@ -97,7 +117,13 @@ export function ProposedSelectionEdit({
       {current !== undefined && (
         <details>
           <summary>
-            {t(comparingReversion ? "writing.edit.appliedText" : "writing.edit.before")}
+            {t(
+              replyExcerpt
+                ? "writing.reply.original"
+                : comparingReversion
+                  ? "writing.edit.appliedText"
+                  : "writing.edit.before",
+            )}
           </summary>
           <Excerpt text={comparingReversion ? after : before} source={source} />
         </details>
@@ -120,7 +146,7 @@ export function ProposedSelectionEdit({
             disabled={busy}
             onClick={onDiscard}
           >
-            {t("writing.edit.discard")}
+            {t(replyExcerpt ? "writing.reply.dismissComparison" : "writing.edit.discard")}
           </button>
         )}
         {onRevert && (

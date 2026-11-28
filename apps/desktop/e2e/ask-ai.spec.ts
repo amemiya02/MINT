@@ -21,6 +21,7 @@ test("Ask AI comments inline and continues from the original selection", async (
   const first = "Does this read clearly?";
   const reply = "<replacement>A comment asking for a clearer subject.</replacement>";
   const followUp = "What should the subject be?";
+  const requestMaterial = { name: "Team roster", purpose: "Confirm the team's name." };
   const received: unknown[] = [];
   await page.route("**/__test/ask-ai", async (route) => {
     received.push(route.request().postDataJSON());
@@ -31,7 +32,9 @@ test("Ask AI comments inline and continues from the original selection", async (
             ? "Sample reply."
             : received.length === 2
               ? reply
-              : "Name the team.",
+              : received.length === 3
+                ? JSON.stringify({ requestMaterial })
+                : "Name the team.",
       },
     });
   });
@@ -75,6 +78,18 @@ test("Ask AI comments inline and continues from the original selection", async (
   await sidebar.getByLabel("Scope").selectOption({ label: "Instruction only" });
   await sidebar.getByRole("textbox", { name: "Instruction" }).fill(followUp);
   await sidebar.getByRole("button", { name: /^Comment only · Instruction only · Codex/ }).click();
+  const approval = { name: "Additional material requested" };
+  await expect(
+    sidebar.getByRole("group", approval).getByText(requestMaterial.purpose),
+  ).toBeVisible();
+  await sidebar.getByRole("button", { name: "Close" }).click();
+  await page.getByRole("button", { name: "Resume conversation" }).click();
+  const inlineApproval = inline.getByRole("group", approval);
+  await expect(inlineApproval).toBeVisible({ timeout: 5000 });
+  expect(received).toHaveLength(3);
+  await inlineApproval.getByRole("button", { name: "Skip" }).click();
+  await expect(inline.getByRole("textbox", { name: "AI reply" })).toHaveValue("Name the team.");
+  await inline.getByRole("button", { name: "Continue in sidebar" }).click();
   await expect(sidebar.getByText("Name the team.")).toBeVisible();
 
   await editor.getByText("Private paragraph.", { exact: true }).click();
@@ -94,6 +109,15 @@ test("Ask AI comments inline and continues from the original selection", async (
       path: executable,
       access: "readOnly",
       request: { instruction: followUp, history: [{ instruction: first, reply }] },
+    },
+    {
+      path: executable,
+      access: "readOnly",
+      request: {
+        instruction: expect.stringContaining(followUp),
+        history: [{ instruction: first, reply }],
+        taskContext: { materialDecisions: [{ ...requestMaterial, outcome: "skipped" }] },
+      },
     },
   ]);
 });
@@ -155,6 +179,8 @@ test("selection rewrites preview first or apply with one undo step", async ({ pa
   await instruction.press("Enter");
   await expect(inline.getByRole("button", { name: "Apply proposed edit" })).toBeVisible();
   await expect(editor).toContainText(selection);
+  await inline.getByText("Use part of the reply", { exact: true }).click({ timeout: 5000 });
+  await expect(inline.getByRole("textbox", { name: "AI reply" })).toHaveValue("The team met.");
 
   await inline.getByRole("button", { name: "Close" }).click();
   await page.getByRole("button", { name: "Ask AI", exact: true }).click();
@@ -203,4 +229,116 @@ test("selection rewrites preview first or apply with one undo step", async ({ pa
   await expect
     .poll(() => readFile(page, path))
     .toBe(source.replace("Original line.", `Original line. ${selection}`));
+});
+
+test("a selected reply excerpt can be used in the manuscript or in a new draft", async ({
+  page,
+}) => {
+  const path = "/notes/draft.md";
+  const reference = "/notes/reference.md";
+  const savedExcerpt = "/notes/excerpt.md";
+  const executable = "/fixtures/codex";
+  const source = "Opening stays.  \r\n\r\nOriginal sentence.\r\n";
+  const excerpt = "Use this sentence.";
+  const reply = `Extra context.\n${excerpt}\nLeave this out.`;
+  await page.route("**/__test/reply-excerpt", (route) =>
+    route.fulfill({
+      json: {
+        text:
+          route.request().postDataJSON().request.selectedText === "Original sentence."
+            ? reply
+            : "Sample reply.",
+      },
+    }),
+  );
+  await launch(page, {
+    locale: "en-US",
+    files: {
+      [path]: source,
+      [reference]: "Reference text: ",
+      [settingsPath]: '{"autosave":false}',
+    },
+    openedPaths: [{ path, kind: "file" }],
+    openDialogResults: [reference],
+    saveDialogResults: [savedExcerpt],
+    externalAgent: { executables: [executable], endpoint: "/__test/reply-excerpt" },
+  });
+  await configureAgent(page, executable);
+
+  const manuscript = page.getByRole("tabpanel", { name: "draft.md" }).first();
+  await manuscript.getByText("Original sentence.", { exact: true }).click();
+  await page.keyboard.press("End");
+  await page.keyboard.press("Shift+Home");
+  await manuscript.getByRole("button", { name: "Ask AI", exact: true }).click();
+  const inline = manuscript.getByRole("region", { name: "Ask AI" });
+  await inline.getByLabel("Action").selectOption({ label: "Comment only" });
+  await inline.getByRole("textbox", { name: "Instruction" }).fill("Suggest wording.");
+  await inline.getByRole("textbox", { name: "Instruction" }).press("Enter");
+  const replyText = inline.getByRole("textbox", { name: "AI reply" });
+  await expect(replyText).toHaveValue(reply);
+
+  await page.getByRole("button", { name: "Open draft.md in other pane" }).click();
+  await page.keyboard.press("ControlOrMeta+O");
+  const referenceEditor = page
+    .getByRole("tabpanel", { name: "reference.md" })
+    .locator(".cm-content");
+  await referenceEditor.click();
+  await page.keyboard.press("End");
+
+  await replyText.evaluate(
+    (field: HTMLTextAreaElement, [from, to]) => {
+      field.focus();
+      field.setSelectionRange(from, to);
+    },
+    [reply.indexOf(excerpt), reply.indexOf(excerpt) + excerpt.length] as const,
+  );
+  const insert = inline.getByRole("button", { name: "Insert at cursor in reference.md" });
+  await expect(insert).toBeEnabled();
+  await insert.click();
+  await expect(referenceEditor).toHaveText(`Reference text: ${excerpt}`);
+  const manuscriptEditor = manuscript.locator(".cm-content");
+  await expect(manuscriptEditor).toContainText("Original sentence.");
+
+  const referenceTabs = page.getByRole("tablist").last();
+  await referenceTabs.getByRole("tab", { name: "draft.md" }).click();
+  const peerEditor = page.getByRole("tabpanel", { name: "draft.md" }).last().locator(".cm-content");
+  await peerEditor.getByText("Opening stays.", { exact: true }).click();
+  await page.keyboard.press("Home");
+  await page.keyboard.insertText("Author note. ");
+  await referenceTabs.getByRole("tab", { name: "reference.md" }).click();
+  const replace = inline.getByRole("button", { name: "Replace original selection in draft.md" });
+  await expect(replace).toBeEnabled();
+  await replace.click();
+  await expect(manuscriptEditor).toBeFocused();
+  await expect(referenceEditor).toHaveText(`Reference text: ${excerpt}`);
+  expect(await readFile(page, path)).toBe(source);
+  await page.keyboard.press("ControlOrMeta+S");
+  await expect
+    .poll(() => readFile(page, path))
+    .toBe(`Author note. ${source.replace("Original sentence.", excerpt)}`);
+  await page.keyboard.press("ControlOrMeta+Z");
+  await expect(manuscriptEditor).toContainText("Original sentence.");
+  await expect(manuscriptEditor).toContainText("Author note. Opening stays.");
+
+  await referenceTabs.getByRole("tab", { name: "draft.md" }).click();
+  await peerEditor.getByText("Original sentence.", { exact: true }).click();
+  await page.keyboard.press("End");
+  await page.keyboard.press("Shift+Home");
+  await page.keyboard.insertText("Hand-edited sentence.");
+  await replace.click();
+  await expect(inline.getByRole("alert")).toContainText("The original selection changed");
+  await expect(inline.getByText("Hand-edited sentence.", { exact: true })).toBeVisible();
+  await expect(inline.getByText(excerpt, { exact: true })).toBeVisible();
+  await expect(peerEditor).toContainText("Hand-edited sentence.");
+  await expect(manuscriptEditor).toContainText("Hand-edited sentence.");
+
+  await inline.getByRole("button", { name: "Create new untitled draft" }).click({ timeout: 5000 });
+  const newDraft = page.getByRole("tabpanel", { name: "Untitled" }).locator(".cm-content");
+  await expect(newDraft).toHaveText(excerpt);
+  expect(await readFile(page, savedExcerpt)).toBeUndefined();
+  await newDraft.press("End");
+  await page.keyboard.insertText(" My addition.");
+  await page.keyboard.press("ControlOrMeta+S");
+  await expect.poll(() => readFile(page, savedExcerpt)).toBe(`${excerpt} My addition.`);
+  await expect(manuscriptEditor).toContainText("Hand-edited sentence.");
 });

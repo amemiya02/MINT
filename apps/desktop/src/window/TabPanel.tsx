@@ -28,6 +28,7 @@ export function TabPanel({
   visible,
   toolbarPosition,
   platform,
+  folder,
   askWriting,
   settingsOpen,
   onAskWriting,
@@ -46,6 +47,7 @@ export function TabPanel({
   readonly visible: boolean;
   readonly toolbarPosition: ToolbarPosition;
   readonly platform: Platform;
+  readonly folder: string | null;
   readonly askWriting: number | null;
   readonly settingsOpen: boolean;
   readonly onAskWriting: () => void;
@@ -129,7 +131,7 @@ export function TabPanel({
       aria-labelledby={`tab-${id}`}
       hidden={!visible}
       style={{ gridColumn: tab.pane === "primary" ? 1 : 2, gridRow: 1 }}
-      onFocusCapture={() => {
+      onFocus={() => {
         if (!active) store.activate(id);
       }}
       className="flex min-w-0 min-h-0 h-full flex-col"
@@ -167,8 +169,10 @@ export function TabPanel({
         <WritingAssistant
           editor={editor}
           name={tabName(t, tab)}
+          tabId={id}
           active={active}
           platform={platform}
+          folder={folder}
           askRequest={askWriting}
           settingsOpen={settingsOpen}
           onAsk={onAskWriting}
