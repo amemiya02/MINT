@@ -5,7 +5,7 @@ import {
   writingMaterialChart,
   writingMaterialPdf,
 } from "../test-fixtures/writing-materials.ts";
-import { launch } from "./memory-platform.ts";
+import { launch, readFile, runMenuItem } from "./memory-platform.ts";
 
 const address = "https://ranges.example.test/v1";
 const endpoint = `${address}/chat/completions`;
@@ -25,14 +25,26 @@ async function dropPdf(context: Locator, withAudience = false) {
 }
 
 test("draft from two materials and send only the selected PDF page as text", async ({ page }) => {
+  const supported = "The deck opens Tuesday.";
+  const unsupported = "There is a private access code.";
+  const generated = `${supported} ${unsupported}`;
+  const reply = `${generated}\n\n<source-passages>\n${JSON.stringify([
+    { claim: supported, material: 1, quote: selectedPageText },
+    { claim: unsupported, material: 1, quote: otherPageText },
+  ])}\n</source-passages>`;
+  const draftPath = "/notes/bulletin.md";
   await page.route(endpoint, (route) =>
     route.fulfill({
       json: {
-        choices: [{ message: { content: "The deck opens Tuesday." }, finish_reason: "stop" }],
+        choices: [{ message: { content: reply }, finish_reason: "stop" }],
       },
     }),
   );
-  await launch(page, { locale: "en-US" });
+  await launch(page, {
+    locale: "en-US",
+    directories: ["/notes"],
+    saveDialogResults: [draftPath],
+  });
   await page.getByRole("button", { name: "Draft with AI" }).click();
   const composer = page.getByRole("form", { name: "Draft with AI" });
   await composer.getByLabel("API address").fill(address);
@@ -55,21 +67,36 @@ test("draft from two materials and send only the selected PDF page as text", asy
   ]);
   const body = request.postDataJSON();
   expect(body.model).toBe("text-fixture");
-  expect(JSON.parse(body.messages.at(-1).content).taskContext.materials).toEqual(
-    expect.arrayContaining([
-      {
-        name: "field-notes.pdf",
-        text: selectedPageText,
-        range: { kind: "pdf", page: 2, pages: 2 },
-        format: "extractedText",
-      },
-      { name: "audience.txt", text: "Visitor bulletin." },
-    ]),
+  expect(body.messages).toContainEqual({
+    role: "system",
+    content: expect.stringContaining("<source-passages>"),
+  });
+  expect(JSON.parse(body.messages.at(-1).content).taskContext.materials).toEqual([
+    {
+      name: "field-notes.pdf",
+      text: selectedPageText,
+      range: { kind: "pdf", page: 2, pages: 2 },
+      format: "extractedText",
+    },
+    { name: "audience.txt", text: "Visitor bulletin." },
+  ]);
+  const editor = page.getByRole("tabpanel").getByRole("textbox", { name: "", exact: true });
+  await expect(editor).toHaveText(generated);
+  const review = page.getByRole("region", { name: "Source passages" });
+  await expect(review.getByRole("listitem").filter({ hasText: unsupported })).toContainText(
+    "Needs verification",
   );
-  expect(JSON.parse(body.messages.at(-1).content).taskContext.materials).toHaveLength(2);
-  await expect(
-    page.getByRole("tabpanel").getByRole("textbox", { name: "", exact: true }),
-  ).toHaveText("The deck opens Tuesday.");
+  await review.getByRole("button", { name: supported, exact: true }).click();
+  const passage = review.getByRole("region", { name: "Excerpt used for this draft" });
+  await expect(passage.getByText(selectedPageText, { exact: true })).toBeVisible();
+  await expect(passage).toContainText("field-notes.pdf · Page 2 of 2 · Extracted text");
+  await passage.getByRole("button", { name: "Insert Markdown citation" }).click();
+  await runMenuItem(page, "file.save");
+  await expect
+    .poll(() => readFile(page, draftPath))
+    .toBe(
+      `${supported}[^mint-source-1] ${unsupported}\n\n[^mint-source-1]: field-notes.pdf · Page 2 of 2 · Extracted text, line 1 of sent material. “${selectedPageText}”\n`,
+    );
 });
 
 test("changing the selected PDF page requires a new summary before sending", async ({ page }) => {

@@ -1,5 +1,6 @@
 import diffSequence from "@jest/diff-sequences";
 import { compareLines, rawLines } from "../tabs/line-diff.ts";
+import type { SourcePassage } from "./source-passages.ts";
 import type { AttemptStatus } from "./writing-attempt.ts";
 import type { TaskContext, WritingTurn } from "./writing-sender.ts";
 
@@ -34,6 +35,7 @@ export interface SavedTurn extends WritingTurn {
   readonly recipient: string;
   readonly recipientId: string;
   readonly direct: boolean;
+  readonly sourcePassages?: readonly SourcePassage[];
   readonly suggestions?: readonly SavedSuggestion[];
 }
 

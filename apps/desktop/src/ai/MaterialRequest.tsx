@@ -95,6 +95,7 @@ export function useMaterialRequests() {
         readonly onApproval?: (text: string) => void;
         readonly onResume?: (decision: MaterialDecision | null, text: string) => void;
         readonly onProgress?: (text: string) => void;
+        readonly mapBatchReply?: (reply: WritingReply, context?: TaskContext) => WritingReply;
       },
     ): Promise<WritingReply> {
       const id = ++sequence.current;
@@ -141,7 +142,7 @@ export function useMaterialRequests() {
               }),
           });
           const extra = requestedMaterial(reply);
-          if (!extra) return reply;
+          if (!extra) return options?.mapBatchReply?.(reply, outbound.taskContext) ?? reply;
           if (signal?.aborted) throw "stopped";
           const previous = outbound.taskContext?.materialDecisions ?? [];
           if (id !== sequence.current || previous.some(({ name }) => name === extra.name))
