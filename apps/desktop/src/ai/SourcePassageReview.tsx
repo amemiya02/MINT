@@ -20,7 +20,7 @@ export function SourcePassageReview({
 }: {
   readonly draft: string;
   readonly passages: readonly SourcePassage[];
-  readonly editor?: MintEditor;
+  readonly editor?: MintEditor | null;
 }) {
   const t = useT();
   const detailId = useId();
@@ -70,8 +70,9 @@ export function SourcePassageReview({
     const eol = /\r\n|\n|\r/.exec(live)?.[0] ?? "\n";
     const definition = `${eol}${eol}${reference}: ${notes.join(" ")}${eol}`;
     const end = live.length;
-    const replacements = [{ from: range.to, to: range.to, text: reference }];
-    if (range.to === end) replacements[0].text += definition;
+    const inline = { from: range.to, to: range.to, text: reference };
+    const replacements = [inline];
+    if (range.to === end) inline.text += definition;
     else replacements.push({ from: end, to: end, text: definition });
     editor.replaceRanges(replacements, { lineEndings: "preserve" });
     setCitationStatus("sources.citationInserted");
