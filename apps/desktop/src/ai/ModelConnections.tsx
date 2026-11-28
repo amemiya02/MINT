@@ -14,6 +14,8 @@ type Preset = keyof typeof presets;
 
 const fieldClass =
   "w-full rounded-md border border-(--mint-border) bg-(--mint-bg) px-2 py-1 focus-visible:outline-2 focus-visible:outline-(--mint-accent)";
+const buttonClass =
+  "rounded-md border border-(--mint-border) px-3 py-1 hover:bg-(--mint-hover) focus-visible:outline-2 focus-visible:outline-(--mint-accent) disabled:opacity-50";
 
 export function ModelConnections({ platform }: { readonly platform: Platform }) {
   const t = useT();
@@ -26,7 +28,7 @@ export function ModelConnections({ platform }: { readonly platform: Platform }) 
 
 function ConnectionList({ platform }: { readonly platform: Platform }) {
   const t = useT();
-  const [connections, setConnections] = useState<readonly SavedModelConnection[]>([]);
+  const [connections, setConnections] = useState<readonly SavedModelConnection[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   useEffect(() => {
     let active = true;
@@ -35,13 +37,17 @@ function ConnectionList({ platform }: { readonly platform: Platform }) {
         if (active) setConnections(saved);
       },
       () => {
-        if (active) setLoadFailed(true);
+        if (active) {
+          setLoadFailed(true);
+          setConnections([]);
+        }
       },
     );
     return () => {
       active = false;
     };
   }, [platform]);
+  if (!connections) return null;
   return (
     <>
       {loadFailed && (
@@ -51,7 +57,7 @@ function ConnectionList({ platform }: { readonly platform: Platform }) {
       )}
       <ModelTrial
         platform={platform}
-        onSaved={(saved) => setConnections((previous) => [...previous, saved])}
+        onSaved={(saved) => setConnections((previous) => [...(previous ?? []), saved])}
       />
       {connections.map((connection) => (
         <section
@@ -71,7 +77,7 @@ function ConnectionList({ platform }: { readonly platform: Platform }) {
             platform={platform}
             connection={connection}
             onDisconnected={() =>
-              setConnections((previous) => previous.filter(({ id }) => id !== connection.id))
+              setConnections((previous) => previous?.filter(({ id }) => id !== connection.id) ?? [])
             }
           />
         </section>
@@ -104,12 +110,13 @@ function ModelTrial({
   const [model, setModel] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [stream, setStream] = useState(true);
-  const [busy, setBusy] = useState(false);
+  const [activity, setActivity] = useState<"sample" | "storage" | null>(null);
   const [partial, setPartial] = useState("");
   const [result, setResult] = useState<TrialResult | null>(null);
   const [error, setError] = useState("");
   const sample = t("models.sample");
   const addressHintId = useId();
+  const keyHintId = useId();
   let endpoint = "";
   try {
     endpoint = modelEndpoint(connection?.address ?? address);
@@ -128,9 +135,9 @@ function ModelTrial({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy || !canRun) return;
+    if (activity || !canRun) return;
     clearResult();
-    setBusy(true);
+    setActivity("sample");
     setApiKey("");
     try {
       const send = modelWritingSender(
@@ -156,13 +163,13 @@ function ModelTrial({
         t(failureMessage(error), { status: typeof error === "number" ? String(error) : "" }),
       );
     } finally {
-      setBusy(false);
+      setActivity(null);
     }
   }
 
   async function save(lifetime: SavedModelConnection["lifetime"]) {
-    if (busy || !canSave) return;
-    setBusy(true);
+    if (activity || !canSave) return;
+    setActivity("storage");
     setError("");
     try {
       const saved = await platform.saveModelConnection({ name, address, model, apiKey, lifetime });
@@ -170,15 +177,17 @@ function ModelTrial({
       setApiKey("");
       onSaved?.(saved);
     } catch (error) {
-      setError(t(failureMessage(error)));
+      setError(
+        t(error === "credentialStoreUnavailable" ? "models.error.remember" : failureMessage(error)),
+      );
     } finally {
-      setBusy(false);
+      setActivity(null);
     }
   }
 
   async function disconnect() {
-    if (busy || !connection) return;
-    setBusy(true);
+    if (activity || !connection) return;
+    setActivity("storage");
     setError("");
     try {
       await platform.disconnectModelConnection(connection.id);
@@ -186,13 +195,13 @@ function ModelTrial({
     } catch (error) {
       setError(t(failureMessage(error)));
     } finally {
-      setBusy(false);
+      setActivity(null);
     }
   }
 
   return (
     <form onSubmit={submit} className="space-y-3 px-3 pb-3 text-sm">
-      <fieldset disabled={busy} className="space-y-3">
+      <fieldset disabled={activity !== null} className="space-y-3">
         {!connection && (
           <>
             <label className="block">
@@ -255,10 +264,14 @@ function ModelTrial({
                 type="password"
                 className={fieldClass}
                 autoComplete="off"
+                aria-describedby={keyHintId}
                 value={apiKey}
                 onChange={(event) => setApiKey(event.target.value)}
               />
             </label>
+            <p id={keyHintId} className="text-xs text-(--mint-muted)">
+              {t("models.keyHint")}
+            </p>
             <label className="block">
               {t("models.name")}
               <input
@@ -293,7 +306,7 @@ function ModelTrial({
         )}
         <div className="flex flex-wrap gap-2">
           <button type="submit" disabled={!canRun} className={buttonClass}>
-            {t(busy ? "models.running" : "models.run")}
+            {t(activity === "sample" ? "models.running" : "models.run")}
           </button>
           {connection ? (
             <button type="button" onClick={disconnect} className={buttonClass}>
@@ -322,7 +335,7 @@ function ModelTrial({
         </div>
       </fieldset>
       {error && <p role="alert">{error}</p>}
-      <div aria-live="polite" aria-busy={busy} hidden={!result && !partial}>
+      <div aria-live="polite" aria-busy={activity === "sample"} hidden={!result && !partial}>
         <p>{t(error ? "models.partial" : "models.reply")}</p>
         <p className="whitespace-pre-wrap wrap-anywhere rounded-md bg-(--mint-hover) p-2">
           {result?.text ?? partial}
@@ -347,9 +360,6 @@ function ModelTrial({
     </form>
   );
 }
-
-const buttonClass =
-  "rounded-md border border-(--mint-border) px-3 py-1 hover:bg-(--mint-hover) focus-visible:outline-2 focus-visible:outline-(--mint-accent) disabled:opacity-50";
 
 function failureMessage(error: unknown): MessageKey {
   if (error === "credentialStoreUnavailable") return "models.error.credentialStore";

@@ -263,6 +263,7 @@ export const en = {
     "Enter an OpenAI-compatible API base or chat completions URL. Use HTTPS or a loopback address.",
   "models.model": "Model name",
   "models.key": "API key",
+  "models.keyHint": "Run sample uses this key once.",
   "models.name": "Connection name",
   "models.remember": "Remember connection",
   "models.remembered": "Remembered on this device",
@@ -288,6 +289,8 @@ export const en = {
   "models.error.address": "Enter an HTTPS or loopback API address without embedded credentials.",
   "models.error.key": "The service rejected authorization. Check the API key and try again.",
   "models.error.credentialStore":
+    "System credential store is unavailable. Try again when it is accessible.",
+  "models.error.remember":
     "System credential store is unavailable. You can use the connection for this launch.",
   "models.error.credentialMissing":
     "The system credential is missing. Disconnect and add the connection again.",

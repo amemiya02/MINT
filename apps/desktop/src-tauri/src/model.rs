@@ -71,10 +71,10 @@ pub(crate) fn require_document_window(window: &WebviewWindow) -> Result<(), Mode
     Ok(())
 }
 
-/// Normalize a service address and enforce the same recipient rules for trials
-/// and connected requests, including HTTPS except on loopback.
-pub(crate) fn completion_url(address: &str) -> Result<Url, ModelError> {
-    let mut url = Url::parse(address.trim()).map_err(|_| ModelError::Request("invalidAddress"))?;
+/// Enforce the same recipient rules for trials and connected requests,
+/// including HTTPS except on loopback.
+fn service_url(address: &str) -> Result<Url, ModelError> {
+    let url = Url::parse(address.trim()).map_err(|_| ModelError::Request("invalidAddress"))?;
     let host = url.host_str().unwrap_or_default();
     if !(url.scheme() == "https" || url.scheme() == "http" && is_loopback(host))
         || host.is_empty()
@@ -84,6 +84,11 @@ pub(crate) fn completion_url(address: &str) -> Result<Url, ModelError> {
     {
         return Err(ModelError::Request("invalidAddress"));
     }
+    Ok(url)
+}
+
+pub(crate) fn completion_url(address: &str) -> Result<Url, ModelError> {
+    let mut url = service_url(address)?;
     let path = url.path().trim_end_matches('/');
     let path = if path.ends_with("/chat/completions") {
         path.to_owned()
@@ -109,7 +114,10 @@ pub(crate) async fn send_model_request(
     on_event: Channel<ModelEvent>,
 ) -> Result<(), ModelError> {
     require_document_window(&window)?;
-    let url = completion_url(&request.url)?;
+    let url = service_url(&request.url)?;
+    if !url.path().ends_with("/chat/completions") {
+        return Err(ModelError::Request("invalidAddress"));
+    }
     send(url, request.api_key, request.body, on_event).await
 }
 

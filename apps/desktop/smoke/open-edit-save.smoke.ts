@@ -1032,6 +1032,7 @@ test("a model trial sends only the visible sample and shows native streaming rep
     assert.ok(address && typeof address !== "string");
     await openSettings();
     await click("Model connections");
+    await shows("Sample prompt");
     await fill("API address", `http://127.0.0.1:${address.port}/fixture/v1/chat/completions`);
     await fill("Model name", "native-fixture");
     await fill("API key", secret);
@@ -1101,6 +1102,8 @@ test("model keys survive a restart only when remembered and disconnect removes t
   skip: !credentialPolicy && "requires the hosted smoke suite's isolated Secret Service",
 }, async () => {
   assert.ok(credentialPolicy && process.env.XDG_DATA_HOME);
+  const draft = join(dir, "model-connection-review.md");
+  await writeFile(draft, "\uFEFF# Field notes\r\n\r\nTuesday entry  ");
   const persistentKey = "mint-smoke-remembered-7291";
   const sessionKey = "mint-smoke-session-8732";
   const requests: { authorization?: string; body: unknown }[] = [];
@@ -1129,6 +1132,7 @@ test("model keys survive a restart only when remembered and disconnect removes t
   const openConnections = async () => {
     await openSettings();
     await click("Model connections");
+    await shows("Sample prompt");
   };
   const card = (name: string) => `//section[@aria-label='${name}']`;
   const clickCard = (name: string, action: string) =>
@@ -1161,13 +1165,20 @@ test("model keys survive a restart only when remembered and disconnect removes t
       "org.freedesktop.DBus.ReloadConfig",
     ]);
   }
-  const versions = () => invokeNative<number[]>("list_versions", { path: document });
+  const versions = () => invokeNative<number[]>("list_versions", { path: draft });
+  const versionText = (id: number) => invokeNative<string>("read_version", { path: draft, id });
 
   try {
-    await restart([document]);
-    const manuscript = await readFile(document);
+    await restart([draft]);
+    const manuscript = await readFile(draft);
+    await invokeNative("record_version", {
+      path: draft,
+      text: "# Field notes\r\n\r\nMonday entry",
+    });
     const history = await versions();
-    assert.ok(history.length > 0, "verify an existing local version history survives");
+    const latestId = history.at(-1);
+    assert.ok(latestId !== undefined, "verify an existing local version history survives");
+    const latest = await versionText(latestId);
     await openConnections();
     await fill("API address", api);
     await fill("Model name", "smoke-model");
@@ -1204,7 +1215,7 @@ test("model keys survive a restart only when remembered and disconnect removes t
     await setStoreAvailable(true);
 
     await click("Close");
-    await restart([document]);
+    await restart([draft]);
     await openConnections();
     await shows("Remembered model");
     const launchCards = () =>
@@ -1244,11 +1255,12 @@ test("model keys survive a restart only when remembered and disconnect removes t
       }
     }).catch(explain);
     await click("Close");
-    await restart([document]);
+    await restart([draft]);
     await openConnections();
     assert.deepEqual(await invokeNative("list_model_connections", {}), []);
-    assert.deepEqual(await readFile(document), manuscript);
+    assert.deepEqual(await readFile(draft), manuscript);
     assert.deepEqual(await versions(), history);
+    assert.equal(await versionText(latestId), latest);
     assert.equal(requests.length, 2, "reopening Settings never sends a model request");
     await click("Close");
   } finally {
