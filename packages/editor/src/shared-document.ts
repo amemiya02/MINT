@@ -3,9 +3,12 @@ import { Compartment, type Extension, Transaction } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import { copyFileDocument, sharedFileEffects } from "./file-text.ts";
 
+import { ManualReview } from "./manual-review.ts";
+
 /** Views of one manuscript share CodeMirror changes and the immutable history field.
  * Each view maps its own selection through a sibling's changes and keeps its own viewport. */
 export class SharedDocument {
+  readonly review = new ManualReview();
   private views = new Set<EditorView>();
   private history = new Compartment();
   private lastWriter: EditorView | null = null;
@@ -49,6 +52,7 @@ export class SharedDocument {
     } else {
       source.update(transactions);
     }
+    for (const transaction of changed) this.review.record(transaction);
     this.lastWriter = source;
     for (const peer of this.views) {
       if (peer === source) continue;
