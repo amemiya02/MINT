@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { launch, readFile, settingsPath } from "./memory-platform.ts";
+import { launch, readFile, runMenuItem, settingsPath } from "./memory-platform.ts";
 
 test("verify a manuscript citation using only the selected Zotero record", async ({ page }) => {
   const path = "/field-notes.md";
@@ -74,6 +74,62 @@ test("verify a manuscript citation using only the selected Zotero record", async
       instruction,
       selectedText: source.split("\n\n")[1],
       taskContext: { materials: [{ name: "Zotero · Ridge study", text: material }] },
+    },
+  ]);
+});
+
+test("attach a Zotero record when adding an Agent from the manuscript", async ({ page }) => {
+  const path = "/field-notes.md";
+  const executable = "/opt/agents/fixture-codex";
+  const sent: unknown[] = [];
+  await page.route("**/__test/external-agent", (route) => {
+    sent.push(route.request().postDataJSON());
+    return route.fulfill({ json: { text: "The correct year is 2024." } });
+  });
+  await launch(page, {
+    locale: "en-US",
+    files: { [path]: "Ridge study (2019)." },
+    openedPaths: [{ kind: "file", path }],
+    externalAgent: { executables: [executable], endpoint: "/__test/external-agent" },
+    zoteroItems: [{ key: "RIDGE123", title: "Ridge study", date: "2024" }],
+  });
+  await page.getByRole("tabpanel").getByRole("textbox", { name: "", exact: true }).click();
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.press("Shift+Home");
+  await runMenuItem(page, "edit.askExternalAgent");
+  const dialog = page.getByRole("dialog", { name: "Ask External Agent" });
+  await dialog.getByLabel("Codex executable").fill(executable);
+  await dialog.getByRole("button", { name: "Inspect Agent" }).click();
+  const context = dialog.getByRole("group", { name: "Task context to send" });
+  await expect(context.getByRole("button", { name: "Add from Zotero" })).toBeVisible();
+  await context.getByRole("button", { name: "Add from Zotero" }).click();
+  await context.getByRole("button", { name: "Allow once" }).click();
+  await context.getByRole("button", { name: "Ridge study" }).click();
+  await expect(context.getByText(`Codex · ${executable}`, { exact: true })).toBeVisible();
+  await expect(context.getByText("Zotero (read only)", { exact: true })).toBeVisible();
+  await dialog.getByLabel("Instruction").fill("Check the publication year.");
+  await dialog.getByRole("button", { name: "Send selection" }).click();
+  expect(sent).toEqual([]);
+  await dialog.getByRole("button", { name: "Allow and send" }).click();
+  await expect(dialog.getByRole("textbox", { name: "AI reply" })).toHaveValue(
+    "The correct year is 2024.",
+  );
+  expect(sent).toEqual([
+    {
+      path: executable,
+      access: "readOnly",
+      request: {
+        instruction: expect.stringContaining("Check the publication year."),
+        selectedText: "Ridge study (2019).",
+        taskContext: {
+          materials: [
+            {
+              name: "Zotero · Ridge study",
+              text: "Title: Ridge study\nDate: 2024\nZotero link: zotero://select/library/items/RIDGE123",
+            },
+          ],
+        },
+      },
     },
   ]);
 });

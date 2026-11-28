@@ -87,7 +87,7 @@ export function TaskContextChecklist({
   includeDraft,
   handlingFull = true,
   folder,
-  searchEnabled,
+  searchEnabled = false,
   onSearchChange,
 }: {
   readonly platform: Platform;
@@ -98,9 +98,9 @@ export function TaskContextChecklist({
   readonly emptyDraft?: boolean;
   readonly includeDraft?: (checked: boolean) => void;
   readonly handlingFull?: boolean;
-  readonly folder: string | null;
-  readonly searchEnabled: boolean;
-  readonly onSearchChange: (checked: boolean) => void;
+  readonly folder?: string | null;
+  readonly searchEnabled?: boolean;
+  readonly onSearchChange?: (checked: boolean) => void;
 }) {
   const t = useT();
   return (
@@ -174,7 +174,7 @@ export function TaskContextChecklist({
         </ul>
       )}
       <MaterialPicker platform={platform} named={named} />
-      {folder && (
+      {folder && onSearchChange && (
         <div className="wrap-anywhere">
           <label className="flex items-start gap-2">
             <input
