@@ -59,6 +59,7 @@ export const en = {
   "command.file.new": "New",
   "command.edit.selectNextOccurrence": "Select Next Occurrence",
   "command.file.saveAs": "Save As…",
+  "command.file.export": "Export…",
   "command.file.exportHtml": "Export as HTML…",
   "command.file.exportPdf": "Export as PDF…",
   "command.file.openFolder": "Open Folder…",
@@ -127,6 +128,9 @@ export const en = {
   "command.view.toggleVimMode": "Toggle Vim Mode",
   "search.label": "Search in Folder",
   "search.close": "Close Search",
+  "search.headings": "Current document headings",
+  "search.names": "File names",
+  "search.body": "Document text",
   "search.searching": "Searching…",
   "search.summary": "{matches} in {documents}",
   "search.matches.one": "1 result",
@@ -215,6 +219,8 @@ export const en = {
   "settings.shortcuts.cancel": "Cancel",
   "settings.shortcuts.alsoUsedBy": "Also used by {commands}",
 
+  "export.title": "Export",
+  "export.format": "Format",
   "export.html.title": "Export as HTML",
   "export.html.saveTitle": "Export as HTML",
   "export.html.embedImages": "Embed images",
@@ -276,6 +282,8 @@ export const en = {
   "status.characters.other": "{count} characters",
   "status.readingTime": "{minutes} min read",
 
+  "error.staleSearchResult":
+    "The document changed. This search result can no longer be located in the open draft.",
   "error.missingHeading": "Heading not found: {fragment}",
   "error.ambiguousHeading": "Multiple headings match: {fragment}",
   "error.open": "Could not open {path}: {reason}",

@@ -8,7 +8,7 @@ import {
   Submenu,
 } from "@tauri-apps/api/menu";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getAllWindows, getCurrentWindow } from "@tauri-apps/api/window";
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { message } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -94,12 +94,14 @@ export function createTauriPlatform(): Platform {
     readDirectory: (path) => invoke<DirectoryEntry[]>("read_directory", { path }),
     listFolderFiles: (path, extensions) =>
       invoke<string[]>("list_folder_files", { path, extensions }),
+    matchSearchLabels: (query, labels) =>
+      invoke<number[]>("match_search_labels", { query, labels }),
     async searchFolder(path, query, extensions, listener) {
       const channel = new Channel<SearchEvent>();
       let cancelled = false;
       channel.onmessage = (event) => {
         if (cancelled) return;
-        if (event.kind === "file") listener.onFile({ path: event.path, lines: event.lines });
+        if (event.kind === "file") listener.onFile(event);
         else listener.onDone({ truncated: event.truncated });
       };
       const id = await invoke<number>("search_folder", {
@@ -155,9 +157,11 @@ export function createTauriPlatform(): Platform {
       );
       windowMenu = await Menu.new({ items: submenus });
       if (isMac) {
-        // macOS has one menu bar for the whole app: it must belong to the focused window.
-        if (await getCurrentWindow().isFocused()) await windowMenu.setAsAppMenu();
         ensureMenuFollowsFocus();
+        // A lone window owns the app menu even when macOS opens a document in the background.
+        if ((await getCurrentWindow().isFocused()) || (await getAllWindows()).length === 1) {
+          await windowMenu.setAsAppMenu();
+        }
       } else {
         await windowMenu.setAsWindowMenu(getCurrentWindow());
       }

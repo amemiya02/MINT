@@ -1,5 +1,11 @@
 import { expect, type Page, test } from "@playwright/test";
-import { launch, printedDocuments, runMenuItem } from "./memory-platform.ts";
+import {
+  launch,
+  printedDocuments,
+  readFile,
+  runMenuItem,
+  settingsPath,
+} from "./memory-platform.ts";
 
 /** A 1×1 PNG. */
 const pngBase64 =
@@ -116,4 +122,44 @@ test("is in the command palette, in Chinese too", async ({ page }) => {
   const printed = await printedDocuments(page);
   expect(printed.map((p) => p.title)).toEqual(["报告"]);
   expect(printed[0]?.html).toContain("<h1>报告</h1>");
+});
+
+test("switches a dark HTML draft to a light PDF from the format chooser", async ({
+  page,
+  context,
+}, testInfo) => {
+  const source = "# Review copy\n\n![chart](chart.png)\n\n";
+  await launch(page, {
+    files: { "/notes/review.md": source, [settingsPath]: '{"autosave":false,"appearance":"dark"}' },
+    binaryFiles: { "/notes/chart.png": pngBase64 },
+    openDialogResults: ["/notes/review.md"],
+    locale: "en-US",
+  });
+  await page.keyboard.press("ControlOrMeta+O");
+  await expect(page.locator(".cm-content")).toBeVisible();
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.insertText("Pending revision.");
+  await runMenuItem(page, "file.export");
+  const dialog = page.getByRole("dialog", { name: "Export", exact: true });
+  await expect(dialog.getByLabel("Appearance")).toHaveValue("dark");
+  await dialog.getByLabel("Embed images").uncheck();
+  await dialog.getByLabel("Format").selectOption("pdf");
+  await expect(dialog.getByLabel("Appearance")).toHaveValue("light");
+  await expect(dialog.getByLabel("Embed images")).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Print…" }).click();
+  await expect(dialog).toHaveCount(0);
+  const [job] = await printedDocuments(page);
+  expect(job?.title).toBe("review");
+  const view = await context.newPage();
+  await view.setContent(job?.html ?? "");
+  await expect(view).toHaveTitle("Review copy");
+  await expect(view.getByText("Pending revision.")).toBeVisible();
+  await expect(view.getByRole("img", { name: "chart" })).toHaveAttribute(
+    "src",
+    /^data:image\/png;base64,/,
+  );
+  const pdf = await view.pdf({ path: testInfo.outputPath("review.pdf") });
+  expect(pdf.subarray(0, 5).toString()).toBe("%PDF-");
+  expect(await readFile(page, "/notes/review.md")).toBe(source);
+  await expect(page.getByText("Unsaved changes")).toBeVisible();
 });

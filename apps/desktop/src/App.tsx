@@ -258,6 +258,9 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
       if (activeId !== null) void store.saveAs(activeId);
     },
     "file.history": () => setHistoryPath(active?.path ?? null),
+    "file.export": () => {
+      if (activeId !== null) setExporting({ tab: activeId });
+    },
     "file.exportHtml": () => {
       if (activeId !== null) setExporting({ tab: activeId, format: "html" });
     },
@@ -377,6 +380,8 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
           <FolderSearch
             platform={platform}
             folder={folder}
+            editor={activeId === null ? null : store.editor(activeId)}
+            documentName={name}
             request={folderSearch}
             onOpenDocument={(path, select) => void store.openDocument(path, select)}
             onClose={() => {
@@ -519,7 +524,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
       {exportedTab && (
         <ExportDialog
           platform={platform}
-          format={exporting?.format ?? "html"}
+          initialFormat={exporting?.format}
           path={exportedTab.path ?? tabName(t, exportedTab)}
           getText={() => store.editor(exportedTab.id)?.getText() ?? exportedTab.text}
           onClose={() => {
@@ -543,6 +548,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
 }
 
 function errorMessage(t: Translate, error: TabError): string {
+  if (error.kind === "staleSearchResult") return t("error.staleSearchResult");
   if ("fragment" in error) return t(`error.${error.kind}`, { fragment: error.fragment });
   const params = { path: error.path, reason: error.reason };
   return t(`error.${error.kind}`, params);

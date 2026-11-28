@@ -38,7 +38,11 @@ const paperTheme = ":root { --mint-heading-fg: rgb(1, 2, 3); }";
 
 async function openReport(page: Page, saveDialogResults: (string | null)[]) {
   await launch(page, {
-    files: { "/notes/report.md": doc, [`${themesPath}/Paper.css`]: paperTheme },
+    files: {
+      [settingsPath]: '{"autosave":false}',
+      "/notes/report.md": doc,
+      [`${themesPath}/Paper.css`]: paperTheme,
+    },
     binaryFiles: { "/notes/assets/chart.png": pngBase64 },
     openDialogResults: ["/notes/report.md"],
     saveDialogResults,
@@ -152,10 +156,29 @@ test("is in the command palette, in Chinese too", async ({ page }) => {
   await page.keyboard.press("ControlOrMeta+O");
   await expect(page.locator(".cm-content")).toBeVisible();
   await page.keyboard.press("ControlOrMeta+Shift+P");
-  await page.keyboard.type("导出");
+  await page.keyboard.type("导出为 HTML");
   await page.keyboard.press("Enter");
   const dialog = page.getByRole("dialog", { name: "导出为 HTML" });
   await dialog.getByRole("button", { name: "导出" }).click();
   await expect(dialog).toHaveCount(0);
   expect(await readFile(page, "/notes/报告.html")).toContain("<h1>报告</h1>");
+});
+
+test("exports the current draft as HTML from the format chooser", async ({ page }) => {
+  await openReport(page, ["/notes/share.html"]);
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.insertText("\nCurrent draft.");
+  await page.keyboard.press("ControlOrMeta+Shift+P");
+  await page.getByRole("option", { name: "Export…", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Export", exact: true });
+  await expect(dialog.getByLabel("Format")).toHaveValue("html");
+  await dialog.getByLabel("Embed images").uncheck();
+  await dialog.getByRole("button", { name: "Export", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  const html = await readFile(page, "/notes/share.html");
+  expect(html).toContain("<title>Quarterly report</title>");
+  expect(html).toContain('src="assets/chart.png"');
+  expect(html).toContain("Current draft.");
+  expect(await readFile(page, "/notes/report.md")).toBe(doc);
+  await expect(page.getByText("Unsaved changes")).toBeVisible();
 });

@@ -394,6 +394,20 @@ async fn list_folder_files(
     .await
 }
 
+/// Match the live editor's headings using the same query syntax as the folder search.
+#[tauri::command]
+async fn match_search_labels(
+    query: search::SearchQuery,
+    labels: Vec<String>,
+) -> Result<Vec<usize>, String> {
+    let compiled = search::Search::new(&query)?;
+    Ok(labels
+        .iter()
+        .enumerate()
+        .filter_map(|(i, label)| compiled.matches_label(label).then_some(i))
+        .collect())
+}
+
 /// Running global searches, by id, each with its cancel flag.
 #[derive(Default)]
 struct Searches {
@@ -638,6 +652,7 @@ pub fn run() {
             move_to_trash,
             list_folder_files,
             search_folder,
+            match_search_labels,
             cancel_search,
             watch_folder,
             watch_file,
