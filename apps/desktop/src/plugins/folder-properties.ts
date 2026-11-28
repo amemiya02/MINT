@@ -12,12 +12,12 @@ export interface FolderViewProps {
   onOpen: (path: string) => void;
 }
 
-interface FolderDocument {
+export interface FolderDocument {
   path: string;
   properties: Record<string, unknown>;
 }
 
-function propertiesOf(source: string): Record<string, unknown> {
+export function propertiesOf(source: string): Record<string, unknown> {
   if (!source.startsWith("---") && !source.startsWith("\uFEFF---")) return {};
   const header = /^\uFEFF?---[ \t]*\r?\n([\s\S]*?)^(?:---|\.\.\.)[ \t]*\r?$/m.exec(source);
   if (header?.index !== 0) return {};
@@ -46,11 +46,16 @@ async function readDocuments(id: string, folder: string, platform: Platform, sig
 }
 
 // The shell keys each view by plugin, folder and grant, clearing prior results on change.
-export function useFolderProperties({ manifest, folder, platform, granted }: FolderViewProps) {
+export function useFolderProperties(
+  { manifest, folder, platform, granted }: FolderViewProps,
+  revision = 0,
+) {
   const [documents, setDocuments] = useState<FolderDocument[] | null>(null);
   const [failed, setFailed] = useState(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: A move refreshes the on-disk snapshot.
   useEffect(() => {
     if (!folder || !granted) return;
+    setFailed(false);
     const controller = new AbortController();
     readDocuments(manifest.id, folder, platform, controller.signal).then(
       (result) => {
@@ -61,6 +66,6 @@ export function useFolderProperties({ manifest, folder, platform, granted }: Fol
       },
     );
     return () => controller.abort();
-  }, [manifest.id, folder, granted, platform]);
+  }, [manifest.id, folder, granted, platform, revision]);
   return { documents, failed };
 }

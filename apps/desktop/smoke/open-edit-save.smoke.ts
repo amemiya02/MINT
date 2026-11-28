@@ -259,6 +259,64 @@ test("history restores and undo autosave the exact native file", async () => {
   assert.deepEqual(await readdir(dir), ["smoke.md"]);
 });
 
+test("moving a Kanban card changes only its status on disk after the writer grants access", async () => {
+  assert.ok(application);
+  const folder = await mkdtemp(join(dir, "kanban-"));
+  const path = join(folder, "card.md");
+  const draft = "\uFEFF---\r\nstatus: 'Draft'  # keep\r\n---\r\n\r\nNotes.  \r\n";
+  await writeFile(path, draft);
+  await restart([folder]);
+  async function clickPath(xpath: string) {
+    const id = await until(xpath, async () => {
+      const el = await command<Record<string, string>>("POST", `/session/${session}/element`, {
+        using: "xpath",
+        value: xpath,
+      });
+      return el[elementKey] ?? null;
+    }).catch(explain);
+    await command("POST", `/session/${session}/element/${id}/click`, {});
+  }
+  await until("the Kanban fixture folder to open", () =>
+    command<boolean>("POST", `/session/${session}/execute/sync`, {
+      script: `return !!document.querySelector('[role=treeitem][aria-label="card.md"]')`,
+      args: [],
+    }).then((ready) => ready || null),
+  ).catch(explain);
+  await nativeShortcut("ctrl+comma");
+  await clickPath("//fieldset[@aria-label='Kanban board']//button[normalize-space(.)='Install']");
+  await shows("Change the status property");
+  await click("Deny access");
+  const grant = (action: string) =>
+    `//fieldset[@aria-label='Kanban board']//small[contains(.,'${action}')]/following-sibling::button`;
+  await clickPath(grant("Read Markdown"));
+  await click("Close");
+  await clickPath("//nav//button[@aria-label='Kanban board']");
+  const select = "//aside//select[@aria-label='Move card.md']";
+  await until("read-only Kanban card", async () => {
+    const el = await command<Record<string, string>>("POST", `/session/${session}/element`, {
+      using: "xpath",
+      value: `${select}[@disabled]`,
+    });
+    return el[elementKey] ?? null;
+  }).catch(explain);
+  assert.equal(await readFile(path, "utf8"), draft);
+  await nativeShortcut("ctrl+comma");
+  await clickPath(grant("Change the status"));
+  await click("Close");
+  await clickPath(`${select}/option[@value='Done']`);
+  await until(
+    "the status update to reach disk",
+    async () => (await readFile(path, "utf8")) === draft.replace("'Draft'", "'Done'") || null,
+  ).catch(explain);
+  await restart([folder]);
+  await click("Kanban board", "aria-label");
+  await clickPath("//aside//section[@aria-label='Done']//button[normalize-space(.)='card.md']");
+  assert.deepEqual(await readdir(folder), ["card.md"]);
+  await nativeShortcut("ctrl+comma");
+  await clickPath("//fieldset[@aria-label='Kanban board']//button[normalize-space(.)='Uninstall']");
+  await click("Close");
+});
+
 const click = async (label: string, by: "text" | "aria-label" = "text") => {
   const element = await until(label, async () => {
     const result = await command<Record<string, string>>("POST", `/session/${session}/element`, {
