@@ -1046,3 +1046,121 @@ test("the daily journal creates one ordinary Markdown file only after permission
   await clickPath(`${plugin}//button[normalize-space(.)='Uninstall']`);
   await click("Close");
 });
+
+test("external Agent consent gates a real CLI process and keeps the manuscript out of its input", async () => {
+  const fixture = await mkdtemp(join(dir, "external-agent-"));
+  const draft = join(fixture, "draft.md");
+  const executable = join(fixture, "fixture-codex");
+  const calls = join(fixture, "calls.jsonl");
+  const writeTarget = join(fixture, "agent-write.txt");
+  const initial = "Unsent paragraph.\n\nOn-disk sentence.";
+  await writeFile(draft, initial);
+  await writeFile(
+    executable,
+    `#!/usr/bin/env node
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+const readOnly = args.includes("--sandbox") && args[args.indexOf("--sandbox") + 1] === "read-only";
+const prompt = fs.readFileSync(0, "utf8");
+const readable = fs.readFileSync(${JSON.stringify(draft)}, "utf8");
+fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify({
+  args, prompt: JSON.parse(prompt), cwd: process.cwd(), entries: fs.readdirSync(process.cwd()), readable,
+}) + "\\n");
+if (!readOnly) fs.writeFileSync(${JSON.stringify(writeTarget)}, "configured access ran");
+console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "Fixture Agent reply." } }));
+console.log(JSON.stringify({ type: "turn.completed" }));
+`,
+    { mode: 0o755 },
+  );
+
+  await restart([draft]);
+  await openSettings();
+  await clickPath("//summary[normalize-space(.)='External Agents']");
+  await clickPath("//label[normalize-space(.)='Codex executable']/input");
+  await keyActions(typing(executable));
+  await click("Inspect Agent");
+  await shows("MINT launches this executable with your account’s file access.");
+  await click("Try example");
+  await click("Decline");
+  await shows("Agent access declined.");
+  await assert.rejects(readFile(calls), { code: "ENOENT" });
+
+  const { path, revision } = await invokeNative<{ path: string; revision: string }>(
+    "inspect_external_agent",
+    { path: executable },
+  );
+  const request = { instruction: "Reply with one line.", selectedText: "One line." };
+  await assert.rejects(
+    invokeNative("send_external_agent", { path, revision, access: "readOnly", request }),
+    /agentAccessRequired/,
+  );
+  await assert.rejects(readFile(calls), { code: "ENOENT" });
+
+  await click("Try example");
+  await click("Allow and send");
+  await shows("Fixture Agent reply.");
+  await shows("Conversation verified");
+  const [sample] = (await readFile(calls, "utf8"))
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.ok(sample.args.includes("--json"));
+  assert.ok(sample.args.includes("--ephemeral"));
+  assert.equal(sample.args.at(-1), "-");
+  assert.equal(sample.args[sample.args.indexOf("--sandbox") + 1], "read-only");
+  assert.deepEqual(sample.prompt, {
+    instruction: "Suggest one concise rewrite of the selected text.",
+    selectedText: "We are currently in the process of reviewing the draft.",
+  });
+  assert.notEqual(sample.cwd, fixture);
+  assert.deepEqual(sample.entries, []);
+  assert.equal(sample.readable, initial);
+  await assert.rejects(readFile(writeTarget), { code: "ENOENT" });
+
+  await command("POST", `/session/${session}/execute/sync`, {
+    script: `const select = Array.from(document.querySelectorAll('dialog[open] select'))
+      .find((control) => control.querySelector('option[value="configured"]'));
+      select.value = 'configured';
+      select.dispatchEvent(new Event('change', { bubbles: true }));`,
+    args: [],
+  });
+  await shows("Configured file access may include writes across your account.");
+  await click("Try example");
+  await click("Decline");
+  await assert.rejects(
+    invokeNative("send_external_agent", { path, revision, access: "configured", request }),
+    /agentAccessRequired/,
+  );
+  assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, 1);
+  await assert.rejects(readFile(writeTarget), { code: "ENOENT" });
+
+  await click("Try example");
+  await click("Allow and send");
+  await shows("Fixture Agent reply.");
+  assert.equal(await readFile(writeTarget, "utf8"), "configured access ran");
+  assert.equal(await readFile(draft, "utf8"), initial);
+
+  // Reopening Settings after an actual app restart retains the connection and the granted scope.
+  await click("Close");
+  await restart([draft]);
+  await openSettings();
+  await clickPath("//summary[normalize-space(.)='External Agents']");
+  await shows(executable);
+  await click("Try example");
+  await shows("Fixture Agent reply.");
+  assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, 3);
+  await writeFile(
+    executable,
+    `${await readFile(executable, "utf8")}
+// replacement
+`,
+  );
+  await click("Try example");
+  await shows("Agent access changed. Review its permissions before sending.");
+  assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, 3);
+  await click("Try example");
+  await click("Decline");
+  await shows("Agent access declined.");
+  await click("Forget Agent");
+  await click("Close");
+});

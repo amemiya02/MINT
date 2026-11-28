@@ -1,3 +1,4 @@
+import type { ExternalAgentPlatform } from "../ai/external-agent.ts";
 import type { PrintJob } from "../print/protocol.ts";
 
 /**
@@ -8,6 +9,7 @@ import type { PrintJob } from "../print/protocol.ts";
  * packages directly.
  */
 export interface Platform {
+  readonly externalAgent: ExternalAgentPlatform;
   listZoteroItems(start: number): Promise<ZoteroPage>;
   /** The user's preferred UI language as a BCP 47 tag, e.g. `zh-CN` or `en-US`. */
   readonly locale: string;

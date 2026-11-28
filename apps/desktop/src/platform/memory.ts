@@ -1,5 +1,6 @@
 import { baseName, parentPath } from "../paths.ts";
 import { createIgnoreRules } from "./gitignore.ts";
+import { type MemoryExternalAgentOptions, memoryExternalAgent } from "./memory-external-agent.ts";
 import { pickBrowserFile } from "./pick-file.ts";
 import type {
   DirectoryEntry,
@@ -28,6 +29,7 @@ export const memoryRecoveryDir = "/data/MINT/recovery";
 export const memoryThemesPath = "/data/MINT/themes";
 
 export interface MemoryPlatformOptions {
+  readonly externalAgent?: MemoryExternalAgentOptions;
   /** Initial files, keyed by absolute `/`-separated path. Their parent directories exist implicitly. */
   readonly files?: Readonly<Record<string, string>>;
   /** Extra (possibly empty) directories. */
@@ -295,6 +297,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
         next: options.zoteroItems.length > start + 50,
       };
     },
+    externalAgent: memoryExternalAgent(options.externalAgent),
     locale: options.locale ?? navigator.language,
     files,
     binaryFiles,
