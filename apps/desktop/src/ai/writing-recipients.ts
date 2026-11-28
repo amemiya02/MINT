@@ -12,7 +12,7 @@ export type WritingRecipient = {
 );
 
 /** Bind native-approved Agent policies and saved model IDs to the shared text sender. */
-export async function loadWritingRecipients(platform: Platform) {
+export async function loadWritingRecipients(platform: Platform, agentAccess?: AgentAccess) {
   const [agents, models] = await Promise.allSettled([
     platform.externalAgent.saved(),
     platform.listModelConnections(),
@@ -21,7 +21,7 @@ export async function loadWritingRecipients(platform: Platform) {
   let failed = agents.status === "rejected" || models.status === "rejected";
   if (agents.status === "fulfilled") {
     for (const agent of agents.value) {
-      const access = agent.preferredAccess;
+      const access = agentAccess ?? agent.preferredAccess;
       if (!agent.approved.includes(access)) continue;
       available.push({
         id: `agent:${JSON.stringify([agent.path, agent.revision, access])}`,

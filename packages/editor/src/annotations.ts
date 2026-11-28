@@ -169,15 +169,22 @@ export class DocumentAnnotations {
   }
 
   add(target: AnnotationTarget, note: string, text: string) {
+    this.addAll([{ ...target, note }], text);
+  }
+
+  addAll(
+    targets: readonly Pick<Annotation, "kind" | "excerpt" | "range" | "implicitColumn" | "note">[],
+    text: string,
+  ) {
+    if (!targets.length) return;
     this.set([
       ...this.items,
-      {
+      ...targets.map((target) => ({
         ...target,
         id: crypto.randomUUID(),
-        note,
         resolved: false,
-        range: locate(target.range, text),
-      },
+        range: target.range && locate(target.range, text),
+      })),
     ]);
   }
 

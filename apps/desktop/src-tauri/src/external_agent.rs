@@ -39,9 +39,21 @@ pub struct WritingRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     selected_text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    annotation_batch: Option<Vec<WritingAnnotation>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     task_context: Option<TaskContext>,
     #[serde(skip_serializing_if = "Option::is_none")]
     history: Option<Vec<WritingTurn>>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct WritingAnnotation {
+    id: String,
+    kind: String,
+    excerpt: String,
+    note: String,
+    editable: bool,
 }
 
 #[derive(Deserialize, Serialize)]
