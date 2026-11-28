@@ -115,3 +115,80 @@ test("another window can revoke a live view, and enabling it again leaves it clo
   await expect(page.getByRole("button", { name: "Writing statistics" })).toBeVisible();
   await expect(view).toHaveCount(0);
 });
+
+const original = {
+  apiVersion: 1,
+  id: "example.draft",
+  name: "Draft metrics",
+  permissions: ["document.read"],
+  statistics: ["words"],
+};
+const upload = (manifest: object) => ({
+  name: "draft.mint.json",
+  mimeType: "application/json",
+  buffer: Buffer.from(JSON.stringify(manifest)),
+});
+
+test("updating a local plugin retains its existing document grant", async ({ page }) => {
+  // Open an installation saved by an earlier MINT release.
+  await page.addInitScript((manifest) => {
+    localStorage.setItem(
+      "mint.plugin.v1." + manifest.id,
+      JSON.stringify({ manifest, enabled: true, granted: true }),
+    );
+  }, original);
+  await launch(page, { locale: "en-US" });
+  await page.keyboard.press("ControlOrMeta+n");
+  await page.locator(".cm-content").fill("draft");
+  await page.keyboard.press("ControlOrMeta+,");
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  const input = settings.getByLabel("Install a MINT plugin file");
+  await input.setInputFiles(
+    upload({ ...original, name: "Draft size", statistics: ["characters"] }),
+  );
+  await expect(settings.getByRole("group", { name: "Draft size" })).toBeVisible();
+  await settings.getByRole("button", { name: "Close", exact: true }).click();
+  await page.getByRole("button", { name: "Draft size" }).click();
+  await expect(page.getByRole("dialog", { name: "Draft size" })).toContainText("Characters: 5");
+});
+
+test("a writer can decline an additional action, then approve the update", async ({ page }) => {
+  await launch(page, { locale: "en-US" });
+  await page.keyboard.press("ControlOrMeta+n");
+  const editor = page.locator(".cm-content");
+  await editor.fill("draft");
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  const input = settings.getByLabel("Install a MINT plugin file");
+  const close = settings.getByRole("button", { name: "Close", exact: true });
+  const expanded = {
+    ...original,
+    name: "Draft toolkit",
+    permissions: ["document.write", "document.read"],
+    templates: [{ name: "Review marker", text: "REVIEW" }],
+  };
+  await page.keyboard.press("ControlOrMeta+,");
+  await input.setInputFiles(upload(original));
+  await settings.getByRole("button", { name: "Allow access" }).click();
+  await input.setInputFiles(upload(expanded));
+  const review = settings.getByRole("group", { name: "Update Draft toolkit" });
+  await expect(review).toContainText("Modify the current document at the selection");
+  await expect(review).not.toContainText("Read the current document");
+  await review.getByRole("button", { name: "Keep current version" }).click();
+  await close.click();
+  await page.getByRole("button", { name: "Draft metrics" }).click();
+  await expect(page.getByRole("dialog", { name: "Draft metrics" })).toContainText("Words: 1");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("ControlOrMeta+Shift+p");
+  await expect(page.getByRole("option", { name: /Review marker/ })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("ControlOrMeta+,");
+  await input.setInputFiles(upload(expanded));
+  await review.getByRole("button", { name: "Allow and update" }).click();
+  await close.click();
+  await page.getByRole("button", { name: "Draft toolkit" }).click();
+  await expect(page.getByRole("dialog", { name: "Draft toolkit" })).toContainText("Words: 1");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("ControlOrMeta+Shift+p");
+  await page.getByRole("option", { name: /Review marker/ }).click();
+  await expect(editor).toContainText("REVIEW");
+});

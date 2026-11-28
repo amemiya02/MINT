@@ -137,7 +137,9 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [sidebarView, setSidebarView] = useState<Exclude<SidebarTool, "search">>("outline");
   const plugins = useInstallations();
-  const timingEnabled = plugins.some((i) => i.enabled && i.granted && "diagram" in i.manifest);
+  const timingEnabled = plugins.some(
+    (i) => i.enabled && i.grants.includes("document.read") && "diagram" in i.manifest,
+  );
   const codeBlockRenderers = useMemo(
     () => (timingEnabled ? [timingRenderer(t)] : []),
     [timingEnabled, t],
@@ -473,9 +475,13 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
         )}
         {folderSearch === null && sidebarVisible && selectedPlugin && (
           <TagBrowser
-            key={JSON.stringify([selectedPlugin.manifest.id, folder, selectedPlugin.granted])}
+            key={JSON.stringify([
+              selectedPlugin.manifest.id,
+              folder,
+              selectedPlugin.grants.includes("folder.read"),
+            ])}
             manifest={selectedPlugin.manifest}
-            granted={selectedPlugin.granted}
+            granted={selectedPlugin.grants.includes("folder.read")}
             folder={folder}
             platform={platform}
             onOpen={(path) => void store.openDocument(path)}

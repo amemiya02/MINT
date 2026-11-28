@@ -3,16 +3,19 @@ import { useEffect, useState } from "react";
 import { type Translate, useT } from "../i18n/index.ts";
 import { useModalDialog } from "../window/useModalDialog.ts";
 import {
+  addedPermissions,
   change,
   install,
   installations,
   isManifest,
   notionImporter,
+  type Permission,
   type PluginManifest,
   readStatistics,
   tagBrowser,
   timingDiagrams,
   uninstall,
+  update,
   writingStatistics,
   writingTemplates,
 } from "./host.ts";
@@ -41,16 +44,19 @@ export function pluginName(m: PluginManifest, t: Translate) {
   return m.id === writingStatistics.id ? t("plugin.statistics") : m.name;
 }
 
-function permission(manifest: PluginManifest, t: Translate) {
-  if ("importer" in manifest) return t("notion.permission");
-  if ("templates" in manifest) return t("plugin.write");
-  return t("sidebar" in manifest ? "plugin.folderRead" : "plugin.read");
+function permission(action: Permission, t: Translate) {
+  if (action === "archive.import") return t("notion.permission");
+  if (action === "document.write") return t("plugin.write");
+  return t(action === "folder.read" ? "plugin.folderRead" : "plugin.read");
 }
 
 export function PluginSettings() {
   const t = useT();
   const installed = useInstallations();
   const [pending, setPending] = useState<PluginManifest | null>(null);
+  const [review, setReview] = useState<{ manifest: PluginManifest; added: Permission[] } | null>(
+    null,
+  );
   const [invalidFile, setInvalidFile] = useState(false);
   const [failed, setFailed] = useState(false);
   function apply(action: () => void) {
@@ -82,7 +88,10 @@ export function PluginSettings() {
             type="button"
             className={button}
             aria-label={m.id === writingTemplates.id ? t("plugin.installTemplates") : undefined}
-            onClick={() => setPending(m)}
+            onClick={() => {
+              setReview(null);
+              setPending(m);
+            }}
           >
             {t("plugin.install")}
           </button>
@@ -98,17 +107,19 @@ export function PluginSettings() {
             event.currentTarget.value = "";
             if (!file) return;
             setPending(null);
+            setReview(null);
             try {
               const manifest: unknown = file.size <= 65536 && JSON.parse(await file.text());
-              if (
-                !isManifest(manifest) ||
-                manifest.id.startsWith("mint.") ||
-                installed.some((i) => i.manifest.id === manifest.id)
-              ) {
+              if (!isManifest(manifest) || manifest.id.startsWith("mint.")) {
                 setInvalidFile(true);
                 return;
               }
-              setPending(manifest);
+              const current = installations().find((i) => i.manifest.id === manifest.id);
+              if (current) {
+                const added = addedPermissions(current.manifest, manifest);
+                if (added.length) setReview({ manifest, added });
+                else apply(() => update(manifest));
+              } else setPending(manifest);
               setInvalidFile(false);
             } catch {
               setInvalidFile(true);
@@ -120,7 +131,9 @@ export function PluginSettings() {
       {pending && (
         <div className="rounded border border-(--mint-border) p-2">
           <strong>{pluginName(pending, t)}</strong>
-          <p>{permission(pending, t)}</p>
+          {pending.permissions.map((p) => (
+            <p key={p}>{permission(p, t)}</p>
+          ))}
           <div className="flex gap-2">
             {([true, false] as const).map((grant) => (
               <button
@@ -140,6 +153,31 @@ export function PluginSettings() {
           </div>
         </div>
       )}
+      {review && (
+        <fieldset className="rounded border border-(--mint-border) p-2">
+          <legend>{t("plugin.update", { name: pluginName(review.manifest, t) })}</legend>
+          {review.added.map((p) => (
+            <p key={p}>{permission(p, t)}</p>
+          ))}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              className={button}
+              onClick={() =>
+                apply(() => {
+                  update(review.manifest, review.added);
+                  setReview(null);
+                })
+              }
+            >
+              {t("plugin.allowUpdate")}
+            </button>
+            <button type="button" className={button} onClick={() => setReview(null)}>
+              {t("plugin.keep")}
+            </button>
+          </div>
+        </fieldset>
+      )}
       {installed.map((i) => (
         <fieldset
           aria-label={pluginName(i.manifest, t)}
@@ -147,7 +185,22 @@ export function PluginSettings() {
           className="flex flex-col gap-1"
         >
           <span>{pluginName(i.manifest, t)}</span>
-          <small>{permission(i.manifest, t)}</small>
+          {i.manifest.permissions.map((p) => (
+            <div key={p} className="flex items-center gap-2">
+              <small>{permission(p, t)}</small>
+              <button
+                type="button"
+                className={button}
+                onClick={() =>
+                  apply(() =>
+                    change(i.manifest.id, { permission: p, granted: !i.grants.includes(p) }),
+                  )
+                }
+              >
+                {t(i.grants.includes(p) ? "plugin.revoke" : "plugin.allow")}
+              </button>
+            </div>
+          ))}
           {"diagram" in i.manifest && (
             <details className="text-sm">
               <summary className="cursor-pointer">{t("plugin.exampleMarkdown")}</summary>
@@ -157,13 +210,6 @@ export function PluginSettings() {
             </details>
           )}
           <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              className={button}
-              onClick={() => apply(() => change(i.manifest.id, { granted: !i.granted }))}
-            >
-              {t(i.granted ? "plugin.revoke" : "plugin.allow")}
-            </button>
             <button
               type="button"
               className={button}
