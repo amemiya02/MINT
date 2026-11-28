@@ -4037,6 +4037,10 @@ test("Codex provides manuscript and folder reviews from approved task copies", a
   const unsaved = initial.replace("Original.", "Original. Unsaved note.");
   const changed = unsaved.replace("Original.", "Revised.");
   const approved = "Only the approved passage.";
+  const preference = {
+    topic: "Interview quotations",
+    guidance: "Keep the interviewee's words verbatim.",
+  };
   await writeFile(draft, initial);
   await writeFile(sibling, "Private text.");
   await writeFile(index, "[Old](old.md#section)\n");
@@ -4056,6 +4060,10 @@ const config = args.flatMap((arg, i) =>
   arg === "-c" && args[i + 1].startsWith("permissions.") ? ["-c", args[i + 1]] : []);
 const sample = prompt.instruction.startsWith("Suggest one concise rewrite");
 const folder = prompt.folderDocuments !== undefined;
+if (folder) {
+  require("node:assert/strict").deepEqual(prompt.preferences, [${JSON.stringify(preference)}]);
+  require("node:assert/strict").match(prompt.instruction, /explicit current instruction takes precedence/);
+}
 if (folder && JSON.stringify(prompt.folderDocuments) !== JSON.stringify([
   "documents/index.md", "documents/manuscript.md", "documents/old.md",
 ])) process.exit(11);
@@ -4328,6 +4336,15 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   for (const path of ["manuscript.md", "index.md", "old.md"]) {
     await clickPath(`${assistant}//label[normalize-space(.)='${path}']/input[@type='checkbox']`);
   }
+  const preferenceBox = `${assistant}//fieldset[legend[normalize-space(.)='Writing preferences to send']]`;
+  await clickPath(`${preferenceBox}//summary[normalize-space(.)='Remember a correction']`);
+  await select("Remember for", "folder");
+  await clickPath(`${preferenceBox}//label[normalize-space(.)='Topic']/input`);
+  await keyActions(typing(preference.topic));
+  await clickPath(`${preferenceBox}//label[normalize-space(.)='Writing guidance']/textarea`);
+  await keyActions(typing(preference.guidance));
+  await clickPath(`${preferenceBox}//button[normalize-space(.)='Save writing preference']`);
+  await showsIn('aside[aria-label="Writing Assistant"]', preference.guidance);
   await clickPath(`${assistant}//label[normalize-space(.)='Instruction']/input`);
   await keyActions([...typing("Organize these documents."), ...typing(keys.enter)]);
   await shows("Requires chapter/renamed.md, notes.md");
@@ -4372,4 +4389,29 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   assert.equal(await readFile(draft, "utf8"), changed);
   assert.equal(await readFile(sibling, "utf8"), "Private text.");
   await invokeNative("forget_external_agent", { path: executable });
+
+  await restart([fixture, draft]);
+  await nativeShortcut("ctrl+shift+p");
+  await waitForView(
+    "the command palette to receive focus after restart",
+    `return document.activeElement?.matches('dialog[aria-label="Command Palette"] input');`,
+  );
+  await keyActions(typing("Remember a correction"));
+  await shows("Remember a correction");
+  await keyActions(typing(keys.enter));
+  await waitForView(
+    "the saved preference and its scope to be visible before sending",
+    `const row = [...document.querySelectorAll('fieldset li')].find(
+      item => item.textContent.includes(${JSON.stringify(preference.guidance)}));
+      return Boolean(row?.textContent.includes("Working folder")
+        && row.textContent.includes(${JSON.stringify(preference.topic)}));`,
+  );
+  assert.deepEqual((await readdir(fixture)).sort(), [
+    "chapter",
+    "fixture-codex",
+    "index.md",
+    "manuscript.md",
+    "notes.md",
+    "unapproved.md",
+  ]);
 });

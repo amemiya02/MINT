@@ -44,6 +44,8 @@ pub enum AgentAccess {
 pub struct WritingRequest {
     instruction: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    preferences: Option<Vec<crate::writing_preferences::WritingPreference>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     task_copy: Option<task_copy::Mode>,
     #[serde(skip_serializing_if = "Option::is_none")]
     folder_documents: Option<Vec<task_copy::Document>>,

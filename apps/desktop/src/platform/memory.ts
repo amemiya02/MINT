@@ -6,6 +6,7 @@ import {
   modelEndpoint,
   type SavedModelConnection,
 } from "../ai/model.ts";
+import { readWritingPreferences, writingPreferencesFile } from "../ai/writing-preferences.ts";
 import { hasProposedEdits, type SavedWritingTask } from "../ai/writing-tasks.ts";
 import { baseName, isWithin, parentPath } from "../paths.ts";
 import { createIgnoreRules } from "./gitignore.ts";
@@ -379,6 +380,13 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       options.externalAgent,
       (id) => temporaryTasks.has(id) || appData.has(taskRecord(id)),
     ),
+    async saveWritingPreference(preference) {
+      const saved = readWritingPreferences(appData.get(writingPreferencesFile) ?? null);
+      const next = saved.filter(
+        ({ key, folder }) => key !== preference.key || folder !== preference.folder,
+      );
+      appData.set(writingPreferencesFile, JSON.stringify([...next, preference]));
+    },
     writingTasks: {
       async list(path, all) {
         return [...appData.entries()].flatMap(([key, json]) => {

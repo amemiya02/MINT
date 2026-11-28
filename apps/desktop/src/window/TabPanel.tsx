@@ -57,7 +57,7 @@ export function TabPanel({
   readonly toolbarPosition: ToolbarPosition;
   readonly platform: Platform;
   readonly folder: string | null;
-  readonly askWriting: { readonly folder?: string } | null;
+  readonly askWriting: { readonly folder?: string; readonly rememberPreference?: true } | null;
   readonly writingTaskRestore: WritingTaskOpenRequest | null;
   readonly writingTaskListRevision: number;
   readonly settingsOpen: boolean;

@@ -15,6 +15,7 @@ import {
   WritingTasksContext,
 } from "./ai/WritingTasks.tsx";
 import { WritingTasksDialog } from "./ai/WritingTasksDialog.tsx";
+import { writingPreferenceFolder } from "./ai/writing-preferences.ts";
 import { captureWritingSelection, type WritingSelection } from "./ai/writing-selection.ts";
 import {
   checkpointOpenWritingTasks,
@@ -177,9 +178,11 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     },
     [store],
   );
-  const [writingRequest, setWritingRequest] = useState<{ tabId: number; folder?: string } | null>(
-    null,
-  );
+  const [writingRequest, setWritingRequest] = useState<{
+    tabId: number;
+    folder?: string;
+    rememberPreference?: true;
+  } | null>(null);
   const [taskDialog, setTaskDialog] = useState<"current" | "all" | "review" | null>(null);
   const [taskRestore, setTaskRestore] = useState<
     (WritingTaskOpenRequest & { tabId: number }) | null
@@ -544,6 +547,9 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
       if (activeId === null || !store.editor(activeId)) return;
       setShellError(null);
       setWritingRequest({ tabId: activeId });
+    },
+    "edit.rememberWritingPreference": () => {
+      setWritingRequest({ tabId: activeId ?? store.newDocument(), rememberPreference: true });
     },
     "edit.askFolderAI": () => {
       if (!folder) {
@@ -939,6 +945,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
                 key={tab.documentId}
                 annotations={tab.document.annotations}
                 documentId={tab.documentId}
+                folder={folder}
                 name={tabName(t, tab)}
                 platform={platform}
                 store={store}
@@ -1077,6 +1084,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
           platform={platform}
           selection={agentSelection.origin.text}
           name={agentTab ? tabName(t, agentTab) : t("writing.scope.untitled")}
+          folder={agentTab ? writingPreferenceFolder(folder, agentTab.path) : null}
           tabId={agentSelection.tabId}
           visible={agentDialogVisible}
           onReveal={() => {

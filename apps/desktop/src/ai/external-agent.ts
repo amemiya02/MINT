@@ -1,4 +1,9 @@
 import {
+  outboundWritingPreferences,
+  type WritingPreference,
+  writingPreferenceInstruction,
+} from "./writing-preferences.ts";
+import {
   hasTaskImages,
   materialRequestInstruction,
   outboundTaskContext,
@@ -33,7 +38,8 @@ export interface ExternalAgentPlatform {
   send(
     agent: ExternalAgent,
     access: AgentAccess,
-    request: Omit<WritingRequest, "responseFormat" | "sourcePassages"> & {
+    request: Omit<WritingRequest, "responseFormat" | "sourcePassages" | "preferences"> & {
+      readonly preferences?: readonly WritingPreference[];
       readonly taskCopy?: "edit" | "draft";
     },
     options?: WritingOptions,
@@ -50,6 +56,7 @@ export function externalAgentSender(
     if (request.folderDocuments && access !== "taskCopy") throw "invalidRequest";
     if (hasTaskImages(request.taskContext)) throw "invalidRequest";
     const instruction = [request.instruction];
+    if (request.preferences?.length) instruction.push(writingPreferenceInstruction);
     const taskCopy =
       access === "taskCopy" && responseFormat
         ? responseFormat === "replacement"
@@ -65,6 +72,7 @@ export function externalAgentSender(
       access,
       {
         ...request,
+        preferences: outboundWritingPreferences(request.preferences),
         taskContext: outboundTaskContext(request.taskContext, (material) => material),
         taskCopy,
         instruction: instruction.join("\n\n"),
