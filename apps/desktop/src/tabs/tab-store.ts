@@ -233,40 +233,37 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
     if (target) set({ activeId: target.id });
   }
 
-  /** Wait for React to show the destination panel before scrolling it. */
   function reveal(id: number, editor: MintEditor, range: DocumentLocation) {
-    setTimeout(() => {
-      if (state.activeId !== id || editors.get(id) !== editor) return;
-      if ("fragment" in range) {
-        const matches = matchingHeadings(editor.getOutline(), range.fragment);
-        const heading = matches[0];
-        if (!heading || matches.length > 1) {
-          set({
-            error: {
-              kind: heading ? "ambiguousHeading" : "missingHeading",
-              fragment: range.fragment,
-            },
-          });
-          return;
-        }
-        editor.setSelection({ anchor: heading.from, scrollIntoView: "start" });
-        editor.focus();
+    if (state.activeId !== id || editors.get(id) !== editor) return;
+    if ("fragment" in range) {
+      const matches = matchingHeadings(editor.getOutline(), range.fragment);
+      const heading = matches[0];
+      if (!heading || matches.length > 1) {
+        set({
+          error: {
+            kind: heading ? "ambiguousHeading" : "missingHeading",
+            fragment: range.fragment,
+          },
+        });
         return;
       }
-      const text = editor.getText();
-      const start = startOfMatch(text, range);
-      if (start === null) {
-        set({ error: { kind: "staleSearchResult" } });
-        return;
-      }
-      const clamp = (offset: number) => Math.min(start + offset, text.length);
-      editor.setSelection({
-        anchor: clamp(range.from),
-        head: clamp(range.to),
-        scrollIntoView: true,
-      });
+      editor.setSelection({ anchor: heading.from, scrollIntoView: "start" });
       editor.focus();
+      return;
+    }
+    const text = editor.getText();
+    const start = startOfMatch(text, range);
+    if (start === null) {
+      set({ error: { kind: "staleSearchResult" } });
+      return;
+    }
+    const clamp = (offset: number) => Math.min(start + offset, text.length);
+    editor.setSelection({
+      anchor: clamp(range.from),
+      head: clamp(range.to),
+      scrollIntoView: true,
     });
+    editor.focus();
   }
 
   async function read(path: string) {
@@ -464,7 +461,8 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
       const tab = state.tabs.find((t) => t.path === path);
       if (!select || !tab) return;
       const editor = editors.get(tab.id);
-      if (editor) reveal(tab.id, editor, select);
+      // Opening a tab may still need React to show its panel before scrolling.
+      if (editor) setTimeout(() => reveal(tab.id, editor, select));
       else pendingSelections.set(tab.id, select);
     },
 
@@ -676,7 +674,7 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
       editors.set(id, editor);
       const select = pendingSelections.get(id);
       pendingSelections.delete(id);
-      if (select) reveal(id, editor, select);
+      if (select) setTimeout(() => reveal(id, editor, select));
     },
 
     markChanged(viewId, fromHistory = false) {
