@@ -124,9 +124,8 @@ function canRevert(suggestion: Suggestion) {
 
 function isApplied(suggestion: Suggestion, draft: string) {
   return (
-    suggestion.status === "applied" &&
-    suggestion.appliedText !== undefined &&
-    currentText(suggestion, draft) !== suggestion.before
+    canRevert(suggestion) &&
+    (!suggestion.range.hasBoundaries() || currentText(suggestion, draft) !== suggestion.before)
   );
 }
 
@@ -661,6 +660,23 @@ function Composer({
     return tracked;
   }
 
+  function recordReversionDecision(ranges: readonly TrackedRange[], status: "reverted" | "kept") {
+    const decided = new Set(ranges);
+    setTurns((previous) =>
+      previous.map((turn) => ({
+        ...turn,
+        suggestions: turn.suggestions?.map((suggestion) =>
+          decided.has(suggestion.range) ? { ...suggestion, status } : suggestion,
+        ),
+      })),
+    );
+  }
+
+  function keepCurrent(range: TrackedRange) {
+    if (busy || checkingDisk.current || !trackedSuggestions.current.has(range)) return;
+    recordReversionDecision([range], "kept");
+  }
+
   function recordApplied(
     suggestion: Suggestion,
     range: TextRange,
@@ -704,11 +720,7 @@ function Composer({
     });
   }
 
-  async function revertDirect(
-    index: number,
-    suggestions: readonly Suggestion[],
-    compared?: string,
-  ) {
+  async function revertEdits(suggestions: readonly Suggestion[], compared?: string) {
     if (busy || checkingDisk.current) return;
     checkingDisk.current = true;
     try {
@@ -718,31 +730,37 @@ function Composer({
       }
       const live = origin.editor.getText();
       let needsComparison = false;
-      const replacements = suggestions.flatMap(({ id, status, appliedText, range, before }) => {
-        if (status !== "applied" || appliedText === undefined) return [];
+      const replacements: (TextRange & { text: string; range: TrackedRange })[] = [];
+      const laterEdits: TextRange[] = [];
+      // If two turns touched the same text, consider the latest edit first.
+      for (const suggestion of suggestions.toReversed()) {
+        const { appliedText, range, before } = suggestion;
+        if (!trackedSuggestions.current.has(range) || !isApplied(suggestion, live)) continue;
         const { from, to } = range.current();
-        const current = live.slice(from, to);
-        if (current === before) return [];
-        if (!range.hasBoundaries() || current !== (compared ?? appliedText)) {
+        const overlaps = laterEdits.some((other) =>
+          from === to || other.from === other.to
+            ? from <= other.to && other.from <= to
+            : from < other.to && other.from < to,
+        );
+        laterEdits.push({ from, to });
+        if (
+          !range.hasBoundaries() ||
+          live.slice(from, to) !== (compared ?? appliedText) ||
+          overlaps
+        ) {
           needsComparison = true;
-          return [];
+          continue;
         }
-        return [{ id, from, to, text: before }];
-      });
-      origin.editor.replaceRanges(replacements, { lineEndings: "preserve" });
-      const reverted = new Set(replacements.map(({ id }) => id));
-      setTurns((previous) =>
-        previous.map((turn, i) =>
-          i === index
-            ? {
-                ...turn,
-                suggestions: turn.suggestions?.map((suggestion) =>
-                  reverted.has(suggestion.id) ? { ...suggestion, status: "reverted" } : suggestion,
-                ),
-              }
-            : turn,
-        ),
-      );
+        replacements.push({ from, to, text: before, range });
+      }
+      if (replacements.length > 0) {
+        replacements.sort((left, right) => left.from - right.from);
+        origin.editor.replaceRanges(replacements, { lineEndings: "preserve" });
+        recordReversionDecision(
+          replacements.map(({ range }) => range),
+          "reverted",
+        );
+      }
       if (needsComparison) viewChanges();
       else if (isActive.current && placement === "inline") origin.editor.focus();
     } finally {
@@ -815,14 +833,13 @@ function Composer({
             lineEndings: "match",
           });
           if (inserted) {
-            update = turns[index]?.direct
-              ? recordApplied(
-                  { ...suggestion, batchApplied: false },
-                  inserted,
-                  origin.editor.getText().slice(inserted.from, inserted.to),
-                  acceptedText,
-                )
-              : { ...update, range: retrackSuggestion(suggestion, inserted) };
+            const edited = origin.editor.getText();
+            update = recordApplied(
+              { ...suggestion, batchApplied: false },
+              inserted,
+              edited.slice(inserted.from, inserted.to),
+              acceptedText,
+            );
           }
         }
         if (isActive.current && !keepReviewFocus) origin.editor.focus();
@@ -851,29 +868,25 @@ function Composer({
           currentText(item, live) !== item.before
         )
           return [];
-        return [{ ...item.range.current(), text: item.after, item, direct: turns[turn]?.direct }];
+        return [{ ...item.range.current(), text: item.after, item }];
       });
       // Different replies can propose edits to the same passage. Leave overlapping
       // proposals pending for individual comparison.
       let end = -1;
-      let start = -1;
-      const replacements = eligible
-        .sort((a, b) => a.from - b.from)
-        .filter(({ from, to }) => {
-          if (from < end || from === start) return false;
-          start = from;
-          end = to;
-          return true;
-        });
+      eligible.sort((a, b) => a.from - b.from);
+      const replacements = eligible.filter(({ from, to }, index) => {
+        const overlapsEarlier = from < end || from === eligible[index - 1]?.from;
+        end = Math.max(end, to);
+        const next = eligible[index + 1]?.from;
+        return !overlapsEarlier && (next === undefined || (next >= to && next !== from));
+      });
       const ranges = editor.replaceRanges(replacements, { lineEndings: "match" });
       const edited = editor.getText();
       const updates = new Map<Suggestion, Suggestion>();
-      for (const [index, { item, direct }] of replacements.entries()) {
+      for (const [index, { item }] of replacements.entries()) {
         const range = ranges[index];
         if (!range) continue;
-        const applied = direct
-          ? recordApplied(item, range, edited.slice(range.from, range.to))
-          : { ...item, range: retrackSuggestion(item, range), status: "applied" as const };
+        const applied = recordApplied(item, range, edited.slice(range.from, range.to));
         updates.set(item, { ...applied, batchApplied: true });
       }
       setTurns((previous) =>
@@ -1103,7 +1116,7 @@ function Composer({
             ? {
                 ...turn,
                 suggestions: turn.suggestions?.map((suggestion, position) => {
-                  if (position !== rewrite.position || suggestion.status !== "preview")
+                  if (position !== rewrite.position || reviewStatus(suggestion, origin.editor.getText()) !== "preview")
                     return suggestion;
                   if (
                     replacement !== undefined &&
@@ -1286,7 +1299,7 @@ function Composer({
   ) {
     const { suggestions } = latest;
     const applied = suggestions.filter((suggestion) => isApplied(suggestion, draft)).length;
-    const pending = suggestions.filter(({ status }) => status === "preview").length;
+    const pending = suggestions.filter((item) => reviewStatus(item, draft) === "preview").length;
     const summary =
       pending === 0 && applied === 0
         ? t("writing.edit.noneApplied")
@@ -1311,7 +1324,7 @@ function Composer({
           <button
             type="button"
             className={buttonClass}
-            onClick={() => void revertDirect(turns.length - 1, suggestions)}
+            onClick={() => void revertEdits(suggestions)}
           >
             {t("writing.edit.undoDirect")}
           </button>
@@ -1324,6 +1337,7 @@ function Composer({
   }
   const Container = sidebar ? "aside" : "section";
   const messages = sidebar ? turns : turns.slice(-1);
+  const taskEdits = sidebar ? turns.flatMap((turn) => turn.suggestions ?? []) : [];
 
   function renderReplyExcerpt(reply: string, collapsed = false) {
     const actions = <ReplyExcerpt reply={reply} origin={origin} originId={tabId} />;
@@ -1423,6 +1437,16 @@ function Composer({
           </pre>
         </>
       )}
+      {taskEdits.some((suggestion) => isApplied(suggestion, draft)) && (
+        <button
+          type="button"
+          className={`${buttonClass} self-start`}
+          disabled={busy}
+          onClick={() => void revertEdits(taskEdits)}
+        >
+          {t("writing.edit.revertAll")}
+        </button>
+      )}
       {sidebar && attempt && (
         <WritingTaskMaterials
           request={attempt.task.request}
@@ -1464,32 +1488,18 @@ function Composer({
                 </details>
               )}
               {sidebar && renderSentContext(turn.context, turn.searchFolder)}
-              {sidebar &&
-                turn.direct &&
-                suggestions?.some((suggestion) => isApplied(suggestion, draft)) && (
-                  <button
-                    type="button"
-                    className={buttonClass}
-                    disabled={busy}
-                    onClick={() => void revertDirect(index, suggestions)}
-                  >
-                    {t("writing.edit.undoDirect")}
-                  </button>
-                )}
               {suggestions?.length ? (
                 suggestions.map((suggestion, position) => {
-                  const pending = suggestion.status === "preview";
-                  const revertible = canRevert(suggestion);
+                  const status = reviewStatus(suggestion, draft);
+                  const pending = status === "preview";
+                  const revertible = !pending && canRevert(suggestion);
                   const current = pending || revertible ? currentText(suggestion, draft) : "";
                   const conflict = pending && current !== suggestion.before;
-                  const reverted = revertible && current === suggestion.before;
+                  const located = suggestion.range.hasBoundaries();
+                  const reverted = revertible && located && current === suggestion.before;
                   const revertConflict =
-                    revertible && !reverted && current !== suggestion.appliedText;
-                  const blocked = externalChange
-                    ? "disk"
-                    : !suggestion.range.hasBoundaries()
-                      ? "boundaries"
-                      : undefined;
+                    revertible && !reverted && (!located || current !== suggestion.appliedText);
+                  const blocked = externalChange ? "disk" : !located ? "boundaries" : undefined;
                   return (
                     <ProposedSelectionEdit
                       key={suggestion.id}
@@ -1499,8 +1509,8 @@ function Composer({
                       })}
                       before={suggestion.before}
                       after={suggestion.appliedText ?? suggestion.after}
-                      status={reverted ? "reverted" : suggestion.status}
-                      showAppliedComparison={turn.direct}
+                      status={reverted ? "reverted" : status}
+                      showAppliedComparison={revertible}
                       source={showSource}
                       current={conflict || revertConflict ? current : undefined}
                       blocked={pending || (revertible && !reverted) ? blocked : undefined}
@@ -1522,8 +1532,11 @@ function Composer({
                       }
                       onRevert={
                         revertible && !reverted && !blocked
-                          ? () => void revertDirect(index, [suggestion], current)
+                          ? () => void revertEdits([suggestion], current)
                           : undefined
+                      }
+                      onKeepCurrent={
+                        revertConflict ? () => keepCurrent(suggestion.range) : undefined
                       }
                       onRewrite={
                         blocked || !pending || !canRewrite

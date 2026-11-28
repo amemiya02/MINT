@@ -21,6 +21,7 @@ export function ProposedSelectionEdit({
   onApply,
   onDiscard,
   onRevert,
+  onKeepCurrent,
   onRewrite,
 }: {
   readonly before: string;
@@ -39,6 +40,7 @@ export function ProposedSelectionEdit({
   readonly onApply?: (() => void) | undefined;
   readonly onDiscard?: (() => void) | undefined;
   readonly onRevert?: (() => void) | undefined;
+  readonly onKeepCurrent?: (() => void) | undefined;
   readonly onRewrite?: ((instruction: string) => Promise<boolean>) | undefined;
 }) {
   const t = useT();
@@ -53,12 +55,13 @@ export function ProposedSelectionEdit({
     !review &&
     ((status === "applied" && !showAppliedComparison) ||
       status === "discarded" ||
-      status === "reverted")
+      status === "reverted" ||
+      status === "kept")
   ) {
     return (
       <fieldset aria-label={label} className="min-w-0">
         <p>{t(`writing.edit.${status}`)}</p>
-        <pre className="whitespace-pre-wrap wrap-anywhere">{after}</pre>
+        {status !== "kept" && <pre className="whitespace-pre-wrap wrap-anywhere">{after}</pre>}
         {conversation}
       </fieldset>
     );
@@ -170,6 +173,16 @@ export function ProposedSelectionEdit({
             onClick={onRevert}
           >
             {t(comparingReversion ? "writing.edit.revertCompared" : "writing.edit.revert")}
+          </button>
+        )}
+        {onKeepCurrent && (
+          <button
+            type="button"
+            className="rounded border border-(--mint-border) px-2 py-1"
+            disabled={busy}
+            onClick={onKeepCurrent}
+          >
+            {t("writing.edit.keepCurrent")}
           </button>
         )}
         {onRewrite && !rewriting && (

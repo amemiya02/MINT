@@ -84,10 +84,11 @@ test("automatic proofreading locates and applies one undoable correction", async
   await page.keyboard.type(" More notes.");
   await expect.poll(() => pending.length).toBe(1);
   await page.keyboard.press("ControlOrMeta+Shift+P");
-  await page
-    .getByRole("combobox", { name: "Command Palette" })
-    .fill("toggle automatic proofreading");
-  await page.keyboard.press("Enter");
+  const palette = page.getByRole("dialog", { name: "Command Palette" });
+  const search = palette.getByRole("combobox");
+  await search.fill("toggle automatic proofreading");
+  await search.press("Enter");
+  await expect(palette).toBeHidden();
   await expect
     .poll(async () => JSON.parse((await readFile(page, settingsPath)) ?? "{}").proofreading)
     .toBe(false);
@@ -95,6 +96,9 @@ test("automatic proofreading locates and applies one undoable correction", async
   if (!held) throw new Error("The proofreading request did not reach the fixture");
   await held.fulfill({ json: reply });
   await expect(editor).toBeFocused();
+  await expect
+    .poll(() => editor.evaluate((element) => element.contains(getSelection()?.anchorNode ?? null)))
+    .toBe(true);
   await page.keyboard.type(" Still writing.");
   await expect(editor).toContainText("Still writing.");
   await page.waitForTimeout(1200);
