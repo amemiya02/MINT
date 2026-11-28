@@ -119,7 +119,8 @@ export interface TabStore {
    */
   restoreDocument(path: string | null, text: string): number;
   activate(id: number): void;
-  openInOtherPane(id: number): void;
+  /** Split this tab, or open its previewed target alongside it. */
+  openInOtherPane(id: number, preview?: { path: string | null; fragment?: string }): void;
   focusOtherPane(): void;
   closeReferencePane(): void;
   activateNext(): void;
@@ -236,8 +237,9 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
     if (target) set({ activeId: target.id });
   }
 
-  function reveal(id: number, editor: MintEditor, range: DocumentLocation) {
-    if (state.activeId !== id || editors.get(id) !== editor) return;
+  function reveal(id: number, range: DocumentLocation) {
+    const editor = editors.get(id);
+    if (state.activeId !== id || !editor) return;
     if ("sourceFrom" in range) {
       editor.setSelection({ anchor: range.sourceFrom, head: range.sourceTo, scrollIntoView: true });
       editor.focus();
@@ -274,7 +276,25 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
     editor.focus();
   }
 
-  async function read(path: string) {
+  /** Select only after React has made this view visible. */
+  function selectWhenVisible(id: number, select: DocumentLocation) {
+    if (editors.has(id)) setTimeout(() => reveal(id, select));
+    else pendingSelections.set(id, select);
+  }
+
+  function showInPane(tab: Tab, pane: Pane, selected = state.selected) {
+    const existing = state.tabs.find((t) => t.documentId === tab.documentId && t.pane === pane);
+    if (existing) {
+      if (state.activeId !== existing.id || state.error)
+        set({ activeId: existing.id, error: null });
+      return existing.id;
+    }
+    const view = { ...tab, id: nextId++, pane };
+    set({ tabs: [...state.tabs, view], activeId: view.id, selected, error: null });
+    return view.id;
+  }
+
+  async function read(path: string, pane?: Pane) {
     try {
       const text = await platform.readTextFile(path);
       const existing = state.tabs.find((t) => t.path === path);
@@ -286,7 +306,7 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
         documentId: nextId,
         document: new SharedDocument(),
         id: nextId++,
-        pane: activePane(),
+        pane: pane ?? activePane(),
         path,
         untitled: null,
         text,
@@ -302,6 +322,22 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
     } catch (e) {
       set({ error: { kind: "open", path, reason: reasonOf(e) } });
     }
+  }
+
+  async function openDocument(path: string, select?: DocumentLocation, pane?: Pane) {
+    let tab = state.tabs.find((t) => t.path === path);
+    if (!tab) {
+      let pending = opening.get(path);
+      if (!pending) {
+        pending = read(path, pane).finally(() => opening.delete(path));
+        opening.set(path, pending);
+      }
+      await pending;
+      tab = state.tabs.find((t) => t.path === path);
+      if (!tab) return;
+    }
+    const id = showInPane(tab, pane ?? tab.pane);
+    if (select) selectWhenVisible(id, select);
   }
 
   /** Watch the tab's document for changes by other programs (replacing any earlier watch). */
@@ -454,31 +490,13 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
       return () => listeners.delete(listener);
     },
 
-    async openDocument(path, select) {
-      const existing = state.tabs.find((t) => t.path === path);
-      if (existing) {
-        set({ activeId: existing.id, error: null });
-      } else {
-        let pending = opening.get(path);
-        if (!pending) {
-          pending = read(path).finally(() => opening.delete(path));
-          opening.set(path, pending);
-        }
-        await pending;
-      }
-      const tab = state.tabs.find((t) => t.path === path);
-      if (!select || !tab) return;
-      const editor = editors.get(tab.id);
-      // Opening a tab may still need React to show its panel before scrolling.
-      if (editor) setTimeout(() => reveal(tab.id, editor, select));
-      else pendingSelections.set(tab.id, select);
-    },
+    openDocument,
 
     revealHeading(id, fragment) {
       const editor = editors.get(id);
       if (editor) {
         set({ error: null });
-        reveal(id, editor, { fragment });
+        reveal(id, { fragment });
       }
     },
 
@@ -543,29 +561,24 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
     activate(id) {
       if (state.tabs.some((t) => t.id === id)) set({ activeId: id });
     },
-    openInOtherPane(id) {
+    openInOtherPane(id, preview) {
       const tab = state.tabs.find((item) => item.id === id);
       if (!tab) return;
       const pane = tab.pane === "primary" ? "reference" : "primary";
-      const other = state.tabs.find(
-        (item) => item.documentId === tab.documentId && item.pane === pane,
-      );
-      if (other) {
-        store.activate(other.id);
-        editors.get(other.id)?.focus();
+      if (preview) {
+        const location = preview.fragment
+          ? { fragment: preview.fragment }
+          : { sourceFrom: 0, sourceTo: 0 };
+        if (preview.path) void openDocument(preview.path, location, pane);
+        else selectWhenVisible(showInPane(tab, pane), location);
         return;
       }
-      const view: Tab = {
-        ...tab,
-        id: nextId++,
-        pane,
-      };
-      const neighbour = state.tabs.findLast((item) => item.pane === tab.pane && item.id !== id);
-      set({
-        tabs: [...state.tabs, view],
-        activeId: view.id,
-        selected: { ...state.selected, [tab.pane]: neighbour?.id ?? id },
+      const neighbour = state.tabs.findLast((t) => t.pane === tab.pane && t.id !== id);
+      const viewId = showInPane(tab, pane, {
+        ...state.selected,
+        [tab.pane]: neighbour?.id ?? id,
       });
+      editors.get(viewId)?.focus();
     },
     focusOtherPane() {
       const id = state.selected[activePane() === "primary" ? "reference" : "primary"];
@@ -682,7 +695,7 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
       editors.set(id, editor);
       const select = pendingSelections.get(id);
       pendingSelections.delete(id);
-      if (select) setTimeout(() => reveal(id, editor, select));
+      if (select) setTimeout(() => reveal(id, select));
     },
 
     markChanged(viewId, fromHistory = false) {
