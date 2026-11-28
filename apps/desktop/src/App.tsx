@@ -8,6 +8,7 @@ import {
 } from "./ai/InlineCompletionRecovery.tsx";
 import { ReplyExcerpt } from "./ai/ReplyExcerpt.tsx";
 import { recordWritingResult, stopTrackingWritingResult } from "./ai/record-writing-result.ts";
+import type { WritingAssistantRequest } from "./ai/WritingAssistant.tsx";
 import {
   type WritingTask,
   WritingTaskNotices,
@@ -177,9 +178,9 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     },
     [store],
   );
-  const [writingRequest, setWritingRequest] = useState<{ tabId: number; folder?: string } | null>(
-    null,
-  );
+  const [writingRequest, setWritingRequest] = useState<
+    (WritingAssistantRequest & { tabId: number }) | null
+  >(null);
   const [taskDialog, setTaskDialog] = useState<"current" | "all" | "review" | null>(null);
   const [taskRestore, setTaskRestore] = useState<
     (WritingTaskOpenRequest & { tabId: number }) | null
@@ -552,6 +553,11 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
       }
       setShellError(null);
       setWritingRequest({ tabId: activeId ?? store.newDocument(), folder });
+    },
+    "edit.writingSkills": () => {
+      if (activeId === null || !store.editor(activeId)) return;
+      setShellError(null);
+      setWritingRequest({ tabId: activeId, startWithSkills: true });
     },
     "edit.writingTasks": () => setTaskDialog(activeId === null ? "all" : "current"),
     "edit.allWritingTasks": () => setTaskDialog("all"),

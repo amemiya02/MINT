@@ -39,6 +39,7 @@ import {
   TaskContextChecklist,
   useNamedMaterials,
 } from "./TaskContext.tsx";
+import { useWritingSkillAction, WritingSkillPlan } from "./WritingSkillPlan.tsx";
 import { useWritingTask, WritingTaskMaterials } from "./WritingTasks.tsx";
 import {
   useWritingToolPicker,
@@ -72,6 +73,13 @@ import {
   type WritingRequest,
 } from "./writing-sender.ts";
 import {
+  readWritingSkill,
+  type WritingAction,
+  type WritingSkillId,
+  writingActions,
+  writingSkillInstruction,
+} from "./writing-skills.ts";
+import {
   mapReviewRanges,
   openWritingReviews,
   type ReviewRange,
@@ -99,8 +107,6 @@ function connectionSettingForScope(scope: Scope) {
   if (scope === "document") return "reviewWritingConnection";
   return "defaultWritingConnection";
 }
-const actions = ["comment", "preview", "direct"] as const;
-type Action = (typeof actions)[number];
 const proposedEditTracking = { followReplacedEdges: true };
 
 function isTaskCopyRecipient(recipient?: WritingRecipient) {
@@ -114,14 +120,16 @@ function editKey({ from, to, before, after }: SelectionEdit) {
 interface Origin extends WritingSelection {
   readonly id: string;
   readonly folder?: string;
+  readonly startWithSkills?: true;
 }
 
 interface Task {
   readonly request: WritingRequest;
+  readonly authorInstruction?: string;
   readonly folderPaths?: readonly string[];
   readonly documentBaseline?: string;
   readonly plan?: MaterialPlan;
-  readonly action: Action;
+  readonly action: WritingAction;
   readonly scope: Scope;
   readonly searchFolder: string | null;
   readonly seen: Set<string>;
@@ -196,6 +204,11 @@ function isApplied(suggestion: Suggestion, draft: string) {
   );
 }
 
+export interface WritingAssistantRequest {
+  readonly folder?: string;
+  readonly startWithSkills?: true;
+}
+
 interface Props {
   readonly editor: MintEditor | null;
   readonly tabId: number;
@@ -204,7 +217,7 @@ interface Props {
   readonly active: boolean;
   readonly platform: Platform;
   readonly folder: string | null;
-  readonly askRequest: { readonly folder?: string } | null;
+  readonly askRequest: WritingAssistantRequest | null;
   readonly taskRestore: WritingTaskOpenRequest | null;
   readonly taskListRevision: number;
   readonly settingsOpen: boolean;
@@ -293,7 +306,12 @@ export function WritingAssistant({
     }
     const selection = captureWritingSelection(editor, true);
     if (!selection) return;
-    setOrigin({ id: crypto.randomUUID(), ...selection, folder: askRequest.folder });
+    setOrigin({
+      id: crypto.randomUUID(),
+      ...selection,
+      folder: askRequest.folder,
+      startWithSkills: askRequest.startWithSkills,
+    });
     setRestored(null);
     setPlacement(askRequest.folder ? "sidebar" : "inline");
   }, [askRequest, editor, temporary]);
@@ -483,12 +501,12 @@ function Composer({
   readonly setPlacement: (placement: "inline" | "sidebar" | null) => void;
 }) {
   const t = useT();
-  const [instruction, setInstruction] = useState("");
+  const [instruction, setInstruction] = useState(origin.startWithSkills ? "/" : "");
   const { settings } = useSettings();
   const [scope, setScope] = useState<Scope>(
     origin.folder ? "folder" : origin.text ? "selection" : "document",
   );
-  const [actionOverride, setActionOverride] = useState<Action | null>(null);
+  const [actionOverride, setActionOverride] = useState<WritingAction | null>(null);
   const [folderPaths, setFolderPaths] = useState<readonly string[]>();
   const [folderListingFailed, setFolderListingFailed] = useState(false);
   const [folderSelection, setFolderSelection] = useState<{
@@ -591,14 +609,23 @@ function Composer({
   const canEditFolder = scope === "folder" && isTaskCopyRecipient(recipient);
   const canEdit = (scope === "selection" && !!origin.text) || canEditDocument || canEditFolder;
   const explicitDirect = /(?:^|[,，]\s*)(?:apply directly|直接改)[.!。！]?\s*$/i.test(instruction);
+  const skill = readWritingSkill(instruction);
+  const skillFolder =
+    folder && (origin.folder ? origin.folder === folder : !path || isWithin(path, folder))
+      ? folder
+      : null;
+  const skillAction = useWritingSkillAction(platform, skillFolder, skill.id);
+  const canSendInstruction =
+    !!instruction.trim() && !skill.suggestions?.length && !skillAction.loading;
+  const preferredAction =
+    actionOverride ??
+    (explicitDirect && !canEditFolder ? "direct" : skillAction.action) ??
+    (turns.length && !canEditFolder ? "comment" : "preview");
   const action = !canEdit
     ? "comment"
-    : (actionOverride ??
-      (explicitDirect && !canEditFolder
-        ? "direct"
-        : turns.length && !canEditFolder
-          ? "comment"
-          : "preview"));
+    : canEditFolder && preferredAction === "direct"
+      ? "preview"
+      : preferredAction;
   const folderCopy = canEditFolder && action === "preview" ? origin.folder : undefined;
 
   const currentDraft = sendDraft
@@ -1256,10 +1283,15 @@ function Composer({
     );
   }
 
+  function chooseSkill(id: WritingSkillId) {
+    setInstruction(`/${id} `);
+    input.current?.focus();
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (
-      !instruction.trim() ||
+      !canSendInstruction ||
       toolPicker.incomplete ||
       !recipient ||
       !capacity.plan ||
@@ -1315,11 +1347,12 @@ function Composer({
           ])
       : [];
     const task: Task = {
+      authorInstruction: skill.id ? instruction.trim() : undefined,
       plan: capacity.plan,
       folderPaths: folderDocuments && folderPaths,
       documentBaseline: canEditDocument && action !== "comment" ? draft : undefined,
       request: {
-        instruction: instruction.trim(),
+        instruction: skill.id ? writingSkillInstruction(t, skill, action) : instruction.trim(),
         selectedText: capacity.plan.selectedText,
         taskContext: capacity.plan.contexts[0],
         history: history.length ? history : undefined,
@@ -1372,7 +1405,7 @@ function Composer({
     const submitted = {
       id: entry.id,
       alternativeTo: task.alternativeTo,
-      instruction: task.request.instruction,
+      instruction: task.authorInstruction ?? task.request.instruction,
       material: task.request.selectedText ?? task.request.taskContext?.currentDraft?.text,
       context: task.request.taskContext,
       searchFolder: task.searchFolder ?? undefined,
@@ -1669,7 +1702,7 @@ function Composer({
         ? {
             id: origin.id,
             tabId,
-            title: title || attempt.task.request.instruction,
+            title: title || attempt.task.authorInstruction || attempt.task.request.instruction,
             name,
             folder: origin.folder,
             recipient: sendingTo,
@@ -2219,6 +2252,7 @@ function Composer({
                     void runTask(
                       {
                         request: first,
+                        authorInstruction: turn.instruction,
                         folderPaths: folderCopy ? folderPaths : undefined,
                         documentBaseline:
                           baseline.scope === "document" && first.responseFormat === "replacement"
@@ -2534,19 +2568,42 @@ function Composer({
               <input
                 ref={input}
                 className={fieldClass}
+                placeholder={t("writing.skill.placeholder")}
                 value={instruction}
                 onChange={(event) => setInstruction(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+                  const suggestion = skill.suggestions?.length === 1 && skill.suggestions[0];
+                  if (suggestion) {
+                    event.preventDefault();
+                    chooseSkill(suggestion);
+                  }
+                }}
               />
             </label>
+            {!!skill.suggestions?.length && (
+              <fieldset aria-label={t("writing.skill.list")} className="flex flex-wrap gap-2">
+                {skill.suggestions.map((id) => (
+                  <button
+                    key={id}
+                    type="button"
+                    className={buttonClass}
+                    onClick={() => chooseSkill(id)}
+                  >
+                    /{id} · {t(`writing.skill.${id}`)}
+                  </button>
+                ))}
+              </fieldset>
+            )}
             <div className="flex flex-wrap items-end gap-2">
               <label className="grid gap-1">
                 {t("writing.action")}
                 <select
                   className={fieldClass}
                   value={action}
-                  onChange={(event) => setActionOverride(event.target.value as Action)}
+                  onChange={(event) => setActionOverride(event.target.value as WritingAction)}
                 >
-                  {actions.map((id) => (
+                  {writingActions.map((id) => (
                     <option
                       key={id}
                       value={id}
@@ -2624,6 +2681,14 @@ function Composer({
                 </select>
               </label>
             </div>
+            {skill.id && (
+              <WritingSkillPlan
+                id={skill.id}
+                folder={skillFolder}
+                action={action}
+                preference={skillAction}
+              />
+            )}
             {recipient && renderAgentAccess(recipient)}
             {loadFailed && <p role="alert">{t("writing.connectionsFailed")}</p>}
             {folderCopy && recipient && (
@@ -2702,7 +2767,7 @@ function Composer({
                   !capacity.plan ||
                   toolPicker.incomplete ||
                   loading ||
-                  !instruction.trim() ||
+                  !canSendInstruction ||
                   named.loading ||
                   named.unconfirmed ||
                   (named.hasImages && !vision?.verified) ||

@@ -1,7 +1,7 @@
 import type { CodeBlockRenderer, DocumentLink, LinkTarget, WordCount } from "@mint/editor";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { Proofreading } from "../ai/Proofreading.tsx";
-import { WritingAssistant } from "../ai/WritingAssistant.tsx";
+import { WritingAssistant, type WritingAssistantRequest } from "../ai/WritingAssistant.tsx";
 import type {
   SavedWritingTask,
   WritingTaskOpenRequest,
@@ -57,7 +57,7 @@ export function TabPanel({
   readonly toolbarPosition: ToolbarPosition;
   readonly platform: Platform;
   readonly folder: string | null;
-  readonly askWriting: { readonly folder?: string } | null;
+  readonly askWriting: WritingAssistantRequest | null;
   readonly writingTaskRestore: WritingTaskOpenRequest | null;
   readonly writingTaskListRevision: number;
   readonly settingsOpen: boolean;
