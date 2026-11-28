@@ -218,6 +218,8 @@ export interface MintEditor {
    * the editor to the end of the last one visible at the bottom, in `getText()` offsets.
    */
   getVisibleRange(): { readonly from: number; readonly to: number };
+  /** Capture the current scroll anchor and pixel offset for restoration after a modal view. */
+  captureScrollPosition(): () => void;
   /** Matches of the find query set with the `setFindQuery` command. */
   getFindStatus(): FindStatus;
   /**
@@ -448,6 +450,10 @@ export function createEditor(options: EditorOptions): MintEditor {
             ? EditorView.scrollIntoView(selection.main.head, { y: "start", yMargin: 0 })
             : [],
       });
+    },
+    captureScrollPosition() {
+      const snapshot = view.scrollSnapshot();
+      return () => view.dispatch({ effects: snapshot });
     },
     getVisibleRange() {
       // The part of the scroller inside the window, in document coordinates.
