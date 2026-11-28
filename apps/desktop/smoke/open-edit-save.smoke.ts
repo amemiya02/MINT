@@ -1108,9 +1108,14 @@ test("only granted Zotero reads reach the local service and the chosen item is s
   }
 });
 
-test("a model receives only the sample or the chosen selection through the native connection", async () => {
+test("a native model receives only the sample or live selection and edits through normal save", async () => {
   const draft = join(dir, "ask-ai-model.md");
   const manuscript = "\uFEFFPrivate notes.  \r\n\r\nSelected sentence.";
+  const liveSelection = "Selected sentence. Author addition.";
+  const edited = manuscript.replace("Selected sentence.", "Short sentence.");
+  const liveManuscript = manuscript.replace("Selected sentence.", liveSelection);
+  const autosave =
+    "//input[@type='checkbox' and @id=//label[normalize-space(.)='Save automatically']/@for]";
   await writeFile(draft, manuscript);
   await restart([draft]);
   const requests: { url?: string; method?: string; authorization?: string; body: unknown }[] = [];
@@ -1169,7 +1174,7 @@ test("a model receives only the sample or the chosen selection through the nativ
     await command("POST", `/session/${session}/element/${found[elementKey]}/value`, { text });
   }
 
-  async function askSelection(instruction: string) {
+  async function askSelection(instruction: string, authorization?: string) {
     await click("Ask AI");
     await waitForView(
       "the saved model to appear in the send row",
@@ -1184,7 +1189,24 @@ test("a model receives only the sample or the chosen selection through the nativ
       args: [],
     });
     await clickPath("//section[@aria-label='Ask AI']//input");
-    await keyActions([...typing(instruction), ...typing(keys.enter)]);
+    await keyActions(typing(instruction));
+    if (authorization) {
+      await waitForView(
+        "the direct edit authorization on the send button",
+        `return [...document.querySelectorAll('section[aria-label="Ask AI"] button[type=submit]')]
+          .some((button) => !button.disabled && button.textContent.trim() === ${JSON.stringify(authorization)});`,
+      );
+    }
+    await keyActions(typing(keys.enter));
+  }
+
+  async function setAutosave(enabled: boolean) {
+    const checked = await command<boolean>("POST", `/session/${session}/execute/sync`, {
+      script: `return [...document.querySelectorAll('dialog[open] label')]
+        .find((label) => label.textContent.trim() === 'Save automatically')?.control.checked;`,
+      args: [],
+    });
+    if (checked !== enabled) await clickPath(autosave);
   }
 
   try {
@@ -1256,25 +1278,46 @@ test("a model receives only the sample or the chosen selection through the nativ
     await fill("API key", secret);
     await click("Use for this launch");
     await shows("Selection fixture");
+    await setAutosave(false);
     await click("Close");
 
     await waitForView(
       "the draft to regain focus",
       "return document.activeElement?.matches('.cm-content');",
     );
-    await keyActions([...chord(keys.control, keys.end), ...chord(keys.shift, keys.home)]);
-    const instruction = "Shorten this sentence, apply directly";
-    await askSelection(instruction);
+    await click("Open ask-ai-model.md in other pane", "aria-label");
     await waitForView(
-      "the authorized replacement in the active editor",
-      `return document.activeElement?.matches(".cm-content") &&
-        document.activeElement.textContent.includes("Short sentence.");`,
+      "two views of the manuscript with the reference pane focused",
+      "return document.querySelectorAll('.cm-content').length === 2 && document.querySelectorAll('.cm-content')[1] === document.activeElement;",
     );
+    await keyActions([
+      ...chord(keys.control, keys.end),
+      ...typing(" Author addition."),
+      ...chord(keys.shift, keys.home),
+    ]);
+    const instruction = "Shorten this sentence, apply directly";
+    const authorization = `Apply directly · Current selection · Selection fixture · http://127.0.0.1:${address.port}/fixture/v1/chat/completions`;
+    await askSelection(instruction, authorization);
+    await waitForView(
+      "the authorized replacement in both panes with an active writing cursor",
+      `const panes = [...document.querySelectorAll('.cm-content')];
+        return panes.length === 2 && panes[1] === document.activeElement &&
+          window.getSelection()?.isCollapsed &&
+          panes.every((pane) => pane.textContent.includes('Short sentence.'));`,
+    );
+    assert.deepEqual(await readFile(draft), Buffer.from(manuscript));
+    await click("View changes");
+    await waitForView(
+      "the applied change's before and after text",
+      `const review = document.querySelector('aside[aria-label="Writing Assistant"]');
+        return review?.innerText.includes(${JSON.stringify(liveSelection)}) &&
+          review.innerText.includes('Short sentence.');`,
+    );
+    await clickPath("//aside[@aria-label='Writing Assistant']//button[normalize-space(.)='Close']");
+    await nativeShortcut("ctrl+s");
     await until(
-      "the edited bytes to be autosaved",
-      async () =>
-        (await readFile(draft, "utf8")) ===
-          manuscript.replace("Selected sentence.", "Short sentence.") || null,
+      "the edited bytes to be saved manually",
+      async () => (await readFile(draft)).equals(Buffer.from(edited)) || null,
     ).catch(explain);
     assert.equal(requests.length, 2);
     const sent = requests[1];
@@ -1296,15 +1339,37 @@ test("a model receives only the sample or the chosen selection through the nativ
     assert.ok(selectedMessage);
     assert.deepEqual(JSON.parse(selectedMessage.content), {
       instruction,
-      selectedText: "Selected sentence.",
+      selectedText: liveSelection,
     });
     await keyActions(chord(keys.control, "z"));
+    await nativeShortcut("ctrl+s");
     await until(
-      "one undo to restore the original bytes",
-      async () => (await readFile(draft, "utf8")) === manuscript || null,
+      "one undo to restore the precise unsaved baseline",
+      async () => (await readFile(draft)).equals(Buffer.from(liveManuscript)) || null,
     ).catch(explain);
 
+    await click("Close reference pane", "aria-label");
+    await openSettings();
+    await setAutosave(true);
+    await click("Close");
+    await waitForView(
+      "the remaining view to regain focus",
+      "return document.querySelectorAll('.cm-content').length === 1 && document.activeElement?.matches('.cm-content');",
+    );
+    await keyActions([...chord(keys.control, keys.end), ...chord(keys.shift, keys.home)]);
+    await askSelection(instruction, authorization);
+    await until(
+      "the direct edit to autosave the exact native file",
+      async () => (await readFile(draft)).equals(Buffer.from(edited)) || null,
+    ).catch(explain);
+    assert.deepEqual(requests[2], sent);
+    await keyActions(chord(keys.control, "z"));
+    await until(
+      "one undo to autosave the selected baseline",
+      async () => (await readFile(draft)).equals(Buffer.from(liveManuscript)) || null,
+    ).catch(explain);
     await clickPath("//section[@aria-label='Ask AI']//button[normalize-space(.)='Close']");
+
     const reviewSource = "**Opening line.**\r\n\r\nKeep this.  \n\nClosing line.";
     await writeFile(draft, `\uFEFF${reviewSource}`);
     await waitForView(
@@ -1317,9 +1382,9 @@ test("a model receives only the sample or the chosen selection through the nativ
       "the native preview request",
       async () => pendingPreview ?? null,
     );
-    assert.equal(requests.length, 3);
-    assert.equal(requests[2]?.authorization, `Bearer ${secret}`);
-    assert.deepEqual(requests[2]?.body, {
+    assert.equal(requests.length, 4);
+    assert.equal(requests[3]?.authorization, `Bearer ${secret}`);
+    assert.deepEqual(requests[3]?.body, {
       model: "native-fixture",
       stream: false,
       messages: [

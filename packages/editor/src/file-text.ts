@@ -74,6 +74,46 @@ export function replaceFileText(state: EditorState, raw: string): TransactionSpe
   };
 }
 
+/** Retain exact restored terminators or match existing ones when a rewrite keeps the line count. */
+export function replacementLineEndings(
+  state: EditorState,
+  replacements: readonly { from: number; to: number; text: string }[],
+  policy: "match" | "preserve",
+) {
+  const endings = state.field(lineEndingsField);
+  const { fallback } = endings;
+  const originalBreak = (line: number) => endings.breaks?.[line - 1] ?? fallback;
+  const edits = replacements.map(({ from, to, text }) => {
+    const start = state.doc.lineAt(from).number;
+    const end = state.doc.lineAt(to).number;
+    const inserted = text.match(LINE_BREAK) ?? [];
+    return {
+      from: start,
+      to: end,
+      breaks:
+        policy === "preserve"
+          ? inserted
+          : inserted.map((_, index) =>
+              end - start === inserted.length ? originalBreak(start + index) : fallback,
+            ),
+    };
+  });
+  if (!edits.some(({ breaks }) => breaks.some((terminator) => terminator !== fallback))) return [];
+
+  const breaks: string[] = [];
+  let line = 1;
+  const appendUntil = (to: number) => {
+    for (; line < to; line++) breaks.push(originalBreak(line));
+  };
+  for (const edit of edits) {
+    appendUntil(edit.from);
+    for (const terminator of edit.breaks) breaks.push(terminator);
+    line = edit.to;
+  }
+  appendUntil(state.doc.lines);
+  return [resetEndings.of({ ...endings, breaks })];
+}
+
 function split(raw: string): { doc: Text; endings: LineEndings } {
   const bom = raw.startsWith(BOM);
   const body = bom ? raw.slice(1) : raw;
