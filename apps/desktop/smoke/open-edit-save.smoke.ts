@@ -4919,14 +4919,24 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   }
   await send("direct");
   await waitForView(
-    "the manuscript change in the editor",
-    `return document.querySelector('.cm-content')?.textContent.includes("Revised. Unsaved note.");`,
+    "the direct task to finish with its edit still unsaved",
+    `return document.querySelector('.cm-content')?.textContent.includes("Revised. Unsaved note.") &&
+      document.querySelector('section[aria-label="Ask AI"] [role="status"]')
+        ?.textContent === "Applied to the selected text." &&
+      document.querySelector('footer button[aria-label="Version History"]')
+        ?.textContent === "Unsaved changes";`,
   );
+  await waitForActiveDocument(draft);
   assert.equal(await readFile(draft, "utf8"), initial);
-  await nativeShortcut("ctrl+s");
-  await until("only the approved change to be saved", async () =>
-    (await readFile(draft, "utf8")) === changed ? true : null,
+  // The native model smoke exercises the X11 Save accelerator with autosave
+  // off. Use the native menu here to test persistence of the Codex edit.
+  await nativeMenuItem("File", "Save");
+  await waitForView(
+    "the native Save command to finish",
+    `return document.querySelector('footer button[aria-label="Version History"]')
+      ?.textContent === "Saved";`,
   );
+  assert.deepEqual(await readFile(draft), Buffer.from(changed));
   assert.deepEqual((await readdir(fixture)).sort(), [
     "fixture-codex",
     "index.md",

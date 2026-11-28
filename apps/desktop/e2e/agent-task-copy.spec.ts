@@ -15,16 +15,26 @@ async function configureTaskCopy(page: Page, executable: string, beforeConsent?:
   await settings.getByRole("button", { name: "Close" }).click();
 }
 
-async function sendDocumentEdit(page: Page, action: "Preview first" | "Apply directly") {
+async function sendDocumentEdit(
+  page: Page,
+  executable: string,
+  action: "Preview first" | "Apply directly",
+  submit: "enter" | "click" = "enter",
+) {
   await page.keyboard.press("ControlOrMeta+Shift+P");
   await page.getByRole("combobox").fill("Ask AI");
   await page.keyboard.press("Enter");
   const composer = page.getByRole("region", { name: "Ask AI" });
+  await composer.getByLabel("Recipient").selectOption({ label: `Codex · ${executable}` });
   await composer.getByLabel("Scope").selectOption("document");
   await composer.getByLabel("Action").selectOption({ label: action });
   const input = composer.getByRole("textbox", { name: "Instruction" });
   await input.fill("Shorten the original sentence.");
-  await input.press("Enter");
+  if (submit === "click") {
+    await composer.getByRole("button", { name: new RegExp(`^${action} ·`) }).click();
+  } else {
+    await input.press("Enter");
+  }
   return composer;
 }
 
@@ -36,6 +46,9 @@ test("an Agent can preview and directly edit a task copy of the unsaved manuscri
   const source = "Opening stays.  \r\n\r\nOriginal sentence.\r\n";
   const unsaved = source.replace("Original sentence.", "Original sentence. Handwritten note.");
   const proposed = unsaved.replace("Original sentence.", "Short sentence.");
+  const alternative = unsaved.replace("Opening stays.", "Revised opening.");
+  const address = "http://127.0.0.1:32490/v1";
+  const modelLabel = `Comparison fixture · ${address}/chat/completions`;
   const received: unknown[] = [];
   await page.route("**/__test/task-copy", async (route) => {
     received.push(route.request().postDataJSON());
@@ -46,6 +59,18 @@ test("an Agent can preview and directly edit a task copy of the unsaved manuscri
       },
     });
   });
+  await page.route(`${address}/chat/completions`, (route) =>
+    route.fulfill({
+      json: {
+        choices: [
+          {
+            message: { content: `<replacement>${alternative}</replacement>` },
+            finish_reason: "stop",
+          },
+        ],
+      },
+    }),
+  );
   await launch(page, {
     locale: "en-US",
     files: { [path]: source, [settingsPath]: '{"autosave":false}' },
@@ -60,16 +85,50 @@ test("an Agent can preview and directly edit a task copy of the unsaved manuscri
   await page.keyboard.press("End");
   await page.keyboard.insertText(" Handwritten note.");
 
-  const preview = await sendDocumentEdit(page, "Preview first");
+  const preview = await sendDocumentEdit(page, executable, "Preview first");
   await expect(preview.getByRole("button", { name: "Apply proposed edit" })).toBeVisible();
   await expect(editor).toContainText("Original sentence. Handwritten note.");
   expect(await readFile(page, path)).toBe(source);
-  await preview.getByRole("button", { name: "Close" }).click();
 
-  await sendDocumentEdit(page, "Apply directly");
+  await page.keyboard.press("ControlOrMeta+,");
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  await settings.getByRole("button", { name: "Model connections" }).click();
+  await settings.getByLabel("Connection name").fill("Comparison fixture");
+  await settings.getByLabel("API address").fill(address);
+  await settings.getByLabel("Model name").fill("task-copy-comparison");
+  await settings.getByRole("button", { name: "Use for this launch" }).click();
+  await expect(settings.getByRole("region", { name: "Comparison fixture" })).toBeVisible();
+  await settings.getByRole("button", { name: "Close" }).click();
+  await preview.getByRole("button", { name: "Retry same baseline" }).click();
+  const sidebar = page.getByRole("complementary", { name: "Writing Assistant" });
+  await sidebar.getByLabel("Retry connection").selectOption({ label: modelLabel });
+  await sidebar.getByRole("button", { name: `Send same baseline to ${modelLabel}` }).click();
+  const comparison = page.getByRole("dialog", { name: "Compare writing alternatives" });
+  for (const name of ["Original proposal", "Alternative proposal"]) {
+    await comparison
+      .getByRole("region", { name })
+      .getByRole("button", { name: "Apply proposed edit" })
+      .click();
+  }
+  await comparison.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(editor).toContainText("Revised opening.");
   await expect(editor).toContainText("Short sentence. Handwritten note.");
   expect(await readFile(page, path)).toBe(source);
+  await sidebar.getByRole("button", { name: "Close", exact: true }).click();
+  await page.keyboard.press("ControlOrMeta+Z");
+  await page.keyboard.press("ControlOrMeta+Z");
+  await expect(editor).toContainText("Opening stays.");
+  await expect(editor).toContainText("Original sentence. Handwritten note.");
+
+  const direct = await sendDocumentEdit(page, executable, "Apply directly", "click");
+  await expect(direct.getByRole("status")).toHaveText("Applied to the selected text.");
+  await expect(editor).toContainText("Short sentence. Handwritten note.");
+  await expect(editor).toBeFocused();
+  const saveStatus = page.getByRole("button", { name: "Version History" });
+  await expect(saveStatus).toHaveText("Unsaved changes");
+  expect(await readFile(page, path)).toBe(source);
   await page.keyboard.press("ControlOrMeta+S");
+  await expect(saveStatus).toHaveText("Saved");
   await expect.poll(() => readFile(page, path)).toBe(proposed);
   expect(received.slice(1)).toEqual(
     [1, 2].map(() => ({
@@ -118,7 +177,7 @@ test("a task-copy proposal follows typing after its range is mapped to the live 
   });
   await configureTaskCopy(page, executable);
 
-  const preview = await sendDocumentEdit(page, "Preview first");
+  const preview = await sendDocumentEdit(page, executable, "Preview first");
   await expect.poll(() => editing).toBe(true);
   const editor = page.locator(".cm-content");
   await editor.getByText("Opening stays.", { exact: true }).click();
@@ -231,7 +290,7 @@ test("an interrupted Agent copy remains a proposal even in direct mode", async (
     externalAgent: { executables: [executable], endpoint: "/__test/task-copy" },
   });
   await configureTaskCopy(page, executable);
-  const composer = await sendDocumentEdit(page, "Apply directly");
+  const composer = await sendDocumentEdit(page, executable, "Apply directly");
   await expect(composer.getByText("More work was interrupted.", { exact: true })).toBeVisible();
   await expect(page.locator(".cm-content")).toHaveText(original);
   expect(await readFile(page, path)).toBe(original);
