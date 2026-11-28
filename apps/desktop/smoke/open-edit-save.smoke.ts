@@ -403,7 +403,7 @@ test("import a hidden Notion attachment and embed its granted bytes in a native 
   );
   await openSettings();
   await clickPath("//fieldset[@aria-label='Notion import']//button[normalize-space(.)='Install']");
-  await click("Allow access");
+  await clickPluginReview("Notion import", "Allow access");
   await click("Close");
   const chooseFormat = async (label: string) => {
     await nativeShortcut("ctrl+shift+p");
@@ -463,7 +463,7 @@ test("moving a Kanban card changes only its status on disk after the writer gran
   await openSettings();
   await clickPath("//fieldset[@aria-label='Kanban board']//button[normalize-space(.)='Install']");
   await shows("Change the status property");
-  await click("Deny access");
+  await clickPluginReview("Kanban board", "Deny access");
   const grant = (action: string) =>
     `//fieldset[@aria-label='Kanban board']//small[contains(.,'${action}')]/following-sibling::button`;
   await clickPath(grant("Read Markdown"));
@@ -507,40 +507,59 @@ test("moving a Kanban card changes only its status on disk after the writer gran
 });
 
 async function clickPath(xpath: string) {
-  const element = await until(xpath, async () => {
-    const result = await command<Record<string, string>>("POST", `/session/${session}/element`, {
-      using: "xpath",
-      value: xpath,
+  const element = await until(`a clickable match for ${xpath}`, async () => {
+    const matches = await command<Record<string, string>[]>(
+      "POST",
+      `/session/${session}/elements`,
+      {
+        using: "xpath",
+        value: xpath,
+      },
+    );
+    // XPath also matches hidden panes and content behind a modal. WebKitWebDriver
+    // can find a control in a scroll area before its center can receive a click.
+    return command<Record<string, string> | null>("POST", `/session/${session}/execute/sync`, {
+      script: `const modalOpen = document.querySelector('dialog:modal') !== null;
+        for (const element of arguments[0]) {
+          if ((modalOpen && !element.closest('dialog:modal')) || element.matches(':disabled') ||
+              element.closest('[hidden], [inert]') || !element.getClientRects().length) continue;
+          element.scrollIntoView({ block: 'center', inline: 'nearest' });
+          const rect = element.getClientRects()[0];
+          if (!rect) continue;
+          const left = Math.max(rect.left, 0), right = Math.min(rect.right, innerWidth);
+          const top = Math.max(rect.top, 0), bottom = Math.min(rect.bottom, innerHeight);
+          if (left >= right || top >= bottom) continue;
+          const hit = document.elementFromPoint(Math.floor((left + right) / 2), Math.floor((top + bottom) / 2));
+          if (element.contains(hit)) return element;
+        }
+        return null;`,
+      args: [matches],
     });
-    return result[elementKey] ?? null;
   }).catch(explain);
-  await command("POST", `/session/${session}/element/${element}/click`, {});
+  await command("POST", `/session/${session}/element/${element[elementKey]}/click`, {}).catch(
+    explain,
+  );
 }
 
 const click = (label: string, by: "text" | "aria-label" = "text") =>
   clickPath(`//button[${by === "text" ? "normalize-space(.)" : "@aria-label"}='${label}']`);
 const clickSettingsButton = (label: string) =>
-  until(`the ${label} button in Settings to be clickable`, async () => {
-    const button = await command<Record<string, string>>("POST", `/session/${session}/element`, {
-      using: "xpath",
-      value: `//dialog[@open][.//h2[normalize-space(.)='Settings']]//button[normalize-space(.)='${label}' and not(@disabled) and not(ancestor::*[@hidden] or ancestor::fieldset[@disabled])]`,
-    });
-    // WebKitWebDriver can find an enabled button while it is still clipped by the Settings scroller.
-    await command("POST", `/session/${session}/execute/sync`, {
-      script: "arguments[0].scrollIntoView({ block: 'center' })",
-      args: [button],
-    });
-    await command("POST", `/session/${session}/element/${button[elementKey]}/click`, {});
-    return true;
-  }).catch(explain);
-const shows = (text: string) =>
+  clickPath(
+    `//dialog[@open][.//h2[normalize-space(.)='Settings']]//button[normalize-space(.)='${label}']`,
+  );
+const clickPluginReview = (name: string, action: string) =>
+  clickPath(
+    `//dialog[@open]//fieldset[legend[normalize-space(.)='${name}']]//button[normalize-space(.)='${action}']`,
+  );
+const showsIn = (selector: string, text: string) =>
   until(text, () =>
     command<boolean>("POST", `/session/${session}/execute/sync`, {
-      script:
-        "return document.querySelector('dialog[open]')?.innerText.includes(arguments[0]) === true",
-      args: [text],
+      script: `return [...document.querySelectorAll(arguments[0])].some(element =>
+        element.getClientRects().length && element.innerText.includes(arguments[1]));`,
+      args: [selector, text],
     }).then((found) => (found ? true : null)),
   ).catch(explain);
+const shows = (text: string) => showsIn("dialog[open]", text);
 
 const chooseSettingsOption = (setting: string, label: string) =>
   until(`${setting} to offer ${label}`, () =>
@@ -588,11 +607,9 @@ test("preview, disambiguate, move and undo wikilinks in a native folder", async 
       script: "return document.querySelector('dialog[open] span[title$=\"settings.json\"]')?.title",
       args: [],
     });
-    const checkbox = await command<Record<string, string>>("POST", `/session/${session}/element`, {
-      using: "xpath",
-      value: `//input[@id=//label[normalize-space(.)='Recognize wikilinks in ${folder}']/@for]`,
-    });
-    await command("POST", `/session/${session}/element/${checkbox[elementKey]}/click`, {});
+    await clickPath(
+      `//input[@id=//label[normalize-space(.)='Recognize wikilinks in ${folder}']/@for]`,
+    );
     await until(
       "the folder setting to reach disk",
       async () =>
@@ -794,7 +811,7 @@ test("the native statistics view refuses a denied read and allows an explicit gr
     "//fieldset[@aria-label='Writing statistics']//button[normalize-space(.)='Install']",
   );
   await shows("Read the current document");
-  await click("Deny access");
+  await clickPluginReview("Writing statistics", "Deny access");
   await click("Close");
   await click("Writing statistics");
   await shows("Permission to read the current document was denied.");
@@ -843,10 +860,10 @@ test("declining a plugin update keeps its native read grant and withholds its wr
   await keyActions(chord(keys.control, keys.end));
   await openSettings();
   await upload(original);
-  await click("Allow access");
+  await clickPluginReview(original.name, "Allow access");
   await upload(expanded);
   await shows("Modify the current document at the selection");
-  await click("Keep current version");
+  await clickPluginReview(`Update ${expanded.name}`, "Keep current version");
   await click("Close");
   await click("Smoke metrics");
   await shows("Words: 3");
@@ -857,7 +874,7 @@ test("declining a plugin update keeps its native read grant and withholds its wr
   await keyActions(typing("\uE00C"));
   await openSettings();
   await upload(expanded);
-  await click("Allow and update");
+  await clickPluginReview(`Update ${expanded.name}`, "Allow and update");
   await click("Close");
   await nativeShortcut("ctrl+shift+p");
   await keyActions(typing("Smoke marker"));
@@ -912,7 +929,7 @@ test("the task summary reads only granted folder documents and preserves their b
   await openSettings();
   await clickPath(`${plugin}//button[normalize-space(.)='Install']`);
   await shows("Read Markdown documents in the current folder");
-  await click("Deny access");
+  await clickPluginReview("Task summary", "Deny access");
   await click("Close");
   await click("Task summary", "aria-label");
   const view = `document.querySelector('aside[aria-label="Task summary"]')`;
@@ -973,7 +990,7 @@ test("the installed relationship graph respects folder access and preserves the 
   await openSettings();
   await clickPath(`${plugin}//button[normalize-space(.)='Install']`);
   await shows("Read Markdown documents in the current folder");
-  await click("Deny access");
+  await clickPluginReview("Relationship graph", "Deny access");
   await click("Close");
   await click("Relationship graph", "aria-label");
   await waitForView(
@@ -1031,7 +1048,7 @@ test("the native slide presentation returns to the draft and preserves its bytes
   await openSettings();
   const plugin = "//fieldset[@aria-label='Slide presentation']";
   await clickPath(`${plugin}//button[normalize-space(.)='Install']`);
-  await click("Allow access");
+  await clickPluginReview("Slide presentation", "Allow access");
   await click("Close");
   await click("Present slides");
   await shows("First slide.");
@@ -1081,19 +1098,12 @@ test("only granted Zotero reads reach the local service and the chosen item is s
       }).then((ok) => ok || null),
     ).catch(explain);
     await keyActions(chord(keys.control, keys.end));
-    const settingsButton = async (label: string) => {
-      const el = await until(label, () =>
-        command<Record<string, string>>("POST", `/session/${session}/element`, {
-          using: "xpath",
-          value: `//fieldset[@aria-label='Zotero']//button[normalize-space(.)='${label}']`,
-        }).then((el) => el[elementKey] ?? null),
-      ).catch(explain);
-      await command("POST", `/session/${session}/element/${el}/click`, {});
-    };
+    const settingsButton = (label: string) =>
+      clickPath(`//fieldset[@aria-label='Zotero']//button[normalize-space(.)='${label}']`);
     await openSettings();
     await settingsButton("Install");
     await shows("Connect to the local Zotero library");
-    await click("Deny access");
+    await clickPluginReview("Zotero", "Deny access");
     await click("Close");
     await click("Insert Zotero citation");
     await shows("Zotero access was denied");
@@ -1550,7 +1560,7 @@ test("a native model receives only the sample or live selection and edits throug
 
     await keyActions(chord(keys.control, "a"));
     await askSelection(stopInstruction);
-    await shows("Native partial text.");
+    await showsIn('section[aria-label="Ask AI"]', "Native partial text.");
     await nativeShortcut("ctrl+n");
     await waitForView(
       "the second document to have focus during native streaming",
@@ -1566,7 +1576,7 @@ test("a native model receives only the sample or live selection and edits throug
     await clickPath(
       "//section[@aria-label='Writing tasks']//button[normalize-space(.)='Open task for ask-ai-model.md']",
     );
-    await shows("Native partial text.");
+    await showsIn('aside[aria-label="Writing Assistant"]', "Native partial text.");
     await clickPath(
       "//aside[@aria-label='Writing Assistant']//button[normalize-space(.)='Apply proposed edit']",
     );
@@ -1723,7 +1733,7 @@ test("a saved writing review resumes after a native restart without contacting i
     await clickPath(
       "//aside[@aria-label='Writing Assistant']//summary[normalize-space(.)='Pasted text']",
     );
-    await shows(excerpt);
+    await showsIn('aside[aria-label="Writing Assistant"]', excerpt);
     assert.equal(requests.length, 1);
     await clickPath("//aside[@aria-label='Writing Assistant']//button[normalize-space(.)='Close']");
     await waitForView(
@@ -2461,7 +2471,7 @@ test("the daily journal creates one ordinary Markdown file only after permission
   await openSettings();
   await clickPath(`${plugin}//button[normalize-space(.)='Install']`);
   await shows("Create today’s Markdown journal in the current folder and open it");
-  await click("Deny access");
+  await clickPluginReview("Daily journal", "Deny access");
   await click("Close");
   await chooseJournal();
   await until("the journal permission denial", () =>
@@ -2854,7 +2864,7 @@ if (prompt.instruction === ${JSON.stringify(cancelInstruction)}) {
   });
   await clickPath("//section[@aria-label='Ask AI']//label[normalize-space(.)='Instruction']/input");
   await keyActions([...typing(cancelInstruction), ...typing(keys.enter)]);
-  await shows("Partial Agent reply.");
+  await showsIn('section[aria-label="Ask AI"]', "Partial Agent reply.");
   const runningCall = JSON.parse((await readFile(calls, "utf8")).trim().split("\n").at(-1) ?? "");
   assert.equal(runningCall.prompt.instruction, cancelInstruction);
   const callsBeforeReplacement = (await readFile(calls, "utf8")).trim().split("\n").length;
@@ -2876,7 +2886,6 @@ if (prompt.instruction === ${JSON.stringify(cancelInstruction)}) {
       return composer?.innerText.includes('Stopped') &&
         composer.innerText.includes('Partial Agent reply.');`,
   );
-  await shows("Partial Agent reply.");
   await assert.rejects(readdir(runningCall.cwd), { code: "ENOENT" });
   assert.equal(await readFile(draft, "utf8"), initial);
 

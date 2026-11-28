@@ -157,8 +157,8 @@ export function PluginSettings({ platform }: { platform: Platform }) {
       </button>
       {invalidFile && <p role="alert">{t("plugin.invalid")}</p>}
       {pending && (
-        <div className="rounded border border-(--mint-border) p-2">
-          <strong>{pluginName(pending, t)}</strong>
+        <fieldset className="rounded border border-(--mint-border) p-2">
+          <legend className="font-semibold">{pluginName(pending, t)}</legend>
           {pending.permissions.map((p) => (
             <p key={p}>{permission(p, t)}</p>
           ))}
@@ -179,7 +179,7 @@ export function PluginSettings({ platform }: { platform: Platform }) {
               </button>
             ))}
           </div>
-        </div>
+        </fieldset>
       )}
       {review && (
         <fieldset className="rounded border border-(--mint-border) p-2">
