@@ -68,7 +68,7 @@ export interface WritingRequest {
   readonly annotationBatch?: readonly WritingAnnotation[];
   readonly taskContext?: TaskContext;
   readonly history?: readonly WritingTurn[];
-  readonly responseFormat?: "replacement";
+  readonly responseFormat?: "replacement" | "draft";
   readonly sourcePassages?: true;
 }
 
@@ -82,14 +82,21 @@ export interface WritingAnnotation {
 
 export interface WritingReply {
   readonly text: string;
+  readonly taskCopy?: string | null;
+  readonly ignoredChanges?: boolean;
   readonly finishReason?: string | null;
 }
 
 export const replacementInstruction =
   "If the request calls for replacing the selected text, reply with only the new Markdown enclosed in <replacement> and </replacement>. Leave the tags empty only when the request calls for deleting the selection. For comments or an unclear edit, reply in plain text.";
 
-export function replacementFromReply({ text, finishReason }: WritingReply): string | undefined {
+export function replacementFromReply({
+  text,
+  taskCopy,
+  finishReason,
+}: WritingReply): string | undefined {
   if (finishReason != null && finishReason !== "stop") return;
+  if (taskCopy !== undefined) return taskCopy ?? undefined;
   const replacement = /^<replacement>([\s\S]*)<\/replacement>$/.exec(text.trim())?.[1];
   if (replacement === "" || (replacement?.trim() && !/<\/?replacement>/.test(replacement))) {
     return replacement;

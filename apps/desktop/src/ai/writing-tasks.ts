@@ -34,6 +34,7 @@ export interface SavedTurn extends WritingTurn {
   readonly searchFolder?: string;
   readonly recipient: string;
   readonly recipientId: string;
+  readonly ignoredChanges?: boolean;
   readonly direct: boolean;
   readonly sourcePassages?: readonly SourcePassage[];
   readonly suggestions?: readonly SavedSuggestion[];
