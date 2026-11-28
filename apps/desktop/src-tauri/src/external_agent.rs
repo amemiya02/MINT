@@ -15,7 +15,7 @@ use tauri::{AppHandle, Manager};
 
 const REGISTRY: &str = "external-agents.json";
 const POLICY_REVISION: &str = "codex-exec-1";
-const REGISTRY_LOCK: Mutex<()> = Mutex::new(());
+static REGISTRY_LOCK: Mutex<()> = Mutex::new(());
 const MAX_INPUT: usize = 256 * 1024;
 const MAX_OUTPUT: u64 = 8 * 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(120);
