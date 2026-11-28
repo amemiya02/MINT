@@ -64,11 +64,16 @@ test("a writer presents the current draft and returns to the same editing positi
   expect(await readFile(page, path)).toBe(source);
   await page.keyboard.press("ControlOrMeta+s");
   await expect.poll(() => readFile(page, path)).toBe(draft);
+  await page.keyboard.insertText("x");
+  await expect(editor).toContainText("End of drafxt");
   await page.keyboard.press("ControlOrMeta+,");
   await plugin.getByRole("button", { name: "Disable" }).click();
   await settings.getByRole("button", { name: "Close", exact: true }).click();
   await expect(entry).toHaveCount(0);
-  await editor.press("x");
+  await expect(settings).toHaveCount(0);
+  await editor.press("ControlOrMeta+End");
+  await page.keyboard.insertText("!");
+  await expect(editor).toContainText("End of drafxt!");
   await page.keyboard.press("ControlOrMeta+s");
-  await expect.poll(() => readFile(page, path)).toBe(`${draft.slice(0, -1)}xt`);
+  await expect.poll(() => readFile(page, path)).toBe(`${source} of drafxt!`);
 });
