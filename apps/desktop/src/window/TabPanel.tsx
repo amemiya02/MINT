@@ -28,6 +28,7 @@ export function TabPanel({
   visible,
   toolbarPosition,
   platform,
+  folder,
   askWriting,
   settingsOpen,
   onAskWriting,
@@ -46,6 +47,7 @@ export function TabPanel({
   readonly visible: boolean;
   readonly toolbarPosition: ToolbarPosition;
   readonly platform: Platform;
+  readonly folder: string | null;
   readonly askWriting: number | null;
   readonly settingsOpen: boolean;
   readonly onAskWriting: () => void;
@@ -170,6 +172,7 @@ export function TabPanel({
           tabId={id}
           active={active}
           platform={platform}
+          folder={folder}
           askRequest={askWriting}
           settingsOpen={settingsOpen}
           onAsk={onAskWriting}

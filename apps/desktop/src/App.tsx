@@ -724,6 +724,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
                   visible={selected[tab.pane] === tab.id}
                   toolbarPosition={toolbarPositions[tab.pane]}
                   platform={platform}
+                  folder={folder}
                   askWriting={writingRequest?.tabId === tab.id ? writingRequest.sequence : null}
                   settingsOpen={settingsOpen}
                   onAskWriting={() => run.current("edit.askAI")}
@@ -736,6 +737,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
                     draftTabs.has(tab.id) ? (
                       <DraftComposer
                         platform={platform}
+                        folder={folder}
                         settingsOpen={settingsOpen}
                         canApplyDraft={() => emptyDraftEditor(tab.id) !== null}
                         onDraft={(text) => {

@@ -39,7 +39,43 @@ pub struct WritingRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     selected_text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    task_context: Option<TaskContext>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     history: Option<Vec<WritingTurn>>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TaskContext {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    current_draft: Option<NamedMaterial>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    materials: Option<Vec<NamedMaterial>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    folder_search: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    material_decisions: Option<Vec<MaterialDecision>>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct NamedMaterial {
+    name: String,
+    text: String,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", tag = "outcome", deny_unknown_fields)]
+enum MaterialDecision {
+    Allowed {
+        name: String,
+        purpose: String,
+        material: NamedMaterial,
+    },
+    Skipped {
+        name: String,
+        purpose: String,
+    },
 }
 
 #[derive(Deserialize, Serialize)]
