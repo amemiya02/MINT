@@ -739,7 +739,9 @@ function Composer({
       if (!current) return;
       setRecipients(available);
       setRecipientId((previous) =>
-        available.some(({ id }) => id === previous) ? previous : (available[0]?.id ?? null),
+        (restored && previous !== null) || available.some(({ id }) => id === previous)
+          ? previous
+          : (available[0]?.id ?? null),
       );
       setLoadFailed(failed);
       setLoading(false);
@@ -747,7 +749,7 @@ function Composer({
     return () => {
       current = false;
     };
-  }, [platform, settingsOpen]);
+  }, [platform, restored, settingsOpen]);
 
   useEffect(() => {
     if (!placement || !isActive.current || settingsOpen) return;
@@ -1274,7 +1276,12 @@ function Composer({
     const editing = task.action !== "comment";
     const fileEdit = editing && connection.kind === "agent" && connection.access === "taskCopy";
     let text = "";
-    let approved: NamedMaterial[] = [];
+    let approved: NamedMaterial[] =
+      task.fixedRequests?.flatMap(({ taskContext }) =>
+        (taskContext?.materialDecisions ?? []).flatMap((decision) =>
+          decision.outcome === "allowed" ? [decision.material] : [],
+        ),
+      ) ?? [];
     let status: AttemptStatus;
     let finalReplacement: string | undefined;
     let ignoredChanges: boolean | undefined;
@@ -1449,7 +1456,7 @@ function Composer({
         {
           ...submitted,
           baseline:
-            status === "complete" && dispatched.length
+            status === "complete" && dispatched.length && !task.alternativeTo
               ? { scope: task.scope, requests: dispatched }
               : undefined,
           context: sentContext,
@@ -1465,6 +1472,12 @@ function Composer({
     else if (!rewrite) persist(taskTitle);
     setAttempt({
       ...entry,
+      task: {
+        ...task,
+        fixedRequests:
+          task.fixedRequests ??
+          (dispatched.length === (task.plan?.contexts.length ?? 1) ? dispatched : undefined),
+      },
       approved,
       status,
       partial: "",
@@ -1586,7 +1599,10 @@ function Composer({
   const otherConnection = canRetry && recipients.find(({ id }) => id === retryId);
   const retryHasImages =
     !!canRetry &&
-    hasTaskImages(...(attempt.task.plan?.contexts ?? [attempt.task.request.taskContext]));
+    hasTaskImages(
+      ...(attempt.task.fixedRequests?.map(({ taskContext }) => taskContext) ??
+        attempt.task.plan?.contexts ?? [attempt.task.request.taskContext]),
+    );
   const sameVision = visionFor(sameConnection || undefined);
   const otherVision = visionFor(otherConnection || undefined);
   if (!placement) return null;
@@ -1965,6 +1981,8 @@ function Composer({
                   {t(
                     first.responseFormat === "replacement" ? "writing.preview" : "writing.comment",
                   )}
+                  {" · "}
+                  {t(`writing.scope.${baseline.scope}`)}
                 </p>
                 {first.selectedText !== undefined && (
                   <details className="text-xs">
@@ -2246,7 +2264,16 @@ function Composer({
               </label>
               {attempt.task.plan && otherConnection && (
                 <MaterialPlanPreview
-                  plan={attempt.task.plan}
+                  plan={
+                    attempt.task.fixedRequests
+                      ? {
+                          ...attempt.task.plan,
+                          contexts: attempt.task.fixedRequests.map(
+                            ({ taskContext }) => taskContext,
+                          ),
+                        }
+                      : attempt.task.plan
+                  }
                   recipient={labelFor(otherConnection)}
                 />
               )}
@@ -2258,7 +2285,16 @@ function Composer({
                 type="button"
                 className={buttonClass}
                 disabled={!otherConnection || busy || (retryHasImages && !otherVision?.verified)}
-                onClick={() => otherConnection && void runTask(attempt.task, otherConnection)}
+                onClick={() =>
+                  otherConnection &&
+                  void runTask(
+                    {
+                      ...attempt.task,
+                      action: attempt.task.action === "direct" ? "preview" : attempt.task.action,
+                    },
+                    otherConnection,
+                  )
+                }
               >
                 {t("writing.task.retryOther")}
               </button>

@@ -127,6 +127,7 @@ export function useMaterialRequests(sendMcpRequest?: McpTransport) {
       let approvalId = 0;
       externalTool.resetOutcome();
       let batch = 0;
+      // Record the request that reached the connection, including approved material and tool results.
       const dispatch: WritingSender = (outbound, options) => {
         onDispatch?.(outbound, batch);
         return sender(outbound, options);
