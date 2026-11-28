@@ -16,6 +16,7 @@ import {
   WritingTasksContext,
 } from "./ai/WritingTasks.tsx";
 import { WritingTasksDialog } from "./ai/WritingTasksDialog.tsx";
+import { writingPreferenceFolder } from "./ai/writing-preferences.ts";
 import { captureWritingSelection, type WritingSelection } from "./ai/writing-selection.ts";
 import {
   checkpointOpenWritingTasks,
@@ -546,6 +547,9 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
       setShellError(null);
       setWritingRequest({ tabId: activeId });
     },
+    "edit.rememberWritingPreference": () => {
+      setWritingRequest({ tabId: activeId ?? store.newDocument(), rememberPreference: true });
+    },
     "edit.askFolderAI": () => {
       if (!folder) {
         setShellError(t("writing.tasks.noFolder"));
@@ -945,6 +949,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
                 key={tab.documentId}
                 annotations={tab.document.annotations}
                 documentId={tab.documentId}
+                folder={folder}
                 name={tabName(t, tab)}
                 platform={platform}
                 store={store}
@@ -1083,6 +1088,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
           platform={platform}
           selection={agentSelection.origin.text}
           name={agentTab ? tabName(t, agentTab) : t("writing.scope.untitled")}
+          folder={agentTab ? writingPreferenceFolder(folder, agentTab.path) : null}
           tabId={agentSelection.tabId}
           visible={agentDialogVisible}
           onReveal={() => {

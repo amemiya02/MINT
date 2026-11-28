@@ -29,6 +29,11 @@ import {
   WritingReportedUsage,
   WritingRetryEstimate,
 } from "./WritingCallLimit.tsx";
+import {
+  AppliedWritingPreferences,
+  useWritingPreferences,
+  WritingPreferences,
+} from "./WritingPreferences.tsx";
 import { useWritingTask, WritingTaskMaterials } from "./WritingTasks.tsx";
 import {
   useWritingToolPicker,
@@ -129,6 +134,7 @@ export function DraftComposer({
   >([]);
   const [retryId, setRetryId] = useState("");
   const [instruction, setInstruction] = useState("");
+  const preferences = useWritingPreferences(platform, folder);
   const [address, setAddress] = useState("");
   const [model, setModel] = useState("");
   const [key, setKey] = useState("");
@@ -227,6 +233,7 @@ export function DraftComposer({
   );
   const canSend =
     recipients !== null &&
+    preferences.available &&
     !!instruction.trim() &&
     !toolPicker.incomplete &&
     (!showCallPlan || !callLimit.invalid) &&
@@ -271,6 +278,7 @@ export function DraftComposer({
         plan: capacity.plan,
         request: {
           instruction: t("draft.prompt", { instruction: instruction.trim() }),
+          preferences: preferences.request,
           taskContext: capacity.plan.contexts[0],
           responseFormat: "draft",
         },
@@ -315,6 +323,7 @@ export function DraftComposer({
         id: task.id,
         turn: {
           instruction: task.title,
+          preferences: task.request.preferences,
           reply: text,
           context: sentContext,
           searchFolder: task.folder ?? undefined,
@@ -564,6 +573,12 @@ export function DraftComposer({
             />
           </section>
         )}
+        {attempt?.task.request.preferences && (
+          <details className="px-4 py-2 text-xs">
+            <summary>{t("writing.preference.used")}</summary>
+            <AppliedWritingPreferences preferences={attempt.task.request.preferences} />
+          </details>
+        )}
         <WritingToolOutcome outcome={toolApproval.outcome} />
         {(attempt?.task.plan.contexts.some(Boolean) ||
           (materialRequests.usage?.reportedCalls ?? 0) > 1) && (
@@ -697,6 +712,7 @@ export function DraftComposer({
           onSearchChange={(checked) => setAllowedFolder(checked ? folder : null)}
         />
         {capacity.controls}
+        <WritingPreferences preferences={preferences} correction={instruction} />
         <WritingToolPicker picker={toolPicker} />
         {recipient && capacity.plan && showCallPlan && (
           <WritingCallPlan

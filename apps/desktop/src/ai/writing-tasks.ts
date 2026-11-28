@@ -3,6 +3,7 @@ import { compareLines, rawLines } from "../tabs/line-diff.ts";
 import type { FolderChange } from "./folder-changes.ts";
 import type { SourcePassage } from "./source-passages.ts";
 import type { AttemptStatus } from "./writing-attempt.ts";
+import type { AppliedWritingPreference, WritingPreference } from "./writing-preferences.ts";
 import type { TaskContext, WritingRequest, WritingTurn } from "./writing-sender.ts";
 
 export type EditStatus = "preview" | "applied" | "discarded" | "reverted" | "kept";
@@ -44,6 +45,7 @@ export interface SavedTurn extends WritingTurn {
     readonly requests: readonly WritingRequest[];
   };
   readonly status?: AttemptStatus;
+  readonly preferences?: readonly AppliedWritingPreference[];
   readonly partial?: string;
   readonly material?: string;
   readonly context?: TaskContext;
@@ -71,6 +73,7 @@ export interface SavedWritingTask {
   readonly reviewScroll: number;
   readonly reviewSelection?: string;
   readonly showSource: boolean;
+  readonly taskPreferences?: readonly WritingPreference[];
   readonly turns: readonly SavedTurn[];
   readonly pending?: Omit<SavedTurn, "reply" | "suggestions" | "direct" | "status">;
 }

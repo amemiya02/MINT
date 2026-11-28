@@ -21,6 +21,7 @@ mod settings;
 mod themes;
 mod updates;
 mod walk;
+mod writing_preferences;
 mod writing_requests;
 mod writing_tasks;
 mod zotero;
@@ -797,6 +798,7 @@ pub fn run() {
             external_agent::approve_external_agent,
             external_agent::forget_external_agent,
             external_agent::send_external_agent,
+            writing_preferences::save_writing_preference,
             writing_tasks::list_writing_tasks,
             writing_tasks::list_writing_reviews_in_folder,
             writing_tasks::create_writing_task,

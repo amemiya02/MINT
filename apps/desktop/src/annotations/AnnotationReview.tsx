@@ -8,6 +8,8 @@ import {
   WritingCallPlan,
   WritingReportedUsage,
 } from "../ai/WritingCallLimit.tsx";
+import { useWritingPreferences, WritingPreferences } from "../ai/WritingPreferences.tsx";
+import { writingPreferenceFolder } from "../ai/writing-preferences.ts";
 import {
   effectiveWritingRecipient,
   loadWritingRecipients,
@@ -44,6 +46,7 @@ export function AnnotationReview({
   unresolved,
   annotations,
   documentId,
+  folder,
   platform,
   store,
   settingsOpen,
@@ -56,6 +59,7 @@ export function AnnotationReview({
   readonly unresolved: readonly Annotation[];
   readonly annotations: SharedDocument["annotations"];
   readonly documentId: number;
+  readonly folder: string | null;
   readonly platform: Platform;
   readonly store: TabStore;
   readonly settingsOpen: boolean;
@@ -94,6 +98,10 @@ export function AnnotationReview({
     tabs.find((item) => item.id === activeId && item.documentId === documentId) ??
     tabs.find((item) => item.documentId === documentId);
   const editor = tab && store.editor(tab.id);
+  const preferences = useWritingPreferences(
+    platform,
+    tab ? writingPreferenceFolder(folder, tab.path) : null,
+  );
   const selectedText = useSyncExternalStore(
     useCallback(
       (refresh) => (isDocument && editor ? editor.subscribe(refresh) : () => {}),
@@ -146,6 +154,7 @@ export function AnnotationReview({
   async function send() {
     if (
       !recipient ||
+      !preferences.available ||
       loading ||
       callLimit.invalid ||
       (!isDocument && !items.length) ||
@@ -159,11 +168,13 @@ export function AnnotationReview({
     const editor = tab && store.editor(tab.id);
     if (!tab || !editor) return;
 
-    const sendReview = (request: WritingRequest) =>
-      sendWriting(recipient.send, request, label(recipient), null, {
+    const sendReview = (input: WritingRequest) => {
+      const request = { ...input, preferences: preferences.request };
+      return sendWriting(recipient.send, request, label(recipient), null, {
         fixedRequests: [request],
         callLimit: callLimit.limit,
       });
+    };
     running.current = true;
     setBusy(true);
     setError(null);
@@ -362,6 +373,7 @@ export function AnnotationReview({
             {t("agent.tools")} {t("agent.usesLogin")}
           </p>
         )}
+        <WritingPreferences preferences={preferences} disabled={busy} />
         {loadFailed && <p role="alert">{t("writing.connectionsFailed")}</p>}
         {recipient && (isDocument || items.length > 0) && (
           <WritingCallPlan
@@ -388,7 +400,12 @@ export function AnnotationReview({
             type="submit"
             className={buttonClass}
             disabled={
-              !recipient || (!isDocument && !items.length) || callLimit.invalid || loading || busy
+              !recipient ||
+              !preferences.available ||
+              (!isDocument && !items.length) ||
+              callLimit.invalid ||
+              loading ||
+              busy
             }
           >
             {recipient

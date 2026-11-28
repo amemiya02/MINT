@@ -52,6 +52,11 @@ import {
   WritingReportedUsage,
   WritingRetryEstimate,
 } from "./WritingCallLimit.tsx";
+import {
+  AppliedWritingPreferences,
+  useWritingPreferences,
+  WritingPreferences,
+} from "./WritingPreferences.tsx";
 import { useWritingSkillAction, WritingSkillPlan } from "./WritingSkillPlan.tsx";
 import { useWritingTask, WritingTaskMaterials } from "./WritingTasks.tsx";
 import {
@@ -69,6 +74,7 @@ import {
   writingAttemptBusy,
   writingMaterialNames,
 } from "./writing-attempt.ts";
+import { writingPreferenceFolder } from "./writing-preferences.ts";
 import {
   effectiveWritingRecipient,
   loadWritingRecipients,
@@ -221,6 +227,7 @@ function isApplied(suggestion: Suggestion, draft: string) {
 }
 
 export interface WritingAssistantRequest {
+  readonly rememberPreference?: true;
   readonly folder?: string;
   readonly startWithSkills?: true;
 }
@@ -278,6 +285,8 @@ export function WritingAssistant({
   const [temporary, setTemporary] = useState(false);
   const [restored, setRestored] = useState<RestoredReview | null>(null);
   const taskRunning = useRef(false);
+  const [preferenceRequest, setPreferenceRequest] = useState<object | null>(null);
+  const clearPreferenceRequest = useCallback(() => setPreferenceRequest(null), []);
   const [placement, setPlacement] = useState<"inline" | "sidebar" | null>(null);
   const [reviewStart, setReviewStart] = useState<{ id: string; returnToTab: number } | null>(null);
   const [hasSavedTasks, setHasSavedTasks] = useState(false);
@@ -316,6 +325,15 @@ export function WritingAssistant({
   useEffect(() => {
     if (!askRequest || askRequest === lastAsk.current || !editor) return;
     lastAsk.current = askRequest;
+    if (askRequest.rememberPreference) {
+      setPreferenceRequest(askRequest);
+      if (origin) {
+        setPlacement("sidebar");
+        return;
+      }
+    } else {
+      setPreferenceRequest(null);
+    }
     if (taskRunning.current || temporary) {
       setPlacement("sidebar");
       return;
@@ -330,7 +348,7 @@ export function WritingAssistant({
     });
     setRestored(null);
     setPlacement(askRequest.folder ? "sidebar" : "inline");
-  }, [askRequest, editor, temporary]);
+  }, [askRequest, editor, origin, temporary]);
 
   useEffect(() => () => origin?.range.release(), [origin]);
 
@@ -385,6 +403,7 @@ export function WritingAssistant({
       folder: task.folder,
     });
     setRestored({ task, mapper, restoreReading: returnToTab === undefined });
+    setPreferenceRequest(null);
     setPlacement("sidebar");
     if (returnToTab !== undefined) setReviewStart({ id: task.id, returnToTab });
     request.complete(true);
@@ -435,6 +454,8 @@ export function WritingAssistant({
           path={path}
           name={name}
           placement={placement}
+          preferenceRequest={preferenceRequest}
+          onPreferenceOpened={clearPreferenceRequest}
           reviewStart={reviewStart?.id === origin.id ? reviewStart : null}
           setPlacement={setPlacement}
           active={active}
@@ -471,6 +492,8 @@ function Composer({
   path,
   name,
   placement,
+  preferenceRequest,
+  onPreferenceOpened,
   reviewStart,
   setPlacement,
   taskRunning,
@@ -512,12 +535,20 @@ function Composer({
   readonly onSaved: () => void;
   readonly onBusyChange: (id: string | null) => void;
   readonly placement: "inline" | "sidebar" | null;
+  readonly preferenceRequest: object | null;
+  readonly onPreferenceOpened: () => void;
   readonly reviewStart: { readonly returnToTab: number } | null;
   readonly taskRunning: { current: boolean };
   readonly setPlacement: (placement: "inline" | "sidebar" | null) => void;
 }) {
   const t = useT();
   const [instruction, setInstruction] = useState(origin.startWithSkills ? "/" : "");
+  const preferences = useWritingPreferences(
+    platform,
+    origin.folder ?? writingPreferenceFolder(folder, path),
+    restored?.task.taskPreferences,
+  );
+  const taskPreferences = preferences.task;
   const { settings } = useSettings();
   const [scope, setScope] = useState<Scope>(
     origin.folder ? "folder" : origin.text ? "selection" : "document",
@@ -726,6 +757,7 @@ function Composer({
         reviewScroll: reviewScroll.current,
         reviewSelection,
         showSource,
+        taskPreferences: taskPreferences.length ? taskPreferences : undefined,
         pending: pending.current,
         turns: turns.map((turn) => ({
           ...turn,
@@ -736,7 +768,7 @@ function Composer({
         })),
       };
     },
-    [origin, path, reviewSelection, showSource, turns],
+    [origin, path, reviewSelection, showSource, taskPreferences, turns],
   );
 
   const persist = useCallback(
@@ -892,8 +924,8 @@ function Composer({
     };
   }, [platform, settingsOpen]);
 
-  useEffect(() => {
-    if (!placement || !isActive.current || settingsOpen) return;
+  const focusComposer = useEffectEvent((restored: RestoredReview | null) => {
+    if (preferenceRequest) return;
     if (openingChanges.current) {
       heading.current?.focus();
       openingChanges.current = false;
@@ -902,6 +934,9 @@ function Composer({
     } else {
       input.current?.focus();
     }
+  });
+  useEffect(() => {
+    if (placement && isActive.current && !settingsOpen) focusComposer(restored);
   }, [placement, restored, settingsOpen]);
 
   function viewChanges() {
@@ -1302,7 +1337,13 @@ function Composer({
     prompt: string,
   ) {
     const connection = recipients.find(({ id }) => id === turn.recipientId);
-    if (!connection || busy || checkingDisk.current || !suggestion.range.hasBoundaries())
+    if (
+      !connection ||
+      busy ||
+      !preferences.available ||
+      checkingDisk.current ||
+      !suggestion.range.hasBoundaries()
+    )
       return false;
     const { from, to } = suggestion.range.current();
     if (origin.editor.getText().slice(from, to) !== current) return false;
@@ -1310,6 +1351,7 @@ function Composer({
       {
         request: {
           instruction: prompt,
+          preferences: preferences.request,
           selectedText: current,
           history: [
             { instruction: turn.skillInstruction ?? turn.instruction, reply: suggestion.after },
@@ -1340,6 +1382,7 @@ function Composer({
     event.preventDefault();
     if (
       !canSendInstruction ||
+      !preferences.available ||
       toolPicker.incomplete ||
       !recipient ||
       !capacity.plan ||
@@ -1422,6 +1465,7 @@ function Composer({
       documentBaseline: canEditDocument && action !== "comment" ? draft : undefined,
       request: {
         instruction: skill.id ? writingSkillInstruction(t, skill, action) : instruction.trim(),
+        preferences: preferences.request,
         selectedText: capacity.plan.selectedText,
         taskContext: capacity.plan.contexts[0],
         history: history.length ? history : undefined,
@@ -1481,6 +1525,7 @@ function Composer({
       instruction: task.authorInstruction ?? task.request.instruction,
       skillInstruction:
         task.authorInstruction && !task.alternativeTo ? task.request.instruction : undefined,
+      preferences: task.request.preferences,
       material: task.request.selectedText ?? task.request.taskContext?.currentDraft?.text,
       context: task.request.taskContext,
       searchFolder: task.searchFolder ?? undefined,
@@ -1895,6 +1940,7 @@ function Composer({
   if (!placement) return null;
   const sidebar = placement === "sidebar";
   const latest = turns.at(-1);
+  const correction = instruction.trim() || latest?.instruction || "";
   const closeLabel = t(temporary ? "writing.temporary.close" : "settings.close");
   const closeConfirmation = confirmTemporaryClose && (
     <TemporarySessionClose
@@ -2333,6 +2379,7 @@ function Composer({
           <fieldset className="min-w-0 space-y-2 rounded border border-(--mint-border) p-2">
             <legend>{t("writing.compare.retry")}</legend>
             <p className="whitespace-pre-wrap wrap-anywhere">{turn.instruction}</p>
+            {turn.preferences && <AppliedWritingPreferences preferences={turn.preferences} />}
             <label className="grid gap-1">
               {t("writing.task.retryConnection")}
               <select
@@ -2580,6 +2627,12 @@ function Composer({
                 </details>
               )}
               {sidebar && renderSentContext(turn.context, turn.searchFolder)}
+              {!!turn.preferences?.length && (
+                <details className="text-xs">
+                  <summary>{t("writing.preference.used")}</summary>
+                  <AppliedWritingPreferences preferences={turn.preferences} />
+                </details>
+              )}
               {renderTurnContent(turn, index)}
               {renderBaselineRetry(turn)}
               {turn.alternativeTo && turn.id && turn.status === "complete" && (
@@ -2662,6 +2715,11 @@ function Composer({
               .filter(Boolean)
               .join(" · ")}
           </p>
+          {attempt.task.request.preferences && (
+            <div className="basis-full text-xs">
+              <AppliedWritingPreferences preferences={attempt.task.request.preferences} />
+            </div>
+          )}
           {otherRecipients.length > 0 && (
             <>
               <label className="grid gap-1">
@@ -2957,6 +3015,12 @@ function Composer({
               }
             />
             {capacity.controls}
+            <WritingPreferences
+              preferences={preferences}
+              openRequest={preferenceRequest}
+              onOpened={onPreferenceOpened}
+              correction={readWritingSkill(correction).instruction ?? correction}
+            />
             <WritingToolPicker picker={toolPicker} />
             {showCallPlan && recipient && capacity.plan && (
               <WritingCallPlan
@@ -2991,6 +3055,7 @@ function Composer({
                   toolPicker.incomplete ||
                   loading ||
                   !canSendInstruction ||
+                  !preferences.available ||
                   named.loading ||
                   named.unconfirmed ||
                   (named.hasImages && !vision?.verified) ||
