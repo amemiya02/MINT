@@ -122,3 +122,9 @@ A package can contribute the same format through the host codec registry. Each e
 Install **Kanban board** in Settings → Plugins to group the current folder’s Markdown documents by their top-level YAML `status`. The board offers To do, In progress, Done, and the status values found in the folder. A document without a status appears under No status. Drag a card to a column or choose a destination from its menu. Select the document name to open it.
 
 Packages can contribute this view with `"sidebar": "kanban"` and `"permissions": ["folder.read", "folder.status.write"]`. The second grant allows the host to update only the status property. Writers can revoke it independently while keeping the board readable.
+
+## Relationship graph
+
+Install **Relationship graph** in Settings → Plugins and allow it to read Markdown documents in the current folder. Open its sidebar to see which documents cite each other. Arrows point from the citing document to its target. Select a document to open it, or use the references below the graph to select the exact citation in the source or jump to the cited heading.
+
+The graph reads the same on-disk references as Backlinks. It includes links whose targets resolve to documents in the folder and recognizes wikilinks when enabled for that folder. A package can contribute this view with `"sidebar": "graph"` and `"permissions": ["folder.read"]`.

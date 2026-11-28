@@ -18,7 +18,7 @@ export interface PluginManifest {
   statistics?: (keyof WordCount)[];
   templates?: { name: string; text: string }[];
   exportFormat?: PluginFormat;
-  sidebar?: "tags" | "properties" | "kanban";
+  sidebar?: "tags" | "properties" | "kanban" | "graph";
   diagram?: "timing";
   importer?: "notion";
 }
@@ -61,6 +61,14 @@ export const kanbanBoard: PluginManifest = {
   name: "Kanban board",
   permissions: ["folder.read", "folder.status.write"],
   sidebar: "kanban",
+};
+
+export const relationshipGraph: PluginManifest = {
+  apiVersion: 1,
+  id: "mint.relationship-graph",
+  name: "Relationship graph",
+  permissions: ["folder.read"],
+  sidebar: "graph",
 };
 
 export const tagBrowser: PluginManifest = {
@@ -140,7 +148,8 @@ export function isManifest(value: unknown): value is PluginManifest {
   }
   if ("sidebar" in m) {
     if (m.sidebar === "kanban") required.add("folder.status.write");
-    else if (m.sidebar !== "tags" && m.sidebar !== "properties") return false;
+    else if (m.sidebar !== "tags" && m.sidebar !== "properties" && m.sidebar !== "graph")
+      return false;
     required.add("folder.read");
   }
   if ("statistics" in m) {

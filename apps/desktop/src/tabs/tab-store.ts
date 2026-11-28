@@ -61,7 +61,7 @@ function startOfMatch(text: string, range: LineRange): number | null {
   return matches === 1 || range.text === undefined ? candidate : null;
 }
 
-type DocumentLocation =
+export type DocumentLocation =
   | LineRange
   | { readonly sourceFrom: number; readonly sourceTo: number }
   | { readonly fragment: string };
