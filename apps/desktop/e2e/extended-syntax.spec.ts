@@ -101,9 +101,12 @@ test("HTML and PDF exports render the extended syntax the editor has switched on
   await dialog.getByRole("button", { name: "Print…" }).click();
   await expect(dialog).toHaveCount(0, { timeout: 30_000 });
   const printed = (await printedDocuments(page))[0]?.html ?? "";
-  expect(printed).toContain("<mark>wet</mark>");
-  expect(printed).toContain("H<sub>2</sub>O");
-  expect(printed).toContain("x^2^");
+  const printView = await page.context().newPage();
+  await printView.setContent(printed);
+  await expect(printView.locator("mark")).toHaveText("wet");
+  await expect(printView.locator("sub")).toHaveText("2");
+  await expect(printView.locator("article")).toContainText("H2O");
+  await expect(printView.locator("article")).toContainText("x^2^");
 });
 
 test("exports keep extended syntax as text while its switches are off", async ({ page }) => {

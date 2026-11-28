@@ -10,6 +10,7 @@ export const printEvents = {
 
 /** What the print window receives: the standalone HTML and the print job's name. */
 export interface PrintJob {
+  readonly paper: "A4" | "A5" | "Letter";
   readonly html: string;
   readonly title: string;
 }

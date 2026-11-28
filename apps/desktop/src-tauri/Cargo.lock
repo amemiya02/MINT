@@ -2533,9 +2533,13 @@ dependencies = [
  "grep-matcher",
  "grep-regex",
  "grep-searcher",
+ "gtk",
  "ignore",
  "notify",
  "notify-debouncer-full",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "objc2-web-kit",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -2549,6 +2553,7 @@ dependencies = [
  "tauri-plugin-updater",
  "tempfile",
  "trash",
+ "webkit2gtk",
 ]
 
 [[package]]

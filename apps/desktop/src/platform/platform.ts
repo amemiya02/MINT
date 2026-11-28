@@ -1,3 +1,5 @@
+import type { PrintJob } from "../print/protocol.ts";
+
 /**
  * The platform interface: the only way the shell reaches the outside world
  * (file system, dialogs, window, native menu). Two implementations exist:
@@ -49,7 +51,7 @@ export interface Platform {
    * system print dialog, where the user saves it as a PDF. `title` names the
    * print job, and so the suggested PDF file. Resolves once the dialog is up.
    */
-  printDocument(html: string, options: { readonly title: string }): Promise<void>;
+  printDocument(html: string, options: Pick<PrintJob, "title" | "paper">): Promise<void>;
 
   /** Ask the user to pick a folder. Resolves to its path, or `null` if cancelled. */
   showOpenFolderDialog(options: { readonly title: string }): Promise<string | null>;

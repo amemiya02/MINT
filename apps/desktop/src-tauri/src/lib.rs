@@ -10,6 +10,7 @@ mod fs;
 mod grants;
 mod history;
 mod opened;
+mod printing;
 mod recovery;
 mod search;
 mod settings;
@@ -663,6 +664,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            printing::print_pages,
             read_text_file,
             write_text_file,
             write_binary_file,

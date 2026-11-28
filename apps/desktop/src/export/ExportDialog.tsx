@@ -154,7 +154,7 @@ export function ExportDialog({
       const name = stem(path);
       if (format === "pdf") {
         if (!preview || !ready) throw new Error(t("export.pdf.preview"));
-        await platform.printDocument(preview.html, { title: name });
+        await platform.printDocument(preview.html, { title: name, paper: layout.paper });
         close();
         return;
       }
