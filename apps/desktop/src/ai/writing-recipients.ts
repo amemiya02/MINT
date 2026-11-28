@@ -8,7 +8,12 @@ export type WritingRecipient = {
   readonly send: WritingSender;
 } & (
   | { readonly kind: "agent"; readonly path: string; readonly access: AgentAccess }
-  | { readonly kind: "model"; readonly modelId: string; readonly name: string; readonly endpoint: string }
+  | {
+      readonly kind: "model";
+      readonly modelId: string;
+      readonly name: string;
+      readonly endpoint: string;
+    }
 );
 
 /** Bind native-approved Agent policies and saved model IDs to the shared text sender. */

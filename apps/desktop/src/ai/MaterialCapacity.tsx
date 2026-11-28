@@ -4,7 +4,12 @@ import { useT } from "../i18n/index.ts";
 import { materialLabel } from "./material-display.ts";
 import { sourceLines } from "./material-source.ts";
 import { MaterialPreview } from "./TaskContext.tsx";
-import { contextMaterials, type NamedMaterial, type TaskContext, type WritingRequest } from "./writing-sender.ts";
+import {
+  contextMaterials,
+  type NamedMaterial,
+  type TaskContext,
+  type WritingRequest,
+} from "./writing-sender.ts";
 
 const encoder = new TextEncoder();
 
@@ -12,11 +17,13 @@ export function materialBytes({
   selectedText,
   taskContext,
 }: Pick<WritingRequest, "selectedText" | "taskContext">) {
-  return encoder.encode(selectedText ?? "").length +
+  return (
+    encoder.encode(selectedText ?? "").length +
     contextMaterials(taskContext).reduce(
       (total, { text, image }) => total + encoder.encode(text).length + (image?.length ?? 0),
       0,
-    );
+    )
+  );
 }
 
 interface Source {
@@ -68,7 +75,11 @@ function batchSource(t: ReturnType<typeof useT>, material: NamedMaterial, room: 
 
   function flush(last: number) {
     if (!current.length) return;
-    batches.push({ ...material, name: passageLabel(t, name, headings, first, last), text: current.join("") });
+    batches.push({
+      ...material,
+      name: passageLabel(t, name, headings, first, last),
+      text: current.join(""),
+    });
     current = [];
     bytes = 0;
   }

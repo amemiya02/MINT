@@ -165,8 +165,10 @@ export const en = {
   "materials.visionSample": "Sends a generated color sample to the selected model.",
   "materials.visionVerified": "Image support verified",
   "materials.vision.checking": "Checking image support…",
-  "materials.vision.failed": "The sample did not verify image support. Try another model or use text.",
-  "materials.visionRequired": "Choose a model with verified image support, or edit the material to send text.",
+  "materials.vision.failed":
+    "The sample did not verify image support. Try another model or use text.",
+  "materials.visionRequired":
+    "Choose a model with verified image support, or edit the material to send text.",
   "materials.edit": "Edit {name}",
   "materials.materialTooLarge": "The image is too large. Choose a smaller region or use a caption.",
   "materials.pasted": "Pasted material",
@@ -174,7 +176,8 @@ export const en = {
   "materials.addPasted": "Add pasted text",
   "materials.remove": "Remove {name}",
   "materials.reading": "Reading material…",
-  "materials.invalid": "Choose nonempty UTF-8 text up to 2 MiB, or a supported PDF or image up to 32 MiB.",
+  "materials.invalid":
+    "Choose nonempty UTF-8 text up to 2 MiB, or a supported PDF or image up to 32 MiB.",
   "materials.allowSearch": "Allow searching the current working folder",
   "materials.requested": "Additional material requested",
   "materials.searchingFolderFor": "Search {folder} for “{query}”",

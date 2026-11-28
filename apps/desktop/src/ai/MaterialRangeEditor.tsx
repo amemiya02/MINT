@@ -16,7 +16,12 @@ const coordinates = ["x", "y", "width", "height"] as const;
 
 function initialRegion(previous?: MaterialRange): Partial<Record<Coordinate, string>> {
   return previous?.kind === "image"
-    ? { x: String(previous.x), y: String(previous.y), width: String(previous.width), height: String(previous.height) }
+    ? {
+        x: String(previous.x),
+        y: String(previous.y),
+        width: String(previous.width),
+        height: String(previous.height),
+      }
     : { x: "0", y: "0" };
 }
 
@@ -35,7 +40,9 @@ export function MaterialRangeEditor({
 }) {
   const t = useT();
   const [loaded, setLoaded] = useState<Awaited<ReturnType<typeof loadMaterialSource>> | null>(null);
-  const [page, setPage] = useState(previous?.range?.kind === "pdf" ? String(previous.range.page) : "1");
+  const [page, setPage] = useState(
+    previous?.range?.kind === "pdf" ? String(previous.range.page) : "1",
+  );
   const [region, setRegion] = useState(() => initialRegion(previous?.range));
   const fallback = source.kind === "pdf" ? "extractedText" : "caption";
   const [requestedFormat, setFormat] = useState(previous?.format ?? fallback);
@@ -45,7 +52,9 @@ export function MaterialRangeEditor({
       : requestedFormat;
   const [caption, setCaption] = useState(previous?.format === "caption" ? previous.text : "");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<"invalidRange" | "noPageText" | "materialTooLarge" | null>(null);
+  const [error, setError] = useState<"invalidRange" | "noPageText" | "materialTooLarge" | null>(
+    null,
+  );
   useEffect(() => {
     let current = true;
     const reading = loadMaterialSource(source);
@@ -70,15 +79,29 @@ export function MaterialRangeEditor({
     width: region.width ?? String(bitmap?.width ?? ""),
     height: region.height ?? String(bitmap?.height ?? ""),
   };
-  const rect = { x: Number(value.x), y: Number(value.y), width: Number(value.width), height: Number(value.height) };
+  const rect = {
+    x: Number(value.x),
+    y: Number(value.y),
+    width: Number(value.width),
+    height: Number(value.height),
+  };
   const validRect =
     bitmap &&
     coordinates.every((key) => value[key] !== "" && Number.isInteger(rect[key])) &&
-    rect.x >= 0 && rect.y >= 0 && rect.width >= 1 && rect.height >= 1 &&
-    rect.x + rect.width <= bitmap.width && rect.y + rect.height <= bitmap.height;
+    rect.x >= 0 &&
+    rect.y >= 0 &&
+    rect.width >= 1 &&
+    rect.height >= 1 &&
+    rect.x + rect.width <= bitmap.width &&
+    rect.y + rect.height <= bitmap.height;
   const pageNumber = Number(page);
   let range: MaterialRange | undefined;
-  if (loaded?.kind === "pdf" && Number.isInteger(pageNumber) && pageNumber >= 1 && pageNumber <= loaded.pdf.numPages) {
+  if (
+    loaded?.kind === "pdf" &&
+    Number.isInteger(pageNumber) &&
+    pageNumber >= 1 &&
+    pageNumber <= loaded.pdf.numPages
+  ) {
     range = { kind: "pdf", page: pageNumber, pages: loaded.pdf.numPages };
   } else if (validRect) {
     range = { kind: "image", ...rect };
@@ -120,16 +143,20 @@ export function MaterialRangeEditor({
       {loaded?.kind === "image" && bitmap && (
         <>
           <div className="relative mx-auto w-fit max-w-full">
-            <img className="block h-auto max-w-full" src={loaded.preview} alt={t("materials.sourcePreview")} />
+            <img
+              className="block h-auto max-w-full"
+              src={loaded.preview}
+              alt={t("materials.sourcePreview")}
+            />
             {validRect && (
               <span
                 aria-hidden="true"
                 className="pointer-events-none absolute border-2 border-white shadow-[0_0_0_1px_black]"
                 style={{
-                  left: `${rect.x / bitmap.width * 100}%`,
-                  top: `${rect.y / bitmap.height * 100}%`,
-                  width: `${rect.width / bitmap.width * 100}%`,
-                  height: `${rect.height / bitmap.height * 100}%`,
+                  left: `${(rect.x / bitmap.width) * 100}%`,
+                  top: `${(rect.y / bitmap.height) * 100}%`,
+                  width: `${(rect.width / bitmap.width) * 100}%`,
+                  height: `${(rect.height / bitmap.height) * 100}%`,
                 }}
               />
             )}
@@ -171,20 +198,32 @@ export function MaterialRangeEditor({
                 <option value="extractedText">{t("materials.format.extractedText")}</option>
               )}
               <option value="caption">{t("materials.format.caption")}</option>
-              <option value="image" disabled={!vision}>{t("materials.format.image")}</option>
+              <option value="image" disabled={!vision}>
+                {t("materials.format.image")}
+              </option>
             </select>
           </label>
           {format === "caption" && (
             <label className="grid gap-1">
               {t("materials.format.caption")}
-              <textarea className={field} rows={2} value={caption} onChange={(event) => setCaption(event.target.value)} />
+              <textarea
+                className={field}
+                rows={2}
+                value={caption}
+                onChange={(event) => setCaption(event.target.value)}
+              />
             </label>
           )}
         </>
       )}
       {error && <p role="alert">{t(`materials.${error}`)}</p>}
       <div className="flex flex-wrap gap-2">
-        <button className={button} type="button" disabled={!canAccept || busy} onClick={() => void accept()}>
+        <button
+          className={button}
+          type="button"
+          disabled={!canAccept || busy}
+          onClick={() => void accept()}
+        >
           {t("materials.useRange")}
         </button>
         <button className={button} type="button" onClick={onRemove}>

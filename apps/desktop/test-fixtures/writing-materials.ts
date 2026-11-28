@@ -3,8 +3,8 @@ export const selectedPageText = "Approved page: the observation deck opens Tuesd
 export const otherPageText = "Unselected page: private access code.";
 
 export function writingMaterialPdf() {
-  const stream = (text: string) => {
-    const commands = `BT /F1 12 Tf 12 50 Td (${text}) Tj ET\n`;
+  const stream = (text: string, markerColor: string) => {
+    const commands = `q ${markerColor} rg 0 0 12 12 re f Q\nBT /F1 12 Tf 12 50 Td (${text}) Tj ET\n`;
     return `<< /Length ${commands.length} >>\nstream\n${commands}endstream`;
   };
   const objects = [
@@ -13,8 +13,8 @@ export function writingMaterialPdf() {
     "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 320 80] /Resources << /Font << /F1 5 0 R >> >> /Contents 6 0 R >>",
     "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 320 80] /Resources << /Font << /F1 5 0 R >> >> /Contents 7 0 R >>",
     "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-    stream(otherPageText),
-    stream(selectedPageText),
+    stream(otherPageText, "1 0 0"),
+    stream(selectedPageText, "0 1 0"),
   ];
   let pdf = "%PDF-1.4\n";
   const offsets = objects.map((object, index) => {
@@ -27,3 +27,7 @@ export function writingMaterialPdf() {
   pdf += offsets.map((offset) => `${offset} 00000 n \n`).join("");
   return `${pdf}trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
 }
+
+// 8 × 4 pixels. Only x=5, y=1, width=2, height=2 are blue.
+export const writingMaterialChart =
+  "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAECAIAAAA8r+mnAAAAFUlEQVR4nGP4z8CAFWHwwTQpEnAEAFJmH+HhGbpeAAAAAElFTkSuQmCC";

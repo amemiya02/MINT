@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { useT } from "../i18n/index.ts";
 import { documentExtensions, relativePath } from "../paths.ts";
 import type { Platform } from "../platform/platform.ts";
-import { materialLabel } from "./material-display.ts";
-import type { VisionCheck } from "./ModelVision.tsx";
 import { type MaterialPlan, materialBytes } from "./MaterialCapacity.tsx";
+import type { VisionCheck } from "./ModelVision.tsx";
+import { materialLabel } from "./material-display.ts";
 import {
   type MaterialEntry,
   MaterialPicker,
@@ -317,7 +317,13 @@ export function MaterialRequestNotice({
         <button
           type="button"
           className="rounded border border-(--mint-border) px-2 py-1 hover:bg-(--mint-hover) disabled:opacity-50"
-          disabled={!approved || named.loading || named.unconfirmed || exceedsLimit || (!!approved.image && !vision?.verified)}
+          disabled={
+            !approved ||
+            named.loading ||
+            named.unconfirmed ||
+            exceedsLimit ||
+            (!!approved.image && !vision?.verified)
+          }
           onClick={() => {
             if (approved && !exceedsLimit && (!approved.image || vision?.verified))
               onDecision({ name, purpose, outcome: "allowed", material: approved });

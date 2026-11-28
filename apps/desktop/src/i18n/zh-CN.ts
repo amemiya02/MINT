@@ -166,7 +166,8 @@ export const zhCN: Messages = {
   "materials.addPasted": "添加粘贴的文字",
   "materials.remove": "移除 {name}",
   "materials.reading": "正在读取材料…",
-  "materials.invalid": "请选择不超过 2 MiB 的非空 UTF-8 文本，或不超过 32 MiB 的受支持 PDF 或图像。",
+  "materials.invalid":
+    "请选择不超过 2 MiB 的非空 UTF-8 文本，或不超过 32 MiB 的受支持 PDF 或图像。",
   "materials.allowSearch": "允许搜索当前工作文件夹",
   "materials.requested": "需要额外材料",
   "materials.searchingFolderFor": "在 {folder} 中搜索“{query}”",

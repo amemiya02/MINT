@@ -1,6 +1,8 @@
 import { type ClipboardEvent, type DragEvent, useMemo, useRef, useState } from "react";
 import { useT } from "../i18n/index.ts";
 import type { Platform } from "../platform/platform.ts";
+import { MaterialRangeEditor } from "./MaterialRangeEditor.tsx";
+import { type VisionCheck, VisionControl } from "./ModelVision.tsx";
 import { materialLabel } from "./material-display.ts";
 import {
   type MaterialSource,
@@ -9,9 +11,8 @@ import {
   sourceLines,
   usableMaterialText,
 } from "./material-source.ts";
-import { MaterialRangeEditor } from "./MaterialRangeEditor.tsx";
-import { type VisionCheck, VisionControl } from "./ModelVision.tsx";
 import { hasTaskImages, type NamedMaterial } from "./writing-sender.ts";
+
 const previewClass =
   "max-h-28 overflow-auto whitespace-pre-wrap wrap-anywhere rounded bg-(--mint-hover) p-2";
 const buttonClass =
@@ -36,12 +37,13 @@ export function useNamedMaterials() {
   const [loading, setLoading] = useState(0);
   const [error, setError] = useState(false);
   const confirmed = useMemo(
-    () => [
-      ...entries,
-      ...ranges.flatMap(({ id, editing, selected }) =>
-        !editing && selected ? [{ id, material: selected }] : [],
-      ),
-    ].sort((first, second) => Number(first.id) - Number(second.id)),
+    () =>
+      [
+        ...entries,
+        ...ranges.flatMap(({ id, editing, selected }) =>
+          !editing && selected ? [{ id, material: selected }] : [],
+        ),
+      ].sort((first, second) => Number(first.id) - Number(second.id)),
     [entries, ranges],
   );
   const materials = confirmed.map(({ material }) => material);
@@ -59,10 +61,16 @@ export function useNamedMaterials() {
       return ranges.some((range) => range.id === id);
     },
     edit(id: MaterialEntry["id"]) {
-      setRanges((previous) => previous.map((range) => range.id === id ? { ...range, editing: true } : range));
+      setRanges((previous) =>
+        previous.map((range) => (range.id === id ? { ...range, editing: true } : range)),
+      );
     },
     accept(id: number, material: NamedMaterial) {
-      setRanges((previous) => previous.map((range) => range.id === id ? { ...range, editing: false, selected: material } : range));
+      setRanges((previous) =>
+        previous.map((range) =>
+          range.id === id ? { ...range, editing: false, selected: material } : range,
+        ),
+      );
     },
     remove(id: MaterialEntry["id"]) {
       setEntries((previous) => previous.filter((entry) => entry.id !== id));
@@ -87,7 +95,9 @@ export function useNamedMaterials() {
             const source = rangedSource(file);
             if (source && file.size <= 32 * 1024 * 1024) return { id, source, editing: true };
             if (file.size > materialTextLimit || source) throw new Error("invalidMaterial");
-            const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(await file.arrayBuffer());
+            const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
+              await file.arrayBuffer(),
+            );
             if (!usableMaterialText(text)) throw new Error("invalidMaterial");
             return { id, material: { name: file.name, text } };
           }),
@@ -113,7 +123,11 @@ export function useNamedMaterials() {
 export function MaterialPreview({ material }: { readonly material: NamedMaterial }) {
   const t = useT();
   return material.image ? (
-    <img className="max-h-36 max-w-full object-contain" src={material.image} alt={materialLabel(material, t)} />
+    <img
+      className="max-h-36 max-w-full object-contain"
+      src={material.image}
+      alt={materialLabel(material, t)}
+    />
   ) : (
     <pre className={previewClass}>{material.text}</pre>
   );
@@ -204,10 +218,14 @@ export function TaskContextChecklist({
           {named.entries.map(({ id, material }) => (
             <li key={id} className="flex items-start justify-between gap-2">
               <details className="min-w-0 flex-1">
-                <summary className="cursor-pointer wrap-anywhere">{materialLabel(material, t)}</summary>
+                <summary className="cursor-pointer wrap-anywhere">
+                  {materialLabel(material, t)}
+                </summary>
                 {!material.image && (
                   <p>
-                    {t("materials.capacity.lineCount", { count: String(sourceLines(material.text).length) })}
+                    {t("materials.capacity.lineCount", {
+                      count: String(sourceLines(material.text).length),
+                    })}
                   </p>
                 )}
                 <MaterialPreview material={material} />
@@ -287,7 +305,9 @@ export function MaterialPicker({
           className={buttonClass}
           onClick={() =>
             void named.read(async () => {
-              const file = await platform.pickFile(".md,.markdown,.txt,.csv,.tsv,.json,text/*,.pdf,application/pdf,.png,.jpg,.jpeg,.webp,.gif,.bmp,.avif");
+              const file = await platform.pickFile(
+                ".md,.markdown,.txt,.csv,.tsv,.json,text/*,.pdf,application/pdf,.png,.jpg,.jpeg,.webp,.gif,.bmp,.avif",
+              );
               return file ? [file] : [];
             })
           }

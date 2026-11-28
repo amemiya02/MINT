@@ -86,8 +86,16 @@ struct NamedMaterial {
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", tag = "kind", deny_unknown_fields)]
 enum MaterialRange {
-    Pdf { page: u32, pages: u32 },
-    Image { x: u32, y: u32, width: u32, height: u32 },
+    Pdf {
+        page: u32,
+        pages: u32,
+    },
+    Image {
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
+    },
 }
 
 #[derive(Deserialize, Serialize)]

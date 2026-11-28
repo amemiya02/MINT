@@ -10,10 +10,10 @@ import {
   useMaterialCapacity,
 } from "./MaterialCapacity.tsx";
 import { MaterialRequestNotice, useMaterialRequests } from "./MaterialRequest.tsx";
-import { modelEndpoint, modelWritingSender, type SavedModelConnection } from "./model.ts";
 import { useModelVision, VisionControl, type VisionTarget } from "./ModelVision.tsx";
+import { modelEndpoint, modelWritingSender, type SavedModelConnection } from "./model.ts";
 import { recordWritingResult } from "./record-writing-result.ts";
-import { TaskContextChecklist, useNamedMaterials } from "./TaskContext.tsx";
+import { materialDropHandlers, TaskContextChecklist, useNamedMaterials } from "./TaskContext.tsx";
 import { useWritingTask, WritingTaskMaterials } from "./WritingTasks.tsx";
 import {
   type AttemptStatus,
@@ -22,7 +22,12 @@ import {
   replyStatus,
   writingMaterialNames,
 } from "./writing-attempt.ts";
-import { hasTaskImages, type NamedMaterial, type WritingRequest, type WritingSender } from "./writing-sender.ts";
+import {
+  hasTaskImages,
+  type NamedMaterial,
+  type WritingRequest,
+  type WritingSender,
+} from "./writing-sender.ts";
 
 const field =
   "w-full rounded-md border border-(--mint-border) bg-(--mint-bg) px-2 py-1 focus-visible:outline-2 focus-visible:outline-(--mint-accent)";
@@ -226,7 +231,9 @@ export function DraftComposer({
       ? {
           id: "",
           label: recipient,
-          send: modelWritingSender(platform.sendModelMessage, inlineTarget.connection, { apiKey: key }),
+          send: modelWritingSender(platform.sendModelMessage, inlineTarget.connection, {
+            apiKey: key,
+          }),
           visionTarget: inlineTarget,
         }
       : connections.find(({ id }) => id === choice);
@@ -475,6 +482,7 @@ export function DraftComposer({
     <form
       aria-labelledby={id}
       onSubmit={submit}
+      onPaste={busy ? undefined : materialDropHandlers(named).onPaste}
       className="max-h-[70%] shrink-0 space-y-2 overflow-auto border-b border-(--mint-border) px-4 py-3 text-sm"
     >
       <div className="flex items-center justify-between gap-2">

@@ -7,7 +7,10 @@ export type MaterialSource =
 
 export function rangedSource(file: File): MaterialSource | undefined {
   if (file.type === "application/pdf" || /\.pdf$/i.test(file.name)) return { kind: "pdf", file };
-  if (/^image\/(png|jpe?g|webp|bmp|gif|avif)$/.test(file.type) || /\.(png|jpe?g|webp|bmp|gif|avif)$/i.test(file.name)) {
+  if (
+    /^image\/(png|jpe?g|webp|bmp|gif|avif)$/.test(file.type) ||
+    /\.(png|jpe?g|webp|bmp|gif|avif)$/i.test(file.name)
+  ) {
     return { kind: "image", file };
   }
 }
@@ -38,7 +41,10 @@ export async function loadMaterialSource(source: MaterialSource): Promise<Loaded
     const { width, height } = bitmap;
     if (!width || !height || width * height > 32_000_000) throw new Error("materialTooLarge");
     const scale = Math.min(1, 600 / Math.max(width, height));
-    const preview = canvasFor(Math.max(1, Math.round(width * scale)), Math.max(1, Math.round(height * scale)));
+    const preview = canvasFor(
+      Math.max(1, Math.round(width * scale)),
+      Math.max(1, Math.round(height * scale)),
+    );
     preview.context.drawImage(bitmap, 0, 0, preview.canvas.width, preview.canvas.height);
     return {
       kind: "image",
@@ -107,7 +113,11 @@ export async function prepareRangedMaterial(
   throw new Error("invalidMaterial");
 }
 
-function imageMaterial(name: string, range: MaterialRange, canvas: HTMLCanvasElement): NamedMaterial {
+function imageMaterial(
+  name: string,
+  range: MaterialRange,
+  canvas: HTMLCanvasElement,
+): NamedMaterial {
   const image = canvas.toDataURL("image/png");
   if (!image.startsWith("data:image/png;base64,") || image.length > materialImageLimit) {
     throw new Error("materialTooLarge");

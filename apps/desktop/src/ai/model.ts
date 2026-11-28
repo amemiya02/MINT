@@ -70,7 +70,8 @@ function modelTaskContext(context: TaskContext | undefined, images: ModelMessage
       image.length > materialImageLimit ||
       imageBytes > taskImageLimit ||
       !image.startsWith("data:image/png;base64,")
-    ) throw "invalidRequest";
+    )
+      throw "invalidRequest";
     images.push({ type: "image_url", image_url: { url: image } });
     const { name, range, format } = material;
     return { name, range, format };
@@ -116,7 +117,8 @@ export function modelWritingSender(
     if (images.length) {
       messages.push({
         role: "system",
-        content: "Image parts follow the order of Image pixels materials in task context (format image). Each image contains only the named selected range.",
+        content:
+          "Image parts follow the order of Image pixels materials in task context (format image). Each image contains only the named selected range.",
       });
     }
     messages.push({

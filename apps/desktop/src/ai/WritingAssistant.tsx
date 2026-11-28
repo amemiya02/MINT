@@ -16,7 +16,6 @@ import type { Platform } from "../platform/platform.ts";
 import { useTabStore } from "../tabs/context.ts";
 import { useModalDialog } from "../window/useModalDialog.ts";
 import { FocusedWritingReview, type ReviewEntry } from "./FocusedWritingReview.tsx";
-import { materialLabel } from "./material-display.ts";
 import {
   type MaterialPlan,
   MaterialPlanPreview,
@@ -24,10 +23,16 @@ import {
 } from "./MaterialCapacity.tsx";
 import { MaterialRequestNotice, useMaterialRequests } from "./MaterialRequest.tsx";
 import { useModelVision, VisionControl } from "./ModelVision.tsx";
+import { materialLabel } from "./material-display.ts";
 import { ProposedSelectionEdit } from "./ProposedSelectionEdit.tsx";
 import { ReplyExcerpt } from "./ReplyExcerpt.tsx";
 import { type SelectionEdit, selectionEdits } from "./selection-edits.ts";
-import { MaterialPreview, TaskContextChecklist, useNamedMaterials } from "./TaskContext.tsx";
+import {
+  MaterialPreview,
+  materialDropHandlers,
+  TaskContextChecklist,
+  useNamedMaterials,
+} from "./TaskContext.tsx";
 import { useWritingTask, WritingTaskMaterials } from "./WritingTasks.tsx";
 import {
   type AttemptStatus,
@@ -456,9 +461,9 @@ function Composer({
   const controller = useRef<AbortController | null>(null);
   const busy = attempt?.status === "working" || attempt?.status === "approval";
   const store = useTabStore();
-  const [error, setError] = useState<"sendFailed" | "agentChanged" | "missingSelection" | "visionRequired" | null>(
-    null,
-  );
+  const [error, setError] = useState<
+    "sendFailed" | "agentChanged" | "missingSelection" | "visionRequired" | null
+  >(null);
   const input = useRef<HTMLInputElement>(null);
   const review = useRef<HTMLElement>(null);
   const reviewScroll = useRef(restored?.task.reviewScroll ?? 0);
@@ -480,7 +485,11 @@ function Composer({
   const recipient = recipients.find((candidate) => candidate.id === recipientId);
   const checkVision = useModelVision(platform.sendModelMessage);
   const visionFor = (candidate?: WritingRecipient) =>
-    checkVision(candidate?.kind === "model" ? { id: candidate.id, connection: { id: candidate.modelId } } : undefined);
+    checkVision(
+      candidate?.kind === "model"
+        ? { id: candidate.id, connection: { id: candidate.modelId } }
+        : undefined,
+    );
   const vision = visionFor(recipient);
   const labelFor = (candidate: WritingRecipient) =>
     candidate.kind === "agent"
@@ -1156,7 +1165,10 @@ function Composer({
 
   async function runTask(task: Task, connection: WritingRecipient, onSavedRequest?: () => void) {
     if (controller.current || checkingDisk.current) return false;
-    if (hasTaskImages(...(task.plan?.contexts ?? [task.request.taskContext])) && !visionFor(connection)?.verified) {
+    if (
+      hasTaskImages(...(task.plan?.contexts ?? [task.request.taskContext])) &&
+      !visionFor(connection)?.verified
+    ) {
       setError("visionRequired");
       return false;
     }
@@ -1448,7 +1460,8 @@ function Composer({
   const sameConnection = canRetry && recipients.find(({ id }) => id === attempt.recipientId);
   const otherConnection = canRetry && recipients.find(({ id }) => id === retryId);
   const retryHasImages =
-    !!canRetry && hasTaskImages(...(attempt.task.plan?.contexts ?? [attempt.task.request.taskContext]));
+    !!canRetry &&
+    hasTaskImages(...(attempt.task.plan?.contexts ?? [attempt.task.request.taskContext]));
   const sameVision = visionFor(sameConnection || undefined);
   const otherVision = visionFor(otherConnection || undefined);
   if (!placement) return null;
@@ -1872,7 +1885,9 @@ function Composer({
       )}
       {canRetry && (
         <div className="flex flex-wrap items-end gap-2">
-          {retryHasImages && sameVision && !sameVision.verified && <VisionControl check={sameVision} />}
+          {retryHasImages && sameVision && !sameVision.verified && (
+            <VisionControl check={sameVision} />
+          )}
           <button
             type="button"
             className={buttonClass}
@@ -1932,11 +1947,15 @@ function Composer({
         </div>
       )}
       {error && (
-        <p role="alert">{t(
-            error === "agentChanged" ? "agent.reviewAgain"
-              : error === "visionRequired" ? "materials.visionRequired"
+        <p role="alert">
+          {t(
+            error === "agentChanged"
+              ? "agent.reviewAgain"
+              : error === "visionRequired"
+                ? "materials.visionRequired"
                 : `writing.${error}`,
-          )}</p>
+          )}
+        </p>
       )}
       {saveFailed && <p role="alert">{t("writing.tasks.saveFailed")}</p>}
       {!sidebar && turns.length > 0 && !attempt?.capacityRejected ? (
@@ -1948,7 +1967,11 @@ function Composer({
           {t("writing.continue")}
         </button>
       ) : (
-        <form onSubmit={(event) => void submit(event)} className="space-y-2">
+        <form
+          onSubmit={(event) => void submit(event)}
+          onPaste={busy ? undefined : materialDropHandlers(named).onPaste}
+          className="space-y-2"
+        >
           <fieldset
             disabled={busy}
             className={materialRequests.pending ? "hidden" : "flex min-w-0 flex-col gap-2"}
@@ -2076,8 +2099,8 @@ function Composer({
                   loading ||
                   !instruction.trim() ||
                   named.loading ||
-      named.unconfirmed ||
-      (named.hasImages && !vision?.verified) ||
+                  named.unconfirmed ||
+                  (named.hasImages && !vision?.verified) ||
                   (scope === "folder" && !searchFolder)
                 }
               >

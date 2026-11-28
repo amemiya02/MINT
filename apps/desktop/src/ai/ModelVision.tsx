@@ -65,15 +65,26 @@ async function checkSample(
     drawing.fillRect(0, 0, 96, 96);
     drawing.fillStyle = "#ffff00";
     drawing.fillRect(96, 0, 96, 96);
-    const reply = await send(connection, [{
-      role: "user",
-      content: [
-        { type: "text", text: "Name the two colors in this sample image from left to right. Reply with just two basic English color names separated by a comma." },
-        { type: "image_url", image_url: { url: sample.toDataURL("image/png") } },
+    const reply = await send(
+      connection,
+      [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: "Name the two colors in this sample image from left to right. Reply with just two basic English color names separated by a comma.",
+            },
+            { type: "image_url", image_url: { url: sample.toDataURL("image/png") } },
+          ],
+        },
       ],
-    }], { apiKey, signal });
-    return (reply.finishReason === null || reply.finishReason === "stop") &&
-      /^green\s*,\s*yellow\.?$/i.test(reply.text.trim());
+      { apiKey, signal },
+    );
+    return (
+      (reply.finishReason === null || reply.finishReason === "stop") &&
+      /^green\s*,\s*yellow\.?$/i.test(reply.text.trim())
+    );
   } catch {
     return false;
   }
