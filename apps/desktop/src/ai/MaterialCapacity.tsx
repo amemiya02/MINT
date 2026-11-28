@@ -143,7 +143,7 @@ export function useMaterialCapacity({
   readonly editing?: boolean;
 }) {
   const t = useT();
-  const [method, setMethod] = useState<MaterialHandling>("full");
+  const [chosenMethod, setMethod] = useState<MaterialHandling>("full");
   const [limitInput, setLimit] = useState("");
   const [ranges, setRanges] = useState<ReadonlyMap<Source["id"], LineRange>>(new Map());
   const [summaries, setSummaries] = useState<ReadonlyMap<Source["id"], string>>(new Map());
@@ -164,7 +164,9 @@ export function useMaterialCapacity({
       ].filter(({ material }) => material.text.length > 0),
     [editing, selectedText, draftName, draftText, entries, selectionName],
   );
-  const limit = limitInput ? Number(limitInput) : undefined;
+  const method = sources.length ? chosenMethod : "full";
+  const hasMaterial = sources.length > 0 || selectedText !== undefined;
+  const limit = (hasMaterial || folderSearch) && limitInput ? Number(limitInput) : undefined;
   const invalidLimit = limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1);
   const exceeded = !!recipient && rejected.has(recipient);
   const outgoingSelection = method === "full" || editing ? selectedText : undefined;
@@ -269,7 +271,7 @@ export function useMaterialCapacity({
           selectedText: outgoingSelection,
           contexts,
         };
-  const controls = (sources.length > 0 || selectedText !== undefined || exceeded) && (
+  const controls = (hasMaterial || folderSearch || exceeded) && (
     <div className="space-y-2">
       {exceeded && (
         <p role="alert" className="text-xs">

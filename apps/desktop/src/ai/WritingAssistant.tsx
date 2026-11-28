@@ -1272,7 +1272,7 @@ function Composer({
           partial,
         },
       ]);
-    else persist(taskTitle);
+    else if (!rewrite) persist(taskTitle);
     setAttempt({
       ...entry,
       approved,

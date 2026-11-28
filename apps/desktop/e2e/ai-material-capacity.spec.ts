@@ -90,7 +90,11 @@ test("a bounded endpoint receives every section in the previewed batches", async
   await dropNotes(draft, first + second);
   await draft.getByLabel("Material limit (UTF-8 bytes)").fill("25");
   await expect(send).toBeDisabled();
-  await draft.getByLabel("Material handling").selectOption("batch", { timeout: 2000 });
+  await draft.getByLabel("Material handling").selectOption("batch");
+  await draft.getByRole("button", { name: "Remove field-notes.md" }).click();
+  await expect(send).toBeEnabled();
+  await dropNotes(draft, first + second);
+  await draft.getByLabel("Material handling").selectOption("batch");
   const preview = draft.getByRole("region", { name: "Material send plan" });
   await expect(preview).toContainText(endpoint);
   await expect(preview).toContainText("Batch 1 of 2");
@@ -172,8 +176,8 @@ test("Ask AI sends the approved local summary with the selection to the chosen m
     .getByLabel("Instruction", { exact: true })
     .fill("Update this bulletin, apply directly");
   await dropNotes(composer, publicPassage + privatePassage);
-  await composer.getByLabel("Material limit (UTF-8 bytes)").fill("24", { timeout: 2000 });
-  await composer.getByLabel("Material handling").selectOption("summary", { timeout: 2000 });
+  await composer.getByLabel("Material limit (UTF-8 bytes)").fill("24");
+  await composer.getByLabel("Material handling").selectOption("summary");
   await composer.getByLabel("Summary to send").fill(summary);
   await destination.selectOption({ label: `Bounded model · ${endpoint}` });
 

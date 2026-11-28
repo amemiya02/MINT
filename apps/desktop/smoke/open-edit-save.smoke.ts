@@ -2421,7 +2421,11 @@ test("native writing sends only the approved excerpt after a model capacity erro
     ]);
     await click("Add pasted text");
     await clickPath("//form//button[not(@disabled) and normalize-space(.)='Generate draft']");
-    await shows("The recipient rejected the material because of its capacity.");
+    await waitForView(
+      "the capacity rejection in the draft form",
+      `return [...document.querySelectorAll('form [role="alert"]')].some((notice) =>
+        notice.textContent.includes("The recipient rejected the material because of its capacity."));`,
+    );
     assert.deepEqual(received, [[{ name: "Pasted text", text: publicLine + privateLine }]]);
 
     await clickPath("//form//label[normalize-space(.)='Material limit (UTF-8 bytes)']/input");
