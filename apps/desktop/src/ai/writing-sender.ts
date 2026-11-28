@@ -61,7 +61,22 @@ export function replacementFromReply({ text, finishReason }: WritingReply): stri
 }
 
 /** A configured writing connection ready to handle the same request from setup or the editor. */
+export interface WritingOptions {
+  readonly taskId?: string;
+  readonly signal?: AbortSignal;
+  readonly onDelta?: (text: string) => void;
+}
+
 export type WritingSender<Reply extends WritingReply = WritingReply> = (
   request: WritingRequest,
-  local?: { readonly taskId: string },
+  options?: WritingOptions,
 ) => Promise<Reply>;
+
+/** An interrupted edit is reviewable only when the opening replacement was fully framed. */
+export function splitWritingProgress(text: string, editing: boolean) {
+  const frame = editing ? /^\s*(<replacement>[\s\S]*?<\/replacement>)/.exec(text) : null;
+  const replacement = frame ? replacementFromReply({ text: frame[1] ?? "" }) : undefined;
+  return replacement === undefined
+    ? { partial: text }
+    : { replacement, partial: text.slice(frame?.[0].length) };
+}

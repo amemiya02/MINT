@@ -205,7 +205,7 @@ test("selection rewrites preview first or apply with one undo step", async ({ pa
       authorization: "Bearer fixture-key",
       body: {
         model: "fixture-writer",
-        stream: false,
+        stream: true,
         messages: [
           { role: "system", content: expect.stringContaining("<replacement>") },
           {

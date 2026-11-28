@@ -12,6 +12,7 @@ import { DraftComposer } from "./ai/DraftComposer.tsx";
 import { ExternalAgentDialog } from "./ai/ExternalAgentPanel.tsx";
 import { inlineCompletionSender } from "./ai/inline-completion.ts";
 import { ReplyExcerpt } from "./ai/ReplyExcerpt.tsx";
+import { type WritingTask, WritingTasks, WritingTasksContext } from "./ai/WritingTasks.tsx";
 import { captureWritingSelection, type WritingSelection } from "./ai/writing-selection.ts";
 import { checkpointOpenWritingTasks, writingTaskWrites } from "./ai/writing-tasks.ts";
 import type { AnnotationReviewKind } from "./annotations/AnnotationReview.tsx";
@@ -143,6 +144,18 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   } = useOverlays();
   const { shortcuts, wikilinkFolders, inlineCompletionModel } = useSettings().settings;
   const active = tabs.find((tab) => tab.id === activeId) ?? null;
+  const [writingTasks, setWritingTasks] = useState<ReadonlyMap<string, WritingTask>>(
+    () => new Map(),
+  );
+  const publishWritingTask = useCallback((id: string, task: WritingTask | null) => {
+    setWritingTasks((previous) => {
+      if (!task && !previous.has(id)) return previous;
+      const next = new Map(previous);
+      if (task) next.set(id, task);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
   const [draftTabs, setDraftTabs] = useState<ReadonlySet<number>>(() => new Set());
   const [writingRequest, setWritingRequest] = useState<{ tabId: number; sequence: number } | null>(
     null,
@@ -155,7 +168,14 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     tabId: number;
     origin: WritingSelection;
   } | null>(null);
+  const [agentDialogVisible, setAgentDialogVisible] = useState(false);
   useEffect(() => () => agentSelection?.origin.range.release(), [agentSelection]);
+  useEffect(() => {
+    if (agentSelection && !tabs.some(({ id }) => id === agentSelection.tabId)) {
+      setAgentSelection(null);
+      setAgentDialogVisible(false);
+    }
+  }, [agentSelection, tabs]);
   const [historyPath, setHistoryPath] = useState<string | null>(null);
   const [annotationsOpen, setAnnotationsOpen] = useState(false);
   const [annotationReviews, setAnnotationReviews] = useState<
@@ -478,6 +498,11 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
       if (active) setAnnotationsOpen((open) => !open);
     },
     "edit.askExternalAgent": () => {
+      if (agentSelection) {
+        store.activate(agentSelection.tabId);
+        setAgentDialogVisible(true);
+        return;
+      }
       const editor = activeId === null ? undefined : store.editor(activeId);
       const origin = editor && captureWritingSelection(editor);
       if (activeId === null || !origin) {
@@ -486,6 +511,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
       }
       setShellError(null);
       setAgentSelection({ tabId: activeId, origin });
+      setAgentDialogVisible(true);
     },
     "edit.pastePlainText": () => {
       const editor = activeId === null ? undefined : store.editor(activeId);
@@ -571,6 +597,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     [platform, store, recovery, annotationStorage],
   );
 
+  const agentTab = tabs.find(({ id }) => id === agentSelection?.tabId);
   const exportedTab = tabs.find((tab) => tab.id === exporting?.tab) ?? null;
   const name = active ? tabName(t, active) : null;
   const dirty = active?.dirty ?? false;
@@ -589,7 +616,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     return true;
   }
 
-  return (
+  const content = (
     <div className="flex h-full flex-col bg-(--mint-bg) text-(--mint-fg)">
       <UpdateNotice updates={updates} />
       <SettingsIssues />
@@ -708,8 +735,20 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
                     : "grid grid-cols-2 divide-x divide-(--mint-border)"
                 }
               >
-                <TabBar pane="primary" />
-                {selected.reference !== null && <TabBar pane="reference" />}
+                <div className="flex min-w-0">
+                  <div className="min-w-0 flex-1">
+                    <TabBar pane="primary" />
+                  </div>
+                  {selected.reference === null && <WritingTasks tasks={writingTasks} />}
+                </div>
+                {selected.reference !== null && (
+                  <div className="flex min-w-0">
+                    <div className="min-w-0 flex-1">
+                      <TabBar pane="reference" />
+                    </div>
+                    <WritingTasks tasks={writingTasks} />
+                  </div>
+                )}
               </div>
             )}
             {find && active && (
@@ -756,6 +795,9 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
                     draftTabs.has(tab.id) ? (
                       <DraftComposer
                         platform={platform}
+                        tabId={tab.id}
+                        name={tabName(t, tab)}
+                        active={activeId === tab.id}
                         folder={folder}
                         settingsOpen={settingsOpen}
                         canApplyDraft={() => emptyDraftEditor(tab.id) !== null}
@@ -934,6 +976,13 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
         <ExternalAgentDialog
           platform={platform.externalAgent}
           selection={agentSelection.origin.text}
+          name={agentTab ? tabName(t, agentTab) : t("writing.scope.untitled")}
+          visible={agentDialogVisible}
+          onReveal={() => {
+            store.activate(agentSelection.tabId);
+            setAgentDialogVisible(true);
+          }}
+          onHide={() => setAgentDialogVisible(false)}
           renderReply={(reply, close) => (
             <ReplyExcerpt
               reply={reply}
@@ -944,6 +993,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
           )}
           onClose={() => {
             setAgentSelection(null);
+            setAgentDialogVisible(false);
             const current = store.getState().activeId;
             if (current !== null) store.editor(current)?.focus();
           }}
@@ -963,6 +1013,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
       )}
     </div>
   );
+  return <WritingTasksContext value={publishWritingTask}>{content}</WritingTasksContext>;
 }
 
 function errorMessage(t: Translate, error: TabError): string {

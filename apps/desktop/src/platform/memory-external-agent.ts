@@ -44,7 +44,7 @@ export function memoryExternalAgent(options?: MemoryExternalAgentOptions): Exter
     async forget(path) {
       agents.delete(path);
     },
-    async send({ path, revision }, access, request) {
+    async send({ path, revision }, access, request, control) {
       const agent = await inspect(path);
       if (agent.revision !== revision) throw new Error("agentChanged");
       if (!options || !agent.approved.includes(access)) throw new Error("agentAccessRequired");
@@ -52,6 +52,7 @@ export function memoryExternalAgent(options?: MemoryExternalAgentOptions): Exter
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ path, access, request }),
+        signal: control?.signal,
       });
       if (!response.ok) throw new Error("agentFailed");
       const reply = (await response.json()) as WritingReply;

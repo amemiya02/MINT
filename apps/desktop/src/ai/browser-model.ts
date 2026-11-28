@@ -8,7 +8,9 @@ import {
 export async function sendBrowserModelRequest(
   { url, apiKey, body }: ModelRequest,
   receive: (event: ModelResponseEvent) => void,
+  signal?: AbortSignal,
 ) {
+  const timeout = AbortSignal.timeout(modelTimeoutMs);
   try {
     const response = await fetch(url, {
       method: "POST",
@@ -21,7 +23,7 @@ export async function sendBrowserModelRequest(
       redirect: "error",
       cache: "no-store",
       referrerPolicy: "no-referrer",
-      signal: AbortSignal.timeout(modelTimeoutMs),
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
     });
     if (!response.ok) {
       await response.body?.cancel();
@@ -40,10 +42,11 @@ export async function sendBrowserModelRequest(
         receive({ kind: "data", bytes: next.value });
       }
     } finally {
-      await reader.cancel();
+      await reader.cancel().catch(() => {});
     }
     receive({ kind: "done" });
   } catch (error) {
+    if (signal?.aborted) throw "stopped";
     if (typeof error === "number" || typeof error === "string") throw error;
     if (error instanceof DOMException && error.name === "TimeoutError") throw "timeout";
     throw "network";

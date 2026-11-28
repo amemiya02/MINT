@@ -1,5 +1,6 @@
 import diffSequence from "@jest/diff-sequences";
 import { compareLines, rawLines } from "../tabs/line-diff.ts";
+import type { AttemptStatus } from "./writing-attempt.ts";
 import type { TaskContext, WritingTurn } from "./writing-sender.ts";
 
 export type EditStatus = "preview" | "applied" | "discarded" | "reverted";
@@ -21,6 +22,8 @@ export interface SavedSuggestion {
 }
 
 export interface SavedTurn extends WritingTurn {
+  readonly status?: AttemptStatus;
+  readonly partial?: string;
   readonly material?: string;
   readonly context?: TaskContext;
   readonly searchFolder?: string;
@@ -42,7 +45,7 @@ export interface SavedWritingTask {
   readonly reviewScroll: number;
   readonly showSource: boolean;
   readonly turns: readonly SavedTurn[];
-  readonly pending?: Omit<SavedTurn, "reply" | "suggestions" | "direct">;
+  readonly pending?: Omit<SavedTurn, "reply" | "suggestions" | "direct" | "status" | "partial">;
 }
 
 export interface WritingTasksPlatform {

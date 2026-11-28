@@ -148,8 +148,22 @@ for (const decision of ["allow", "skip"] as const) {
       .getByRole("button", { name: /^Apply directly · Current selection · Trail model/ })
       .click();
 
-    const approval = composer.getByRole("group", { name: "Additional material requested" });
+    let approval = composer.getByRole("group", { name: "Additional material requested" });
     await expect(approval.getByText("Check the exact opening time.")).toBeVisible();
+    if (decision === "allow") {
+      await page.keyboard.press("ControlOrMeta+N");
+      await expect(page.getByRole("tabpanel", { name: "Untitled" })).toBeVisible();
+      const tasks = page.getByRole("region", { name: "Writing tasks" });
+      await tasks.getByText("Writing tasks", { exact: true }).click();
+      await expect(tasks).toContainText("Waiting for approval");
+      await expect(tasks).toContainText("Operating hours");
+      await expect(tasks).toContainText("interview.txt");
+      expect(requests).toHaveLength(1);
+      await tasks.getByRole("button", { name: "Open task for draft.md" }).click();
+      approval = page
+        .getByRole("complementary", { name: "Writing Assistant" })
+        .getByRole("group", { name: "Additional material requested" });
+    }
     const excerpt = approval.getByRole("radio", { name: "gate-hours.md · line 2" });
     if (decision === "allow") await expect(excerpt).toBeVisible();
     else await expect(excerpt).toHaveCount(0);

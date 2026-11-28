@@ -1,6 +1,7 @@
 import {
   materialRequestInstruction,
   replacementInstruction,
+  type WritingOptions,
   type WritingReply,
   type WritingRequest,
   type WritingSender,
@@ -28,7 +29,7 @@ export interface ExternalAgentPlatform {
     agent: ExternalAgent,
     access: AgentAccess,
     request: Omit<WritingRequest, "responseFormat">,
-    taskId?: string,
+    options?: WritingOptions,
   ): Promise<WritingReply>;
 }
 
@@ -38,7 +39,7 @@ export function externalAgentSender(
   access: AgentAccess,
 ): WritingSender {
   // The native boundary rechecks access and executable identity for every operation.
-  return ({ responseFormat, ...request }, local) => {
+  return ({ responseFormat, ...request }, options) => {
     const instruction = [request.instruction];
     if (responseFormat === "replacement") instruction.push(replacementInstruction);
     if (request.taskContext) instruction.push(materialRequestInstruction);
@@ -46,7 +47,7 @@ export function externalAgentSender(
       agent,
       access,
       { ...request, instruction: instruction.join("\n\n") },
-      local?.taskId,
+      options,
     );
   };
 }
