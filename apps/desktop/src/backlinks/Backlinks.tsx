@@ -1,13 +1,9 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
 import type { FolderTree } from "../folder/file-tree.ts";
 import { useT } from "../i18n/index.ts";
 import { relativePath } from "../paths.ts";
 import type { Platform } from "../platform/platform.ts";
-import { useDialect } from "../settings/useDialect.ts";
-import { type Backlink, findBacklinks } from "./references.ts";
-
-const noSubscription = () => () => {};
-const noRevision = () => null;
+import type { FolderReference } from "./references.ts";
+import { useFolderReferences } from "./useFolderReferences.ts";
 
 export function Backlinks({
   platform,
@@ -20,29 +16,16 @@ export function Backlinks({
   wikilinks: boolean;
   tree: FolderTree | null;
   targetPath: string | null;
-  onOpen: (link: Backlink) => void;
+  onOpen: (link: FolderReference) => void;
 }) {
   const t = useT();
   const folder = tree?.root ?? null;
-  const revision = useSyncExternalStore(
-    tree?.subscribe ?? noSubscription,
-    tree?.getRows ?? noRevision,
+  const results = useFolderReferences(
+    platform,
+    targetPath ? tree : null,
+    wikilinks,
+    targetPath ?? undefined,
   );
-  const dialect = useDialect(wikilinks);
-  const [results, setResults] = useState<Backlink[] | "error" | null>(null);
-  useEffect(() => {
-    if (!folder || !targetPath || !revision) return;
-    const controller = new AbortController();
-    void findBacklinks(platform, folder, targetPath, dialect, controller.signal).then(
-      (links) => {
-        if (!controller.signal.aborted) setResults(links);
-      },
-      () => {
-        if (!controller.signal.aborted) setResults("error");
-      },
-    );
-    return () => controller.abort();
-  }, [platform, folder, targetPath, dialect, revision]);
   return (
     <aside
       aria-label={t("backlinks.label")}

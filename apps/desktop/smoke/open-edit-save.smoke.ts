@@ -266,16 +266,6 @@ test("moving a Kanban card changes only its status on disk after the writer gran
   const draft = "\uFEFF---\r\nstatus: 'Draft'  # keep\r\n---\r\n\r\nNotes.  \r\n";
   await writeFile(path, draft);
   await restart([folder]);
-  async function clickPath(xpath: string) {
-    const id = await until(xpath, async () => {
-      const el = await command<Record<string, string>>("POST", `/session/${session}/element`, {
-        using: "xpath",
-        value: xpath,
-      });
-      return el[elementKey] ?? null;
-    }).catch(explain);
-    await command("POST", `/session/${session}/element/${id}/click`, {});
-  }
   await until("the Kanban fixture folder to open", () =>
     command<boolean>("POST", `/session/${session}/execute/sync`, {
       script: `return !!document.querySelector('[role=treeitem][aria-label="card.md"]')`,
@@ -317,16 +307,19 @@ test("moving a Kanban card changes only its status on disk after the writer gran
   await click("Close");
 });
 
-const click = async (label: string, by: "text" | "aria-label" = "text", scope = "") => {
-  const element = await until(label, async () => {
+async function clickPath(xpath: string) {
+  const element = await until(xpath, async () => {
     const result = await command<Record<string, string>>("POST", `/session/${session}/element`, {
       using: "xpath",
-      value: `${scope}//button[${by === "text" ? "normalize-space(.)" : "@aria-label"}='${label}']`,
+      value: xpath,
     });
     return result[elementKey] ?? null;
   }).catch(explain);
   await command("POST", `/session/${session}/element/${element}/click`, {});
-};
+}
+
+const click = (label: string, by: "text" | "aria-label" = "text") =>
+  clickPath(`//button[${by === "text" ? "normalize-space(.)" : "@aria-label"}='${label}']`);
 const shows = (text: string) =>
   until(text, () =>
     command<boolean>("POST", `/session/${session}/execute/sync`, {
@@ -600,6 +593,76 @@ test("declining a plugin update keeps its native read grant and withholds its wr
   await click("Close");
 });
 
+test("the installed relationship graph respects folder access and preserves the linked files", async () => {
+  const folder = await mkdtemp(join(dir, "graph-"));
+  const source = join(folder, "source.md");
+  const target = join(folder, "target.md");
+  const citation = "[proof](target.md#Findings)";
+  const sourceBytes = Buffer.from(
+    `\uFEFF# Draft\r\n\r\nSee ${citation} and [outside](../smoke.md).  \r\n`,
+  );
+  const targetBytes = Buffer.from("# Report\r\n\r\n## Findings\r\n");
+  await writeFile(source, sourceBytes);
+  await writeFile(target, targetBytes);
+  await restart([folder, source]);
+  const waitFor = (message: string, script: string) =>
+    until(
+      message,
+      async () =>
+        (await command<boolean>("POST", `/session/${session}/execute/sync`, {
+          script,
+          args: [],
+        })) || null,
+    ).catch(explain);
+  await waitFor(
+    "the graph fixture to open",
+    `return !!document.querySelector('[role=treeitem][aria-label="target.md"]')`,
+  );
+  const plugin = "//fieldset[@aria-label='Relationship graph']";
+  await nativeShortcut("ctrl+comma");
+  await clickPath(`${plugin}//button[normalize-space(.)='Install']`);
+  await shows("Read Markdown documents in the current folder");
+  await click("Deny access");
+  await click("Close");
+  await click("Relationship graph", "aria-label");
+  await waitFor(
+    "the denied graph to hide its files",
+    `const graph = document.querySelector('aside[aria-label="Relationship graph"]');
+    return graph?.querySelector('[role=alert]')?.textContent.includes('denied') && !graph.querySelector('button');`,
+  );
+  await nativeShortcut("ctrl+comma");
+  await clickPath(`${plugin}//button[normalize-space(.)='Allow access']`);
+  await click("Close");
+  const edges = "//aside[@aria-label='Relationship graph']//ul[@aria-label='References']";
+  await waitFor(
+    "only the in-folder reference",
+    `return document.querySelectorAll('aside[aria-label="Relationship graph"] li').length === 1`,
+  );
+  await clickPath(`${edges}//button[contains(.,'target.md')]`);
+  await waitFor(
+    "the referenced heading",
+    `return document.getSelection()?.anchorNode?.parentElement?.closest('.cm-line')?.textContent.includes('Findings')`,
+  );
+  await clickPath(`${edges}//button[contains(.,'source.md')]`);
+  await waitFor(
+    "the original citation",
+    `return document.getSelection()?.toString() === '${citation}'`,
+  );
+  await nativeShortcut("ctrl+comma");
+  await clickPath(`${plugin}//button[normalize-space(.)='Disable']`);
+  await click("Close");
+  await waitFor(
+    "the disabled graph to close",
+    `return !document.querySelector('aside[aria-label="Relationship graph"], nav button[aria-label="Relationship graph"]')`,
+  );
+  assert.deepEqual(await readFile(source), sourceBytes);
+  assert.deepEqual(await readFile(target), targetBytes);
+  assert.deepEqual((await readdir(folder)).sort(), ["source.md", "target.md"]);
+  await nativeShortcut("ctrl+comma");
+  await clickPath(`${plugin}//button[normalize-space(.)='Uninstall']`);
+  await click("Close");
+});
+
 test("the native slide presentation returns to the draft and preserves its bytes", async () => {
   const path = join(dir, "slides.md");
   const source = Buffer.from(
@@ -616,7 +679,7 @@ test("the native slide presentation returns to the draft and preserves its bytes
   ).catch(explain);
   await nativeShortcut("ctrl+comma");
   const plugin = "//fieldset[@aria-label='Slide presentation']";
-  await click("Install", "text", plugin);
+  await clickPath(`${plugin}//button[normalize-space(.)='Install']`);
   await click("Allow access");
   await click("Close");
   await click("Present slides");
@@ -634,6 +697,6 @@ test("the native slide presentation returns to the draft and preserves its bytes
   ).catch(explain);
   assert.deepEqual(await readFile(path), source);
   await nativeShortcut("ctrl+comma");
-  await click("Uninstall", "text", plugin);
+  await clickPath(`${plugin}//button[normalize-space(.)='Uninstall']`);
   await click("Close");
 });
