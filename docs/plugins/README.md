@@ -122,3 +122,7 @@ A package can contribute the same format through the host codec registry. Each e
 Install **Kanban board** in Settings → Plugins to group the current folder’s Markdown documents by their top-level YAML `status`. The board offers To do, In progress, Done, and the status values found in the folder. A document without a status appears under No status. Drag a card to a column or choose a destination from its menu. Select the document name to open it.
 
 Packages can contribute this view with `"sidebar": "kanban"` and `"permissions": ["folder.read", "folder.status.write"]`. The second grant allows the host to update only the status property. Writers can revoke it independently while keeping the board readable.
+
+## LaTeX export
+
+Install **LaTeX export** in Settings → Plugins and grant access to the current document. Choose **File → Import / Export… → LaTeX** to save the current draft as a standalone UTF-8 `.tex` document. Headings become section commands, lists become LaTeX lists, and inline and display equations preserve their TeX notation. Packages can register this format with `"exportFormat": "latex"` and the `document.read` permission.
