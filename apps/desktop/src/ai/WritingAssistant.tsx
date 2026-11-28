@@ -26,6 +26,7 @@ import { useModelVision, VisionControl } from "./ModelVision.tsx";
 import { materialLabel } from "./material-display.ts";
 import { ProposedSelectionEdit } from "./ProposedSelectionEdit.tsx";
 import { ReplyExcerpt } from "./ReplyExcerpt.tsx";
+import { SourcePassageReview } from "./SourcePassageReview.tsx";
 import { type SelectionEdit, selectionEdits } from "./selection-edits.ts";
 import {
   MaterialPreview,
@@ -445,7 +446,7 @@ function Composer({
   const searchFolder =
     allowedFolder === folder && (!origin.folder || origin.folder === folder) ? folder : null;
   const named = useNamedMaterials();
-  const materialRequests = useMaterialRequests(platform);
+  const materialRequests = useMaterialRequests(platform.sendMcpRequest);
   const toolPicker = useWritingToolPicker(platform.sendMcpRequest);
   const toolApproval = materialRequests.externalTool;
   const [includeHistory, setIncludeHistory] = useState(true);
@@ -1884,6 +1885,13 @@ function Composer({
                   <p>{t("writing.task.partial")}</p>
                   <pre className="whitespace-pre-wrap wrap-anywhere">{turn.partial}</pre>
                 </div>
+              )}
+              {!!turn.sourcePassages?.length && (
+                <SourcePassageReview
+                  draft={turn.reply}
+                  passages={turn.sourcePassages}
+                  editor={turn.direct ? origin.editor : undefined}
+                />
               )}
               {!!turn.reply && renderReplyExcerpt(turn.reply, suggestions !== undefined)}
             </article>

@@ -1,7 +1,10 @@
 import type { Translate } from "../i18n/index.ts";
 import type { NamedMaterial } from "./writing-sender.ts";
 
-export function materialLabel(material: NamedMaterial, t: Translate): string {
+export function materialLabel(
+  material: Pick<NamedMaterial, "name" | "range" | "format">,
+  t: Translate,
+): string {
   if (!material.range || !material.format) return material.name;
   const range = material.range;
   const description =

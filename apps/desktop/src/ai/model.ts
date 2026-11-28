@@ -4,6 +4,7 @@ import {
   materialRequestInstruction,
   type NamedMaterial,
   replacementInstruction,
+  sourcePassageInstruction,
   type TaskContext,
   taskImageLimit,
   type WritingOptions,
@@ -95,13 +96,22 @@ export function modelWritingSender(
   options?: ModelOptions,
 ): WritingSender<ModelReply> {
   return (
-    { instruction, selectedText, annotationBatch, taskContext, history, responseFormat },
+    {
+      instruction,
+      selectedText,
+      annotationBatch,
+      taskContext,
+      history,
+      responseFormat,
+      sourcePassages,
+    },
     writingOptions,
   ) => {
     const messages: ModelMessage[] = [];
     if (responseFormat === "replacement")
       messages.push({ role: "system", content: replacementInstruction });
     if (taskContext) messages.push({ role: "system", content: materialRequestInstruction });
+    if (sourcePassages) messages.push({ role: "system", content: sourcePassageInstruction });
     for (const turn of history ?? []) {
       messages.push(
         { role: "user", content: turn.instruction },

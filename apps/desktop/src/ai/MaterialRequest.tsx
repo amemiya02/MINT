@@ -5,6 +5,7 @@ import type { Platform } from "../platform/platform.ts";
 import { type MaterialPlan, materialBytes } from "./MaterialCapacity.tsx";
 import type { VisionCheck } from "./ModelVision.tsx";
 import { materialLabel } from "./material-display.ts";
+import type { McpTransport } from "./mcp.ts";
 import {
   type MaterialEntry,
   MaterialPicker,
@@ -63,7 +64,7 @@ function requestedMaterial(reply: WritingReply): MaterialRequest | undefined {
 }
 
 /** Await author decisions while keeping the original prompt, recipient and draft snapshot. */
-export function useMaterialRequests(platform: Platform) {
+export function useMaterialRequests(sendMcpRequest?: McpTransport) {
   const externalTool = useWritingToolApproval();
   const [pending, setPending] = useState<PendingMaterial | null>(null);
   const sequence = useRef(0);
@@ -99,6 +100,7 @@ export function useMaterialRequests(platform: Platform) {
         readonly onApproval?: (text: string) => void;
         readonly onResume?: (decision: MaterialDecision | null, text: string) => void;
         readonly onProgress?: (text: string) => void;
+        readonly mapBatchReply?: (reply: WritingReply, context?: TaskContext) => WritingReply;
       },
     ): Promise<WritingReply> {
       const id = ++sequence.current;
@@ -110,16 +112,17 @@ export function useMaterialRequests(platform: Platform) {
       const combined = (text: string) => [...completed, text].filter(Boolean).join("\n\n");
       let approvalId = 0;
       externalTool.resetOutcome();
-      const send = options?.tool
-        ? externalTool.wrap(
-            platform.sendMcpRequest,
-            sender,
-            options.tool,
-            recipient,
-            () => onApproval?.(combined("")),
-            () => onResume?.(null, combined("")),
-          )
-        : sender;
+      const send =
+        options?.tool && sendMcpRequest
+          ? externalTool.wrap(
+              sendMcpRequest,
+              sender,
+              options.tool,
+              recipient,
+              () => onApproval?.(combined("")),
+              () => onResume?.(null, combined("")),
+            )
+          : sender;
 
       async function sendBatch(taskContext: TaskContext | undefined, index: number) {
         const instruction =
@@ -156,7 +159,7 @@ export function useMaterialRequests(platform: Platform) {
               }),
           });
           const extra = requestedMaterial(reply);
-          if (!extra) return reply;
+          if (!extra) return options?.mapBatchReply?.(reply, outbound.taskContext) ?? reply;
           if (signal?.aborted) throw "stopped";
           const previous = outbound.taskContext?.materialDecisions ?? [];
           if (id !== sequence.current || previous.some(({ name }) => name === extra.name))

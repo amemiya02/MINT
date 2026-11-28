@@ -11,6 +11,7 @@ import {
   sameJson,
 } from "./mcp.ts";
 import type { WritingReply, WritingSender } from "./writing-sender.ts";
+import type { WritingToolRecord } from "./writing-tasks.ts";
 
 const effects = ["read", "modify", "send"] as const;
 type Effect = (typeof effects)[number];
@@ -28,14 +29,6 @@ interface PendingTool extends WritingToolPlan {
   readonly name: string;
   readonly args: Args;
   readonly recipient: string;
-}
-
-export interface WritingToolRecord {
-  readonly name: string;
-  readonly endpoint: string;
-  readonly effect: Effect;
-  readonly arguments?: string;
-  readonly status: "done" | "denied" | "outside" | "failed";
 }
 
 function toolArgs(value: unknown): Args | undefined {

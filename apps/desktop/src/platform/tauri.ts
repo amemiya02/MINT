@@ -159,7 +159,7 @@ export function createTauriPlatform(): Platform {
     listModelConnections: () => invoke("list_model_connections"),
     saveModelConnection: (connection) => invoke("save_model_connection", { connection }),
     disconnectModelConnection: (id) => invoke("disconnect_model_connection", { id }),
-    listZoteroItems: (start) => invoke("list_zotero_items", { start }),
+    listZoteroItems: (start, query) => invoke("list_zotero_items", { start, query }),
     savesPdfDirectly: /Windows/.test(navigator.userAgent),
     readTextFile: (path) => invoke<string>("read_text_file", { path }),
     readBinaryFile: (path) => invoke<ArrayBuffer>("read_binary_file", { path }),

@@ -1084,8 +1084,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
       )}
       {agentSelection && (
         <ExternalAgentDialog
-          platform={platform.externalAgent}
-          sendMcpRequest={platform.sendMcpRequest}
+          platform={platform}
           selection={agentSelection.origin.text}
           name={agentTab ? tabName(t, agentTab) : t("writing.scope.untitled")}
           tabId={agentSelection.tabId}

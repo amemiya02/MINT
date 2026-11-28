@@ -21,7 +21,7 @@ export interface Platform {
   listModelConnections(): Promise<readonly SavedModelConnection[]>;
   saveModelConnection(connection: NewModelConnection): Promise<SavedModelConnection>;
   disconnectModelConnection(id: string): Promise<void>;
-  listZoteroItems(start: number): Promise<ZoteroPage>;
+  listZoteroItems(start: number, query?: string): Promise<ZoteroPage>;
   /** The user's preferred UI language as a BCP 47 tag, e.g. `zh-CN` or `en-US`. */
   readonly locale: string;
   /** Whether PDF export uses a save dialog and writes the selected file directly. */
@@ -320,6 +320,10 @@ export type SettingsFile =
 export interface ZoteroItem {
   key: string;
   title: string;
+  creators?: readonly string[];
+  date?: string;
+  publication?: string;
+  doi?: string;
 }
 export interface ZoteroPage {
   items: ZoteroItem[];
