@@ -45,7 +45,10 @@ const button =
 
 export function PresentationEntry({ editor, dialect, platform, path }: PresentationProps) {
   const t = useT();
-  const [pages, setPages] = useState<DocumentFragment[] | null>(null);
+  const [deck, setDeck] = useState<{
+    pages: DocumentFragment[];
+    restoreScroll: () => void;
+  } | null>(null);
   return (
     <div className="border-t border-(--mint-border) px-4 py-1">
       <button
@@ -53,18 +56,22 @@ export function PresentationEntry({ editor, dialect, platform, path }: Presentat
         className={button}
         disabled={!editor}
         onClick={() => {
-          if (editor && canPresentSlides())
-            setPages(slidePages(renderHtml(editor.getText(), dialect), platform, path));
+          if (!editor || !canPresentSlides()) return;
+          setDeck({
+            restoreScroll: editor.captureScrollPosition(),
+            pages: slidePages(renderHtml(editor.getText(), dialect), platform, path),
+          });
         }}
       >
         {t("slides.present")}
       </button>
-      {pages && (
+      {deck && (
         <Presentation
-          pages={pages}
+          pages={deck.pages}
           onClose={() => {
-            setPages(null);
+            setDeck(null);
             editor?.focus();
+            deck.restoreScroll();
           }}
         />
       )}
