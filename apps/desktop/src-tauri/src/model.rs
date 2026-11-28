@@ -142,7 +142,14 @@ pub(crate) fn service_url(address: &str) -> Result<Url, ModelError> {
 }
 
 pub(crate) fn completion_url(address: &str) -> Result<Url, ModelError> {
-    let mut url = service_url(address)?;
+    let url = service_url(address)?;
+    if url.query().is_some() {
+        return Err(ModelError::Request("invalidAddress"));
+    }
+    Ok(completion_path(url))
+}
+
+pub(crate) fn completion_path(mut url: Url) -> Url {
     let path = url.path().trim_end_matches('/');
     let path = if path.ends_with("/chat/completions") {
         path.to_owned()
@@ -150,7 +157,7 @@ pub(crate) fn completion_url(address: &str) -> Result<Url, ModelError> {
         format!("{path}/chat/completions")
     };
     url.set_path(&path);
-    Ok(url)
+    url
 }
 
 fn is_loopback(host: &str) -> bool {
@@ -170,7 +177,7 @@ pub(crate) async fn send_model_request(
 ) -> Result<(), ModelError> {
     require_document_window(&window)?;
     let url = service_url(&request.url)?;
-    if !url.path().ends_with("/chat/completions") {
+    if url.query().is_some() || !url.path().ends_with("/chat/completions") {
         return Err(ModelError::Request("invalidAddress"));
     }
     send_until_stopped(

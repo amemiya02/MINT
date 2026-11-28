@@ -3,7 +3,7 @@
 // session, Secret Service and X display used by the suite.
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { createServer, type ServerResponse } from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -127,6 +127,33 @@ async function nativeShortcut(chord: string) {
     { timeout: 5000 },
   );
   await exec("xdotool", ["key", "--clearmodifiers", chord], { timeout: 5000 });
+}
+
+async function openNativePalette() {
+  await exec(
+    "/usr/bin/python3",
+    ["smoke/activate-gtk-menu.py", "activate", await instancePid(), "View", "Command Palette…"],
+    { timeout: 20_000 },
+  ).catch(explain);
+  await waitForView(
+    "the native Command Palette to receive focus",
+    `return document.activeElement?.matches('dialog[aria-label="Command Palette"] input');`,
+  );
+}
+
+async function focusManuscript() {
+  await waitForView(
+    "the current manuscript to receive focus",
+    `
+    if (document.querySelector('dialog:modal')) return false;
+    const tab = document.querySelector('[role=tab][aria-selected=true]');
+    const editor = document.getElementById(tab?.getAttribute('aria-controls'))
+      ?.querySelector('.cm-content');
+    if (!editor?.getClientRects().length) return false;
+    editor.focus();
+    return document.activeElement === editor;
+  `,
+  );
 }
 
 async function nativeSettingsMenu(mode: "wait" | "activate") {
@@ -517,7 +544,7 @@ test("moving a Kanban card changes only its status on disk after the writer gran
 });
 
 async function clickPath(xpath: string) {
-  const element = await until(`a clickable match for ${xpath}`, async () => {
+  await until(`a clickable match for ${xpath}`, async () => {
     const matches = await command<Record<string, string>[]>(
       "POST",
       `/session/${session}/elements`,
@@ -529,8 +556,11 @@ async function clickPath(xpath: string) {
     // XPath also matches hidden panes and content behind a modal. WebKitWebDriver
     // can find a control in a scroll area before its center can receive a click.
     // WebKitGTK 2.50 resolves element references only at the top level of args.
-    return command<Record<string, string> | null>("POST", `/session/${session}/execute/sync`, {
-      script: `const modalOpen = document.querySelector('dialog:modal') !== null;
+    const element = await command<Record<string, string> | null>(
+      "POST",
+      `/session/${session}/execute/sync`,
+      {
+        script: `const modalOpen = document.querySelector('dialog:modal') !== null;
         for (const element of arguments) {
           if ((modalOpen && !element.closest('dialog:modal')) || element.matches(':disabled') ||
               element.closest('[hidden], [inert]') || !element.getClientRects().length) continue;
@@ -544,12 +574,13 @@ async function clickPath(xpath: string) {
           if (element.contains(hit)) return element;
         }
         return null;`,
-      args: matches,
-    });
+        args: matches,
+      },
+    );
+    if (!element) return null;
+    await command("POST", `/session/${session}/element/${element[elementKey]}/click`, {});
+    return true;
   }).catch(explain);
-  await command("POST", `/session/${session}/element/${element[elementKey]}/click`, {}).catch(
-    explain,
-  );
 }
 
 const click = (label: string, by: "text" | "aria-label" = "text") =>
@@ -2171,9 +2202,11 @@ test("a saved writing review resumes after a native restart without contacting i
     await clickPath(`${first}//button[normalize-space(.)='Revert to selected text']`);
     await waitForView(
       "both native panes to show the chosen reversion and preserve the external edit",
-      `const panes = [...document.querySelectorAll('[role=tabpanel]:not([hidden]) .cm-content')];
+      `const panes = [...document.querySelectorAll('[role=tab][aria-selected=true]')]
+        .filter(tab => tab.textContent === 'renamed-writing-review.md')
+        .map(tab => document.getElementById(tab.getAttribute('aria-controls'))?.querySelector('.cm-content'));
       return panes.length === 2 && panes.every(pane =>
-        pane.textContent.includes('First draft.') && pane.textContent.includes('External third.'));`,
+        pane?.innerText.includes('First draft.') && pane.innerText.includes('External third.'));`,
     );
     await clickPath("//aside[@aria-label='Writing Assistant']//button[normalize-space(.)='Close']");
     await nativeShortcut("ctrl+s");
@@ -2253,7 +2286,7 @@ test("inline completion sends the live manuscript excerpt through the native mod
     }
     await clickPath("//button[not(@disabled) and normalize-space(.)='Use for this launch']");
     await chooseSettingsOption("Default writing connection", name);
-    await chooseSettingsOption("Inline completion", "Use the default writing connection");
+    await chooseSettingsOption("Inline completion", name);
     await clickSettingsButton("Run sample", "Inline completion");
     await shows(continuation.trim());
     const [sample] = requests.splice(0);
@@ -2264,8 +2297,8 @@ test("inline completion sends the live manuscript excerpt through the native mod
       sample.body.messages.filter(({ role }) => role === "user"),
       [{ role: "user", content: '{"before":"The path follows the","after":""}' }],
     );
-    await click("Close");
-    await clickPath("//main//div[@role='textbox']");
+    await clickSettingsButton("Close");
+    await focusManuscript();
     await keyActions([...chord(keys.control, keys.end), ...typing(" trail")]);
     await until(
       "the live excerpt to reach the model receiver",
@@ -2301,8 +2334,8 @@ test("inline completion sends the live manuscript excerpt through the native mod
 
     await openSettings();
     await chooseSettingsOption("Inline completion", "Off");
-    await click("Close");
-    await clickPath("//main//div[@role='textbox']");
+    await clickSettingsButton("Close");
+    await focusManuscript();
     await keyActions([...chord(keys.control, keys.end), ...typing(" Today.")]);
     await nativeShortcut("ctrl+s");
     await until(
@@ -2314,7 +2347,7 @@ test("inline completion sends the live manuscript excerpt through the native mod
     assert.equal(requests.length, 1, "switching inline completion off stops subsequent requests");
 
     await openSettings();
-    await chooseSettingsOption("Inline completion", "Use the default writing connection");
+    await chooseSettingsOption("Inline completion", name);
     await click("Close");
     endpointOffline = true;
     await clickPath("//main//div[@role='textbox']");
@@ -3100,7 +3133,7 @@ test("a shared writing skill uses fresh materials and the recipient's native con
         lifetime: "session",
       },
     });
-    await clickPath("//div[contains(concat(' ', normalize-space(@class), ' '), ' cm-content ')]");
+    await focusManuscript();
     await keyActions(chord(keys.control, "a"));
     return `Comment only · Current selection · ${name} · ${base}/chat/completions`;
   }
@@ -3153,7 +3186,7 @@ test("a shared writing skill uses fresh materials and the recipient's native con
     await click("Save as writing skill");
     await fill("Skill name", "input", "Agreement review");
     await fill("Result format", "textarea", format);
-    await clickPath("//div[contains(concat(' ', normalize-space(@class), ' '), ' cm-content ')]");
+    await focusManuscript();
     await keyActions(chord(keys.control, "a"));
     await waitForView(
       "the fresh trial selection to be available",
@@ -3177,7 +3210,7 @@ test("a shared writing skill uses fresh materials and the recipient's native con
     await click("Save skill");
     await showsIn(composer, "Saved /agreement-review.");
     await clickPath("//section[@aria-label='Ask AI']//button[normalize-space(.)='Close']");
-    await clickPath("//div[contains(concat(' ', normalize-space(@class), ' '), ' cm-content ')]");
+    await focusManuscript();
     await keyActions(chord(keys.control, "a"));
     await skillsMenu();
     await click("/agreement-review · Agreement review");
@@ -3899,9 +3932,9 @@ test("the daily journal creates one ordinary Markdown file only after permission
   await restart([folder, draft]);
   const plugin = "//fieldset[@aria-label='Daily journal']";
   const chooseJournal = async () => {
-    await nativeShortcut("ctrl+shift+p");
+    await openNativePalette();
     await keyActions(typing("journal"));
-    await shows("Open today’s journal");
+    await showsIn('dialog[aria-label="Command Palette"]', "Open today’s journal");
     await keyActions(typing(keys.enter));
   };
   await clickPath("//*[@role='treeitem' and @aria-label='draft.md']");
@@ -3954,6 +3987,9 @@ test("external Agent consent gates a real CLI process and keeps the manuscript o
   const executable = join(fixture, "fixture-codex");
   const calls = join(fixture, "calls.jsonl");
   const cancelInstruction = "Generate a reply I can stop.";
+  const toolReady = join(fixture, "tool-ready");
+  const toolRelease = join(fixture, "tool-release");
+  const toolWrite = join(fixture, "tool-wrote-after-stop");
   const temporaryInstruction = "Shorten this privately, apply directly";
   const privateMaterial = "A confidential interview excerpt for the temporary session.";
   const writeTarget = join(fixture, "agent-write.txt");
@@ -3988,6 +4024,15 @@ if (prompt.instruction.startsWith(${JSON.stringify(temporaryInstruction)})) {
 }
 if (!readOnly) fs.writeFileSync(${JSON.stringify(writeTarget)}, "configured access ran");
 if (prompt.instruction === ${JSON.stringify(cancelInstruction)}) {
+  require("node:child_process").spawn(process.execPath, ["-e", ${JSON.stringify(`
+    const fs = require("node:fs");
+    fs.writeFileSync(${JSON.stringify(toolReady)}, "ready");
+    const timer = setInterval(() => {
+      if (!fs.existsSync(${JSON.stringify(toolRelease)})) return;
+      fs.writeFileSync(${JSON.stringify(toolWrite)}, "Tool survived");
+      clearInterval(timer);
+    }, 20);
+  `)}], { stdio: "ignore" }).unref();
   console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "Partial Agent reply." } }));
   setInterval(() => {}, 1000);
 } else {
@@ -4098,6 +4143,16 @@ if (prompt.instruction === ${JSON.stringify(cancelInstruction)}) {
     args: [],
   });
   await clickPath("//aside[@aria-label='Writing Assistant']//input[not(@type='checkbox')]");
+  await waitForView(
+    "earlier turns approved for the Agent follow-up",
+    `
+    const label = [...document.querySelectorAll('aside[aria-label="Writing Assistant"] label')]
+      .find(label => label.textContent.includes('Send earlier instructions and replies with this message'));
+    if (!label?.control) return false;
+    if (!label.control.checked) label.control.click();
+    return label.control.checked;
+  `,
+  );
   await keyActions([...typing("What would help?"), ...typing(keys.enter)]);
   await waitForView(
     "both CLI replies in the sidebar",
@@ -4352,6 +4407,9 @@ if (prompt.instruction === ${JSON.stringify(cancelInstruction)}) {
   const callsBeforeTemporary = (await readFile(calls, "utf8")).trim().split("\n").length;
   assert.equal(callsBeforeTemporary, callsBeforeRestart + 3);
   process.kill(runningCall.pid, 0);
+  await until("the Agent tool starts before Stop", () =>
+    readFile(toolReady, "utf8").catch(() => null),
+  );
   await clickPath("//section[@aria-label='Ask AI']//button[normalize-space(.)='Stop generation']");
   await until("the stopped CLI process to be reaped", async () => {
     try {
@@ -4369,6 +4427,10 @@ if (prompt.instruction === ${JSON.stringify(cancelInstruction)}) {
         composer.innerText.includes('Partial Agent reply.');`,
   );
   await assert.rejects(readdir(runningCall.cwd), { code: "ENOENT" });
+  await writeFile(toolRelease, "release");
+  // A child left alive after Stop would now write its marker.
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  await assert.rejects(stat(toolWrite), { code: "ENOENT" });
   assert.equal(await readFile(draft, "utf8"), initial);
 
   const composer = "//section[@aria-label='Ask AI']";
@@ -4674,7 +4736,7 @@ console.log(JSON.stringify({ type: "turn.completed" }));
     `return document.querySelector('.cm-content')?.textContent.includes("Original. Unsaved note.");`,
   );
   async function send(action: "preview" | "direct") {
-    await nativeShortcut("ctrl+shift+p");
+    await openNativePalette();
     await waitForView(
       "the Command Palette to receive focus",
       `return document.activeElement?.matches('dialog[aria-label="Command Palette"] input');`,
@@ -4834,7 +4896,7 @@ console.log(JSON.stringify({ type: "turn.completed" }));
     "//div[contains(@class,'cm-line') and normalize-space(.)='Revised. Unsaved note.']",
   );
   await keyActions([...typing(keys.end), ...typing(" New note.")]);
-  await nativeShortcut("ctrl+shift+p");
+  await openNativePalette();
   await waitForView(
     "the folder command to receive focus",
     `return document.activeElement?.matches('dialog[aria-label="Command Palette"] input');`,
@@ -4931,7 +4993,7 @@ console.log(JSON.stringify({ type: "turn.completed" }));
     "next/moved.md",
   ];
   await clickPath(`${assistant}//button[normalize-space(.)='Close']`);
-  await nativeShortcut("ctrl+shift+p");
+  await openNativePalette();
   await waitForView(
     "the Command Palette to receive focus for the authorized batch",
     `return document.activeElement?.matches('dialog[aria-label="Command Palette"] input');`,
@@ -5007,7 +5069,7 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   assert.equal((await readFile(batchReceived, "utf8")).trim().split("\n").length, 1);
   await clickPath(`${assistant}//button[normalize-space(.)='Close']`);
   await restart([fixture, draft]);
-  await nativeShortcut("ctrl+shift+p");
+  await openNativePalette();
   await waitForView(
     "the Command Palette to receive focus after restarting",
     `return document.activeElement?.matches('dialog[aria-label="Command Palette"] input');`,
@@ -5047,4 +5109,305 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   assert.equal(await readFile(sibling, "utf8"), "Private text.");
   assert.equal((await readFile(batchReceived, "utf8")).trim().split("\n").length, 1);
   await invokeNative("forget_external_agent", { path: executable });
+});
+
+test("native folder commits reject a redirected parent and stale baselines", async () => {
+  const root = await mkdtemp(join(dir, "granted-batch-"));
+  const outside = await mkdtemp(join(dir, "outside-batch-"));
+  const manuscript = join(root, "draft.md");
+  const redirected = join(root, "redirected");
+  const target = join(outside, "private.md");
+  await writeFile(manuscript, "First version.");
+  await writeFile(target, "Outside bytes.");
+  await symlink(outside, redirected, "dir");
+  await restart([root, manuscript]);
+
+  const edit = (from: string, to: string, before: string | null, after: string | null) =>
+    invokeNative("apply_document_edit", { root, from, to, before, after });
+  const aliased = join(redirected, "private.md");
+  for (const [before, after] of [
+    [null, "Unauthorized creation."],
+    ["Outside bytes.", "Unauthorized rewrite."],
+    ["Outside bytes.", null],
+  ] as const) {
+    await assert.rejects(edit(aliased, aliased, before, after));
+  }
+  await assert.rejects(edit(manuscript, aliased, "First version.", "Unauthorized move."));
+  assert.equal(await readFile(target, "utf8"), "Outside bytes.");
+  assert.equal(await readFile(manuscript, "utf8"), "First version.");
+
+  await writeFile(manuscript, "Concurrent version.");
+  await assert.rejects(edit(manuscript, manuscript, "First version.", "Agent revision."));
+  assert.equal(await readFile(manuscript, "utf8"), "Concurrent version.");
+  await edit(manuscript, manuscript, "Concurrent version.", "Agent revision.");
+  assert.equal(await readFile(manuscript, "utf8"), "Agent revision.");
+});
+
+test("native model registry rejects query credentials and redacts legacy addresses", async () => {
+  await restart([document]);
+  const registry = join(
+    process.env.XDG_DATA_HOME ?? "",
+    "io.github.amemiya02.mint",
+    "model-connections",
+    "connections.json",
+  );
+  const ordinary = await readFile(registry, "utf8").catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return "[]";
+    throw error;
+  });
+  const route = "http://127.0.0.1:1/v1";
+  const address = `${route}?api-key=fixture-query-key`;
+  try {
+    await assert.rejects(
+      invokeNative("save_model_connection", {
+        connection: {
+          name: "Unsafe address",
+          model: "fixture",
+          address,
+          apiKey: "",
+          lifetime: "persistent",
+        },
+      }),
+      /invalidAddress/,
+    );
+    const legacy = { id: "legacy-query", name: "Legacy address", address, model: "fixture" };
+    await mkdir(dirname(registry), { recursive: true });
+    await writeFile(registry, JSON.stringify([...JSON.parse(ordinary), legacy]));
+    const saved = await invokeNative<{ id: string; address: string }[]>(
+      "list_model_connections",
+      {},
+    );
+    assert.equal(saved.find(({ id }) => id === legacy.id)?.address, route);
+    assert.doesNotMatch(await readFile(registry, "utf8"), /fixture-query-key/);
+  } finally {
+    await writeFile(registry, ordinary);
+  }
+});
+
+test("changing Codex MCP configuration invalidates native configured consent", async () => {
+  await restart([document]);
+  const home = process.env.CODEX_HOME;
+  assert.ok(home, "the hosted desktop smoke isolates CODEX_HOME");
+  const config = join(home, "config.toml");
+  const fixture = await mkdtemp(join(dir, "agent-consent-"));
+  const executable = join(fixture, "codex");
+  await writeFile(executable, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+  await mkdir(home, { recursive: true });
+  const previous = await readFile(config).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  });
+  try {
+    const agent = await invokeNative<{ path: string; revision: string }>("inspect_external_agent", {
+      path: executable,
+    });
+    await invokeNative("approve_external_agent", {
+      path: agent.path,
+      revision: agent.revision,
+      access: "configured",
+    });
+    await writeFile(config, '[mcp_servers.fixture]\ncommand = "/bin/true"\n');
+    await assert.rejects(
+      invokeNative("send_external_agent", {
+        path: agent.path,
+        revision: agent.revision,
+        access: "configured",
+        request: { instruction: "Recheck configured access." },
+      }),
+      /agentChanged/,
+    );
+    const changed = await invokeNative<{ revision: string; approved: string[] }>(
+      "inspect_external_agent",
+      { path: executable },
+    );
+    assert.notEqual(changed.revision, agent.revision);
+    assert.deepEqual(changed.approved, []);
+  } finally {
+    if (previous === null) await rm(config, { force: true });
+    else await writeFile(config, previous);
+    await invokeNative("forget_external_agent", { path: executable });
+  }
+});
+
+test("production Codex exec can write only to the native task copy and returns it on Stop", async () => {
+  const codex = process.env.MINT_SMOKE_CODEX;
+  const base = process.env.OPENAI_BASE_URL;
+  const home = process.env.CODEX_HOME;
+  assert.ok(codex && base && home, "the hosted smoke provides a native CLI and loopback receiver");
+  const endpoint = new URL(base);
+  assert.equal(endpoint.hostname, "127.0.0.1");
+  const fixture = await mkdtemp(join(dir, "codex-exec-"));
+  const manuscript = join(fixture, "draft.md");
+  const sibling = join(fixture, "private.md");
+  const input = "Unsaved manuscript in the task copy.";
+  const revision = "Complete edit waiting for review.";
+  await writeFile(manuscript, "Original disk bytes.");
+  await writeFile(sibling, "Private material.");
+  await mkdir(home, { recursive: true });
+  const auth = join(home, "auth.json");
+  await writeFile(auth, JSON.stringify({ OPENAI_API_KEY: "mint-smoke-fixture" }), { mode: 0o600 });
+  let toolOutput = "";
+  let sentTask = "";
+  let toolConnected = false;
+  let resolveTool: () => void = () => {};
+  const toolFinished = new Promise<void>((resolve) => {
+    resolveTool = resolve;
+  });
+  const receiver = createServer(async (request, response) => {
+    const path = new URL(request.url ?? "/", endpoint).pathname;
+    if (path === "/tool-network-probe") {
+      toolConnected = true;
+      response.writeHead(200).end();
+      return;
+    }
+    if (request.method === "GET" && path.endsWith("/models")) {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end('{"object":"list","data":[]}');
+      return;
+    }
+    if (request.method !== "POST" || !path.endsWith("/responses")) {
+      response.writeHead(404).end();
+      return;
+    }
+    let raw = "";
+    for await (const part of request) raw += part.toString();
+    const body = JSON.parse(raw) as {
+      input: { type: string; call_id?: string; output?: unknown }[];
+      tools: { name?: string }[];
+    };
+    const result = body.input.find(
+      ({ type, call_id }) => type === "function_call_output" && call_id === "mint-containment",
+    );
+    if (result) {
+      toolOutput = JSON.stringify(result.output);
+      resolveTool();
+      // Leave the second model call open so Stop interrupts a real exec turn.
+      return;
+    }
+    sentTask = JSON.stringify(body.input);
+    const tool = body.tools.find(({ name }) => name === "exec_command")?.name;
+    if (!tool) {
+      response.writeHead(422).end(JSON.stringify(body.tools.map(({ name }) => name)));
+      return;
+    }
+    const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+    const shell = [
+      `test "$(/bin/cat draft.md)" = ${quote(input)}`,
+      `! /bin/cat ${quote(manuscript)}`,
+      `! /bin/cat ${quote(sibling)}`,
+      `! (printf blocked > ${quote(manuscript)})`,
+      `! (printf blocked > ${quote(sibling)})`,
+      "test -x /usr/bin/curl",
+      `! /usr/bin/curl --silent --noproxy '*' --max-time 2 ${quote(new URL("/tool-network-probe", endpoint).href)}`,
+      `printf %s ${quote(revision)} > draft.md`,
+      "printf MINT_EXEC_BOUNDARY_PASSED",
+    ].join(" && ");
+    const events = [
+      { type: "response.created", response: { id: "resp_mint" } },
+      {
+        type: "response.output_item.done",
+        item: {
+          type: "function_call",
+          name: tool,
+          call_id: "mint-containment",
+          arguments: JSON.stringify({ cmd: shell, login: false }),
+        },
+      },
+      {
+        type: "response.completed",
+        response: {
+          id: "resp_mint",
+          usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+        },
+      },
+    ];
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    response.end(
+      events.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(""),
+    );
+  });
+  receiver.on("upgrade", (_request, socket) => {
+    // Codex uses its HTTP transport when the endpoint rejects a WebSocket with 426.
+    socket.end("HTTP/1.1 426 Upgrade Required\r\nContent-Length: 0\r\n\r\n");
+  });
+  await new Promise<void>((resolve, reject) => {
+    receiver.once("error", reject);
+    receiver.listen(Number(endpoint.port), endpoint.hostname, resolve);
+  });
+  try {
+    await restart([fixture, manuscript]);
+    const agent = await invokeNative<{ path: string; revision: string }>("inspect_external_agent", {
+      path: codex,
+    });
+    await invokeNative("approve_external_agent", {
+      path: agent.path,
+      revision: agent.revision,
+      access: "taskCopy",
+    });
+    const requestId = "native-codex-exec-boundary";
+    await command("POST", `/session/${session}/execute/sync`, {
+      script: `const internals = window.__TAURI_INTERNALS__;
+        const event = internals.transformCallback((message) => {
+          if (message.message?.kind === 'done') window.mintExecFixture = message.message;
+        });
+        window.mintExecFixture = null;
+        internals.invoke('send_external_agent', { ...arguments[0], onEvent: '__CHANNEL__:' + event })
+          .catch(error => { window.mintExecFixture = { error: String(error) }; });
+        return true;`,
+      args: [
+        {
+          path: agent.path,
+          revision: agent.revision,
+          access: "taskCopy",
+          requestId,
+          request: { instruction: "Edit the task copy.", taskCopy: "edit", selectedText: input },
+        },
+      ],
+    });
+    await Promise.race([
+      toolFinished,
+      new Promise<never>((_, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error(`Codex tool did not finish. Request: ${sentTask}`)),
+          25_000,
+        );
+        timer.unref();
+      }),
+    ]);
+    assert.match(toolOutput, /MINT_EXEC_BOUNDARY_PASSED/);
+    assert.equal(toolConnected, false);
+    assert.match(sentTask, /Edit the task copy/);
+    assert.doesNotMatch(sentTask, /Private material|Original disk bytes/);
+
+    const runs = join(
+      process.env.XDG_DATA_HOME ?? "",
+      "io.github.amemiya02.mint",
+      "ai",
+      "agent-runs",
+    );
+    const scratch = await readdir(runs);
+    assert.ok(scratch.length > 0);
+    for (const name of scratch) {
+      assert.equal((await stat(join(runs, name))).mode & 0o077, 0);
+    }
+    await invokeNative("stop_writing_request", { requestId });
+    const result = await until("the interrupted production Agent reply", () =>
+      command<{ reply?: { taskCopy: string; finishReason: string }; error?: string } | null>(
+        "POST",
+        `/session/${session}/execute/sync`,
+        { script: "return window.mintExecFixture;", args: [] },
+      ),
+    );
+    assert.equal(result.error, undefined);
+    assert.equal(result.reply?.finishReason, "stopped");
+    assert.equal(result.reply?.taskCopy, revision);
+    assert.deepEqual(await readdir(runs), []);
+    assert.equal(await readFile(manuscript, "utf8"), "Original disk bytes.");
+    assert.equal(await readFile(sibling, "utf8"), "Private material.");
+    await invokeNative("forget_external_agent", { path: agent.path });
+  } finally {
+    receiver.closeAllConnections();
+    await new Promise<void>((resolve) => receiver.close(() => resolve()));
+    await rm(auth, { force: true });
+  }
 });

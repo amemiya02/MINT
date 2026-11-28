@@ -128,11 +128,11 @@ test("a temporary session allows selective reversion before clearing its review 
   await editor.press("ControlOrMeta+S");
   await expect.poll(() => readFile(page, path)).toBe(retained);
 
-  const storedData = () =>
+  const storedTasks = () =>
     page.evaluate(() =>
-      Object.fromEntries((window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.appData),
+      (window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.writingTasks.list(null, true),
     );
-  expect(JSON.stringify(await storedData())).not.toContain(material);
+  expect(JSON.stringify(await storedTasks())).not.toContain(material);
   const versions = () =>
     page.evaluate(async (file) => {
       const platform = (window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__;
@@ -194,7 +194,7 @@ test("a temporary session allows selective reversion before clearing its review 
   await expect(allTasks.getByRole("button", { name: savedTask.title, exact: true })).toBeVisible();
   await expect(allTasks.getByRole("button", { name: instruction, exact: true })).toHaveCount(0);
   expect(await readFile(page, path)).toBe(retained);
-  const data = await storedData();
+  const data = await storedTasks();
   expect(JSON.stringify(data)).not.toContain(instruction);
   expect(JSON.stringify(data)).not.toContain(material);
   expect(await versions()).toEqual(history);

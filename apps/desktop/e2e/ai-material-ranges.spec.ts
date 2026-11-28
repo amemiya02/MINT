@@ -329,3 +329,47 @@ test("paste an image into Ask AI and transmit only the crop to the chosen visual
   expect(textRequests).toHaveLength(1);
   expect(received).toHaveLength(2);
 });
+
+test("draft source review opens the exact image crop sent for a claim", async ({ page }) => {
+  const claim = "The marked region is blue.";
+  let crop: string | undefined;
+  await page.route(endpoint, (route) => {
+    const content = route.request().postDataJSON().messages.at(-1).content;
+    const evidence = content.find((part: { type: string }) => part.type === "image_url");
+    const isDraft = content[0].text.includes("Write using the chart");
+    if (isDraft) crop = evidence.image_url.url;
+    const reply = isDraft
+      ? `${claim}\n\n<source-passages>[{"claim":"${claim}","material":1,"image":true}]</source-passages>`
+      : "green,yellow";
+    return route.fulfill({ json: { choices: [{ message: { content: reply } }] } });
+  });
+  await launch(page, { locale: "en-US" });
+  await page.getByRole("button", { name: "Draft with AI" }).click();
+  const draft = page.getByRole("form", { name: "Draft with AI" });
+  await draft.getByLabel("API address").fill(address);
+  await draft.getByLabel("Model name").fill("vision-fixture");
+  await draft.getByLabel("Drafting instruction").fill("Write using the chart.");
+  const context = draft.getByRole("group", { name: "Task context to send" });
+  await context.evaluate((element, png) => {
+    const transfer = new DataTransfer();
+    const bytes = Uint8Array.from(atob(png), (character) => character.charCodeAt(0));
+    transfer.items.add(new File([bytes], "chart.png", { type: "image/png" }));
+    element.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer: transfer }));
+  }, writingMaterialChart);
+  const image = context.getByRole("group", { name: "chart.png" });
+  await context.getByRole("button", { name: "Check image support" }).click();
+  await expect(context.getByText("Image support verified")).toBeVisible();
+  await image.getByLabel("Left (px)").fill("5");
+  await image.getByLabel("Top (px)").fill("1");
+  await image.getByLabel("Width (px)").fill("2");
+  await image.getByLabel("Height (px)").fill("2");
+  await image.getByLabel("Send as").selectOption({ label: "Image pixels" });
+  await image.getByRole("button", { name: "Use selected material" }).click();
+  await draft.getByRole("button", { name: "Generate draft" }).click();
+
+  const review = page.getByRole("region", { name: "Source passages" });
+  await review.getByRole("button", { name: claim, exact: true }).click();
+  const sent = review.getByRole("img", { name: /chart.png · x 5, y 1 · 2 × 2 px/ });
+  expect(crop).toMatch(/^data:image\/png;base64,/);
+  await expect(sent).toHaveAttribute("src", crop ?? "");
+});

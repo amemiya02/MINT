@@ -206,7 +206,14 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
   const opening = new Map<string, Promise<void>>();
   /** Ranges to select in tabs whose editor has not mounted yet. */
   const pendingSelections = new Map<number, DocumentLocation>();
-  const closeGuards = new Map<number, () => Promise<boolean>>();
+  const closeGuards = new Map<number, Set<() => Promise<boolean>>>();
+
+  async function canCloseTab(id: number) {
+    for (const guard of closeGuards.get(id) ?? []) {
+      if (!(await guard())) return false;
+    }
+    return true;
+  }
   let nextId = 1;
   /** Numbers untitled documents of this window (Untitled, Untitled 2, …). */
   let nextUntitled = 1;
@@ -664,8 +671,7 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
             ({ pane, documentId }) => pane === "primary" && documentId === tab.documentId,
           )
         ) {
-          const guard = closeGuards.get(tab.id);
-          if (guard && !(await guard())) return;
+          if (!(await canCloseTab(tab.id))) return;
         }
       }
       const id = state.selected.primary;
@@ -680,15 +686,17 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
     activateNext: () => step(1),
     activatePrevious: () => step(-1),
     registerCloseGuard(id, guard) {
-      closeGuards.set(id, guard);
+      const guards = closeGuards.get(id) ?? new Set();
+      guards.add(guard);
+      closeGuards.set(id, guards);
       return () => {
-        if (closeGuards.get(id) === guard) closeGuards.delete(id);
+        guards.delete(guard);
+        if (guards.size === 0 && closeGuards.get(id) === guards) closeGuards.delete(id);
       };
     },
 
     async close(id) {
-      const guard = closeGuards.get(id);
-      if (guard && !(await guard())) return false;
+      if (!(await canCloseTab(id))) return false;
       const tab = state.tabs.find((t) => t.id === id);
       if (!tab) return true;
       const lastView = !state.tabs.some((t) => t.id !== id && t.documentId === tab.documentId);

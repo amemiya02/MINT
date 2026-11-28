@@ -1,5 +1,6 @@
 import diffSequence from "@jest/diff-sequences";
 import { compareLines, rawLines } from "../tabs/line-diff.ts";
+import type { FolderBatchJournal } from "./folder-batch-journal.ts";
 import type { FolderChange } from "./folder-changes.ts";
 import type { WritingMethod } from "./saved-writing-skills.ts";
 import type { SourcePassage } from "./source-passages.ts";
@@ -77,6 +78,7 @@ export interface SavedWritingTask {
   readonly showSource: boolean;
   readonly taskPreferences?: readonly WritingPreference[];
   readonly turns: readonly SavedTurn[];
+  readonly folderJournal?: FolderBatchJournal;
   readonly pending?: Omit<SavedTurn, "reply" | "suggestions" | "direct" | "status">;
 }
 

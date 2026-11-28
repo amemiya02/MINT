@@ -16,10 +16,13 @@ use std::time::{Duration, Instant};
 use tauri::ipc::{Channel, JavaScriptChannelId};
 use tauri::{AppHandle, Manager, WebviewWindow};
 
+mod process;
 mod task_copy;
 
+use process::AgentProcess;
+
 const REGISTRY: &str = "external-agents.json";
-const POLICY_REVISION: &str = "codex-exec-1";
+const POLICY_REVISION: &str = "codex-exec-2";
 static REGISTRY_LOCK: Mutex<()> = Mutex::new(());
 const MAX_INPUT: usize = 256 * 1024;
 const MAX_OUTPUT: u64 = 8 * 1024 * 1024;
@@ -149,6 +152,8 @@ pub struct WritingReply {
     ignored_changes: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     file_changes: Option<Vec<task_copy::Change>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    finish_reason: Option<&'static str>,
 }
 
 #[derive(Serialize)]
@@ -176,7 +181,7 @@ pub struct ExternalAgent {
     supports_task_copy: bool,
 }
 
-fn inspect(path: &Path) -> Result<ExternalAgent, String> {
+fn inspect(app: &AppHandle, path: &Path) -> Result<ExternalAgent, String> {
     let unavailable = || UNAVAILABLE.to_owned();
     if !path.is_absolute() {
         return Err(unavailable());
@@ -213,13 +218,69 @@ fn inspect(path: &Path) -> Result<ExternalAgent, String> {
     };
     #[cfg(not(unix))]
     let identity = metadata.created().ok();
-    let revision = format!(
-        "{:x}",
-        Sha256::digest(format!(
-            "{POLICY_REVISION}\0{path:?}\0{identity:?}\0{modified:?}\0{}",
-            metadata.len()
-        ))
-    );
+    let mut revision = Sha256::new();
+    revision.update(format!(
+        "{POLICY_REVISION}\0{path:?}\0{identity:?}\0{modified:?}\0{}",
+        metadata.len()
+    ));
+    // Consent follows the configuration Codex can use for this task's scratch workdir.
+    // Hash the files rather than retaining their contents (which can include secrets).
+    let home = env::var_os("CODEX_HOME")
+        .map(PathBuf::from)
+        .or_else(|| app.path().home_dir().ok().map(|home| home.join(".codex")))
+        .filter(|path| path.is_absolute())
+        .ok_or_else(unavailable)?;
+    let mut config_roots = vec![home];
+    #[cfg(unix)]
+    config_roots.push(PathBuf::from("/etc/codex"));
+    #[cfg(windows)]
+    if let Some(program_data) = env::var_os("PROGRAMDATA") {
+        config_roots.push(PathBuf::from(program_data).join("OpenAI/Codex"));
+    }
+    let data = app_data_dir(app).map_err(|_| unavailable())?;
+    for directory in [&data, &env::temp_dir()] {
+        config_roots.extend(
+            directory
+                .ancestors()
+                .map(|ancestor| ancestor.join(".codex")),
+        );
+    }
+    for path in ["ai", "ai/tasks", "ai/temporary-tasks", "ai/agent-runs"] {
+        config_roots.push(data.join(path).join(".codex"));
+    }
+    config_roots.sort();
+    config_roots.dedup();
+    revision.update(format!("{:?}", cli_paths(app)));
+    for root in config_roots {
+        revision.update(format!("\0{root:?}"));
+        for name in [
+            "config.toml",
+            "requirements.toml",
+            "managed_config.toml",
+            "hooks.json",
+        ] {
+            let config = root.join(name);
+            revision.update(name);
+            match File::open(config) {
+                Ok(file) => {
+                    if !file.metadata().map_err(|_| unavailable())?.is_file() {
+                        return Err(unavailable());
+                    }
+                    let mut hash = Sha256::new();
+                    let limit = 4 * 1024 * 1024;
+                    let bytes = std::io::copy(&mut file.take(limit + 1), &mut hash)
+                        .map_err(|_| unavailable())?;
+                    if bytes > limit {
+                        return Err(unavailable());
+                    }
+                    revision.update(hash.finalize());
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(_) => return Err(unavailable()),
+            }
+        }
+    }
+    let revision = format!("{:x}", revision.finalize());
     Ok(ExternalAgent {
         path,
         revision,
@@ -294,7 +355,7 @@ pub async fn discover_external_agents(app: AppHandle) -> Result<Vec<PathBuf>, St
         let name = if cfg!(windows) { "codex.exe" } else { "codex" };
         let mut paths = Vec::new();
         for dir in cli_paths(&app) {
-            if let Ok(agent) = inspect(&dir.join(name)) {
+            if let Ok(agent) = inspect(&app, &dir.join(name)) {
                 if !paths.contains(&agent.path) {
                     paths.push(agent.path);
                 }
@@ -311,10 +372,15 @@ pub async fn saved_external_agents(app: AppHandle) -> Result<Vec<ExternalAgent>,
         let saved = registry(&app)?;
         Ok(saved
             .into_iter()
-            .map(|stored| match inspect(&stored.path) {
+            .map(|stored| match inspect(&app, &stored.path) {
                 Ok(current) if current.revision != stored.revision => current,
-                _ => ExternalAgent {
+                Ok(_) => ExternalAgent {
                     supports_task_copy: task_copy::SUPPORTED,
+                    ..stored
+                },
+                Err(_) => ExternalAgent {
+                    approved: Vec::new(),
+                    verified: Vec::new(),
                     ..stored
                 },
             })
@@ -328,7 +394,7 @@ pub async fn inspect_external_agent(
     app: AppHandle,
     path: PathBuf,
 ) -> Result<ExternalAgent, String> {
-    blocking(move || Ok(restore(inspect(&path)?, registry(&app)?))).await
+    blocking(move || Ok(restore(inspect(&app, &path)?, registry(&app)?))).await
 }
 
 #[tauri::command]
@@ -342,14 +408,14 @@ pub async fn approve_external_agent(
         if access == AgentAccess::TaskCopy && !task_copy::SUPPORTED {
             return Err(SANDBOX_UNAVAILABLE.to_owned());
         }
-        let mut current = inspect(&path)?;
+        let mut current = inspect(&app, &path)?;
         same_revision(&current, &revision)?;
         update_registry(&app, |records| {
             if let Some(index) = records
                 .iter()
                 .position(|stored| stored.path == current.path)
             {
-                current = restore(inspect(&path)?, vec![records.remove(index)]);
+                current = restore(inspect(&app, &path)?, vec![records.remove(index)]);
                 same_revision(&current, &revision)?;
             }
             if !current.approved.contains(&access) {
@@ -405,7 +471,7 @@ pub(crate) async fn send_external_agent(
     };
     let progress = on_event.clone();
     let result = blocking(move || {
-        let current = restore(inspect(&path)?, registry(&app)?);
+        let current = restore(inspect(&app, &path)?, registry(&app)?);
         same_revision(&current, &revision)?;
         if !current.approved.contains(&access) {
             return Err(ACCESS_REQUIRED.to_owned());
@@ -459,7 +525,8 @@ pub(crate) async fn send_external_agent(
                     && stored.approved.contains(&access)
             }) {
                 let mut stored = records.remove(index);
-                if (access != AgentAccess::TaskCopy || reply.task_copy.is_some())
+                if reply.finish_reason.is_none()
+                    && (access != AgentAccess::TaskCopy || reply.task_copy.is_some())
                     && !stored.verified.contains(&access)
                 {
                     stored.verified.push(access);
@@ -511,12 +578,7 @@ fn run_codex(
     let workspace = fs::canonicalize(scratch.path()).map_err(|_| failed())?;
     let (copy, input) = if file_access {
         let spool = fs::canonicalize(private.path()).map_err(|_| failed())?;
-        task_copy::verify(
-            codex_command(path, &paths, true),
-            &workspace,
-            &spool,
-            stopped,
-        )?;
+        task_copy::verify(codex_command(path, &paths), &workspace, &spool, stopped)?;
         if request.task_copy.is_some() || request.folder_documents.is_some() {
             let (copy, input) = task_copy::TaskCopy::stage(&workspace, request)?;
             (Some(copy), input)
@@ -531,7 +593,7 @@ fn run_codex(
     let output = tempfile::NamedTempFile::new_in(private.path()).map_err(|_| failed())?;
     let stdout = output.reopen().map_err(|_| failed())?;
     let mut reader = BufReader::new(output.reopen().map_err(|_| failed())?);
-    let mut command = codex_command(path, &paths, file_access);
+    let mut command = codex_command(path, &paths);
     command.args([
         "--ask-for-approval",
         "never",
@@ -553,14 +615,13 @@ fn run_codex(
     if stopped.load(Ordering::Relaxed) {
         return Err("stopped".to_owned());
     }
-    let mut child = command
+    command
         .arg("-")
         .current_dir(workspace.as_path())
         .stdin(Stdio::from(stdin))
         .stdout(Stdio::from(stdout))
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|_| failed())?;
+        .stderr(Stdio::null());
+    let mut child = AgentProcess::spawn(&mut command).map_err(|_| failed())?;
     let start = Instant::now();
     let mut output = AgentOutput::default();
     let result = loop {
@@ -577,67 +638,60 @@ fn run_codex(
         match status {
             Err(error) => break Err(error),
             Ok(Some(status)) => {
-                break match output.text {
-                    Some(text) if status.success() && output.completed => Ok(text),
-                    None if status.success() && output.completed && copy.is_some() => {
+                break if status.success() && output.completed {
+                    if let Some(text) = output.text.take() {
+                        Ok(text)
+                    } else if copy.is_some() {
                         Ok(String::new())
+                    } else {
+                        Err(failed())
                     }
-                    Some(_) => Err("interrupted".to_owned()),
-                    None => Err(failed()),
+                } else if output.text.is_some() {
+                    Err("interrupted".to_owned())
+                } else {
+                    Err(failed())
                 };
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(40)),
         }
     };
-    if file_access || result.is_err() {
-        stop_child(&mut child, file_access);
-    }
-    let text = result?;
+    // Reap tools before inspecting the task copy or dropping its scratch directory.
+    drop(child);
     let (task_copy, file_changes, ignored) = match copy {
         Some(copy) => copy.result()?,
         None => (None, None, false),
+    };
+    let (text, finish_reason) = match result {
+        Ok(text) => (text, None),
+        Err(error)
+            if task_copy.is_some()
+                || file_changes.as_ref().is_some_and(|items| !items.is_empty()) =>
+        {
+            (
+                output.text.unwrap_or_default(),
+                Some(match error.as_str() {
+                    "stopped" => "stopped",
+                    _ => "interrupted",
+                }),
+            )
+        }
+        Err(error) => return Err(error),
     };
     Ok(WritingReply {
         text,
         task_copy,
         file_changes,
         ignored_changes: ignored.then_some(true),
+        finish_reason,
     })
 }
 
-fn codex_command(path: &Path, paths: &[PathBuf], isolate_children: bool) -> Command {
+fn codex_command(path: &Path, paths: &[PathBuf]) -> Command {
     let mut command = Command::new(path);
     if let Ok(path_env) = env::join_paths(paths) {
         command.env("PATH", path_env);
     }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
-    #[cfg(unix)]
-    if isolate_children {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-    #[cfg(not(unix))]
-    let _ = isolate_children;
     command
-}
-
-fn stop_child(child: &mut std::process::Child, isolate_children: bool) {
-    #[cfg(unix)]
-    if isolate_children {
-        // The child started a separate process group. Stop its sandbox/tool descendants too.
-        if let Ok(group) = i32::try_from(child.id()) {
-            unsafe { libc::kill(-group, libc::SIGKILL) };
-        }
-    }
-    #[cfg(not(unix))]
-    let _ = isolate_children;
-    let _ = child.kill();
-    let _ = child.wait();
 }
 
 #[derive(Default)]

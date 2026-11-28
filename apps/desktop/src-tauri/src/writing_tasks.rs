@@ -198,6 +198,17 @@ pub fn relocate(
     Ok(())
 }
 
+fn private_agent_directory(prefix: &'static str) -> tempfile::Builder<'static, 'static> {
+    let mut builder = tempfile::Builder::new();
+    builder.prefix(prefix);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        builder.permissions(fs::Permissions::from_mode(0o700));
+    }
+    builder
+}
+
 pub struct AgentScratch {
     scratch: Option<tempfile::TempDir>,
     task: Option<PathBuf>,
@@ -211,21 +222,17 @@ impl AgentScratch {
 
     pub fn private_spool(&self, task_copy: bool) -> io::Result<tempfile::TempDir> {
         if task_copy {
-            return tempfile::Builder::new()
-                .prefix(".agent-private-")
-                .tempdir_in(
-                    self.path()
-                        .parent()
-                        .ok_or_else(|| io::Error::other("missing task directory"))?,
-                );
+            return private_agent_directory(".agent-private-").tempdir_in(
+                self.path()
+                    .parent()
+                    .ok_or_else(|| io::Error::other("missing task directory"))?,
+            );
         }
         // Keep input and output outside the working directory. The temporary task
         // owns them so closing it can also clear files left by an interrupted run.
         match self.task.as_ref().filter(|_| self.temporary) {
-            Some(directory) => tempfile::Builder::new()
-                .prefix(".agent-private-")
-                .tempdir_in(directory),
-            None => tempfile::tempdir(),
+            Some(directory) => private_agent_directory(".agent-private-").tempdir_in(directory),
+            None => private_agent_directory(".agent-").tempdir(),
         }
     }
 }
@@ -250,9 +257,9 @@ pub fn agent_scratch(
         let scratch = if task_copy {
             let directory = root(app, AGENT_RUNS)?;
             fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
-            tempfile::tempdir_in(directory)
+            private_agent_directory(".agent-").tempdir_in(directory)
         } else {
-            tempfile::tempdir()
+            private_agent_directory(".agent-").tempdir()
         };
         return Ok(AgentScratch {
             scratch: Some(scratch.map_err(|error| error.to_string())?),
@@ -274,8 +281,7 @@ pub fn agent_scratch(
     {
         return Err("writing task cannot start an Agent run".to_owned());
     }
-    let scratch = tempfile::Builder::new()
-        .prefix(".agent-")
+    let scratch = private_agent_directory(".agent-")
         .tempdir_in(&directory)
         .map_err(|error| error.to_string())?;
     active.push(directory.clone());

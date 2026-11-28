@@ -5,7 +5,6 @@ import {
   useCallback,
   useEffect,
   useEffectEvent,
-  useId,
   useMemo,
   useRef,
   useState,
@@ -20,11 +19,11 @@ import { useModalDialog } from "../window/useModalDialog.ts";
 import { FocusedWritingReview, type ReviewEntry } from "./FocusedWritingReview.tsx";
 import { FolderWritingReview } from "./FolderWritingReview.tsx";
 import {
-  isFolderDocumentPath,
-  planFolderChanges,
-  revertFolderBatch,
-  writeFolderBatch,
-} from "./folder-changes.ts";
+  type FolderBatchJournal,
+  reconcileFolderBatch,
+  runFolderBatch,
+} from "./folder-batch-journal.ts";
+import { isFolderDocumentPath, planFolderChanges } from "./folder-changes.ts";
 import {
   type MaterialPlan,
   MaterialPlanPreview,
@@ -61,6 +60,7 @@ import {
   TaskContextChecklist,
   useNamedMaterials,
 } from "./TaskContext.tsx";
+import { TemporarySessionClose } from "./TemporarySessionClose.tsx";
 import {
   largeWritingSelection,
   useWritingCallLimit,
@@ -652,6 +652,8 @@ function Composer({
   const reviewScroll = useRef(restored?.task.reviewScroll ?? 0);
   const readingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pending = useRef(restored?.task.pending);
+  const folderJournal = useRef(restored?.task.folderJournal);
+  const finishedBatch = useRef<Turn["folderChanges"]>(undefined);
   const heading = useRef<HTMLSpanElement>(null);
   const openingChanges = useRef(false);
   const mounted = useRef(true);
@@ -811,6 +813,7 @@ function Composer({
         showSource,
         taskPreferences: taskPreferences.length ? taskPreferences : undefined,
         pending: pending.current,
+        folderJournal: folderJournal.current,
         turns: turns.map((turn) => ({
           ...turn,
           suggestions: turn.suggestions?.map((item) => ({
@@ -823,17 +826,22 @@ function Composer({
     [origin, path, reviewSelection, showSource, taskPreferences, turns],
   );
 
-  const persist = useCallback(
-    (taskTitle = title) => {
-      if (temporary || !taskTitle || !ready) return;
-      const record = snapshot(taskTitle);
-      void writeTaskCheckpoint(platform.writingTasks, async () => {
+  const saveRecord = useCallback(
+    (record: SavedWritingTask) =>
+      writeTaskCheckpoint(platform.writingTasks, async () => {
         const previous = savedAt.current;
         if (previous === undefined) return;
         const updatedAt = Math.max(previous + 1, record.updatedAt);
         await platform.writingTasks.update({ ...record, updatedAt }, previous);
         savedAt.current = updatedAt;
-      }).then(
+      }),
+    [platform],
+  );
+
+  const persist = useCallback(
+    (taskTitle = title) => {
+      if (temporary || !taskTitle || !ready) return;
+      void saveRecord(snapshot(taskTitle)).then(
         () => {
           if (mounted.current) setSaveFailed(false);
         },
@@ -842,8 +850,19 @@ function Composer({
         },
       );
     },
-    [platform, ready, snapshot, temporary, title],
+    [ready, saveRecord, snapshot, temporary, title],
   );
+
+  async function journalFolderMutation(taskTitle: string, journal: FolderBatchJournal) {
+    if (savedAt.current === undefined) throw new Error("Writing task has no checkpoint");
+    folderJournal.current = journal;
+    try {
+      await saveRecord(snapshot(taskTitle));
+    } catch (error) {
+      if (mounted.current) setSaveFailed(true);
+      throw error;
+    }
+  }
 
   const saveCheckpoint = useEffectEvent(persist);
   const saveReadingSoon = useEffectEvent(() => queueReadingSave());
@@ -866,22 +885,35 @@ function Composer({
   useEffect(() => {
     mounted.current = true;
     const tracked = trackedSuggestions.current;
+    let current = true;
     if (restored) {
       const { task, mapper } = restored;
-      setTurns(
-        task.turns.map((turn) => ({
-          ...turn,
-          suggestions: turn.suggestions?.map((item) => {
-            const range = restoreRange(
-              origin.editor,
-              mapper.range(item.range),
-              item.status === "preview" ? proposedEditTracking : undefined,
-            );
-            tracked.add(range);
-            return { ...item, range };
-          }),
-        })),
-      );
+      async function restoreTurns() {
+        const savedTurns = task.folderJournal
+          ? await reconcileFolderBatch(platform, task.folderJournal, task.turns)
+          : task.turns;
+        if (!current) return;
+        if (task.folderJournal) {
+          folderJournal.current = undefined;
+          pending.current = undefined;
+        }
+        setTurns(
+          savedTurns.map((turn) => ({
+            ...turn,
+            suggestions: turn.suggestions?.map((item) => {
+              const range = restoreRange(
+                origin.editor,
+                mapper.range(item.range),
+                item.status === "preview" ? proposedEditTracking : undefined,
+              );
+              tracked.add(range);
+              return { ...item, range };
+            }),
+          })),
+        );
+        setReady(true);
+      }
+      void restoreTurns();
       if (restored.restoreReading) {
         origin.editor.restoreReadingPosition({
           anchor: mapper.point(task.reading.anchor),
@@ -890,9 +922,9 @@ function Composer({
         });
       }
       if (review.current) review.current.scrollTop = reviewScroll.current;
-      setReady(true);
     }
     return () => {
+      current = false;
       mounted.current = false;
       flushReadingCheckpoint();
       taskRunning.current = false;
@@ -902,11 +934,18 @@ function Composer({
       for (const range of tracked) range.release();
       tracked.clear();
     };
-  }, [origin, restored, taskRunning]);
+  }, [origin, platform, restored, taskRunning]);
 
   useEffect(() => {
+    if (
+      finishedBatch.current &&
+      turns.some((turn) => turn.folderChanges === finishedBatch.current)
+    ) {
+      finishedBatch.current = undefined;
+      folderJournal.current = undefined;
+    }
     persist();
-  }, [persist]);
+  }, [persist, turns]);
 
   useEffect(() => {
     onBusyChange(busy ? origin.id : null);
@@ -1729,6 +1768,7 @@ function Composer({
     let status: AttemptStatus;
     let trialReply: WritingReply | undefined;
     let finalReplacement: string | undefined;
+    let completedCopy: string | undefined;
     let folderChanges: Turn["folderChanges"];
     let ignoredChanges: boolean | undefined;
     let capacityRejected = false;
@@ -1843,7 +1883,7 @@ function Composer({
       status = signal.aborted ? "stopped" : replyStatus(result);
       if (
         !task.trial &&
-        status === "complete" &&
+        (status === "complete" || result.fileChanges?.length) &&
         origin.folder &&
         task.request.folderDocuments &&
         task.folderPaths
@@ -1857,16 +1897,32 @@ function Composer({
           task.request.folderWriteTargets,
           task.folderDiskBaselines,
         );
-        if (task.action === "direct" && task.request.folderWriteTargets) {
+        if (status === "complete" && task.action === "direct" && task.request.folderWriteTargets) {
           writingBatch.current = true;
           try {
-            folderChanges = await writeFolderBatch(
+            folderChanges = await runFolderBatch({
               platform,
               store,
-              origin.folder,
-              folderChanges,
+              root: origin.folder,
+              turn: {
+                ...submitted,
+                reply: text,
+                context: sentContext,
+                toolOutcome: toolApproval.result(),
+                method: task.method,
+                direct: true,
+                ignoredChanges,
+                folderChanges,
+                status: "interrupted",
+              },
+              turnIndex: turns.length,
+              operation: "write",
               signal,
-            );
+              checkpoint: temporary
+                ? undefined
+                : (journal) => journalFolderMutation(taskTitle, journal),
+            });
+            finishedBatch.current = folderChanges;
             setFolderRevision((revision) => revision + 1);
           } finally {
             writingBatch.current = false;
@@ -1874,6 +1930,8 @@ function Composer({
         }
       }
       if (task.trial) trialReply = result;
+      else if (editing && !task.request.folderDocuments)
+        completedCopy = result.taskCopy ?? undefined;
       if (editing && status === "complete" && !task.request.folderDocuments)
         finalReplacement = replacementFromReply(result);
     } catch (problem) {
@@ -1908,7 +1966,8 @@ function Composer({
     const canApplyDirectly =
       status === "complete" && task.action === "direct" && task.seen.size === 0;
     const progress = splitWritingProgress(text, editing && !fileEdit);
-    const replacement = status === "complete" ? finalReplacement : progress.replacement;
+    const replacement =
+      status === "complete" ? finalReplacement : (completedCopy ?? progress.replacement);
     const hasFinishedReply = status === "complete" || status === "callLimit";
     const partial = hasFinishedReply ? "" : progress.partial;
     const edits =
@@ -2370,6 +2429,22 @@ function Composer({
     );
   }
 
+  function renderSentHistory(history: WritingRequest["history"]) {
+    if (!history?.length) return null;
+    return (
+      <details className="text-xs">
+        <summary>{t("writing.compare.history")}</summary>
+        {history.map(({ instruction, reply }, position) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: The outgoing messages are in send order.
+          <div key={position} className="whitespace-pre-wrap wrap-anywhere">
+            <p className="font-medium">{instruction}</p>
+            <p>{reply}</p>
+          </div>
+        ))}
+      </details>
+    );
+  }
+
   function renderWriteTargets(targets: readonly string[]) {
     if (!targets.length) return null;
     return (
@@ -2395,10 +2470,17 @@ function Composer({
     taskRunning.current = true;
     setFolderWriting(true);
     try {
-      const changes =
-        operation === "write"
-          ? await writeFolderBatch(platform, store, origin.folder, turn.folderChanges)
-          : await revertFolderBatch(platform, store, origin.folder, turn.folderChanges, position);
+      const changes = await runFolderBatch({
+        platform,
+        store,
+        root: origin.folder,
+        turn: { ...turn, suggestions: undefined },
+        turnIndex: index,
+        operation,
+        position,
+        checkpoint: temporary ? undefined : (journal) => journalFolderMutation(title, journal),
+      });
+      finishedBatch.current = changes;
       setTurns((previous) =>
         previous.map((item, turnIndex) =>
           turnIndex === index ? { ...item, folderChanges: changes } : item,
@@ -2654,18 +2736,7 @@ function Composer({
                           </pre>
                         </details>
                       )}
-                      {!!history?.length && (
-                        <details className="text-xs">
-                          <summary>{t("writing.compare.history")}</summary>
-                          {history.map(({ instruction, reply }, position) => (
-                            // biome-ignore lint/suspicious/noArrayIndexKey: The saved messages are in fixed send order.
-                            <div key={position} className="whitespace-pre-wrap wrap-anywhere">
-                              <p className="font-medium">{instruction}</p>
-                              <p>{reply}</p>
-                            </div>
-                          ))}
-                        </details>
-                      )}
+                      {renderSentHistory(history)}
                     </div>
                   ),
                 )}
@@ -2972,6 +3043,25 @@ function Composer({
                   }
                   recipient={labelFor(otherConnection)}
                 />
+              )}
+              {otherConnection && (
+                <>
+                  {renderAgentAccess(otherConnection)}
+                  {renderWriteTargets(attempt.task.request.folderWriteTargets ?? [])}
+                  {renderSentContext(undefined, undefined, attempt.task.request.folderDocuments)}
+                  {(attempt.task.fixedRequests ?? [attempt.task.request]).map((request, index) => (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: Requests are in send order.
+                    <div key={index}>
+                      <details className="text-xs">
+                        <summary>{t("writing.compare.instructions")}</summary>
+                        <pre className="max-h-32 overflow-auto whitespace-pre-wrap wrap-anywhere">
+                          {request.instruction}
+                        </pre>
+                      </details>
+                      {renderSentHistory(request.history)}
+                    </div>
+                  ))}
+                </>
               )}
               {retryHasImages && otherVision && <VisionControl check={otherVision} />}
               {retryHasImages && otherConnection && !otherVision && (
@@ -3439,61 +3529,6 @@ function WritingComparison({
           <p className="text-xs wrap-anywhere">{alternative}</p>
           {alternativeContent}
         </section>
-      </div>
-    </dialog>
-  );
-}
-
-function TemporarySessionClose({
-  busy,
-  closing,
-  failed,
-  onCancel,
-  onReview,
-  onConfirm,
-}: {
-  readonly busy: boolean;
-  readonly closing: boolean;
-  readonly failed: boolean;
-  readonly onCancel: () => void;
-  readonly onReview?: () => void;
-  readonly onConfirm: () => void;
-}) {
-  const t = useT();
-  const { props, close } = useModalDialog(onCancel);
-  const description = useId();
-  return (
-    <dialog
-      {...props}
-      onCancel={(event) => {
-        if (closing) event.preventDefault();
-        else props.onCancel(event);
-      }}
-      aria-label={t("writing.temporary.close")}
-      aria-describedby={description}
-      className="m-auto max-h-[85vh] w-[min(28rem,90vw)] space-y-3 overflow-auto rounded-lg border border-(--mint-border) bg-(--mint-bg) p-4 text-(--mint-fg) backdrop:bg-black/30"
-    >
-      <h2 className="font-medium">{t("writing.temporary.close")}</h2>
-      <p id={description}>{t("writing.temporary.closePrompt")}</p>
-      {busy && <p>{t("writing.temporary.wait")}</p>}
-      {failed && <p role="alert">{t("writing.temporary.cleanupFailed")}</p>}
-      <div className="flex flex-wrap gap-2">
-        <button type="button" className={buttonClass} disabled={closing} onClick={close}>
-          {t("unsaved.cancel")}
-        </button>
-        {onReview && (
-          <button type="button" className={buttonClass} disabled={closing} onClick={onReview}>
-            {t("writing.viewChanges")}
-          </button>
-        )}
-        <button
-          type="button"
-          className={buttonClass}
-          disabled={busy || closing}
-          onClick={onConfirm}
-        >
-          {t("writing.temporary.close")}
-        </button>
       </div>
     </dialog>
   );

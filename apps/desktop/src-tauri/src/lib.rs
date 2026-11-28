@@ -7,6 +7,7 @@ mod assets;
 mod document_edit;
 mod external_agent;
 mod folder;
+mod folder_edit;
 mod fs;
 mod grants;
 mod history;
@@ -473,43 +474,55 @@ async fn apply_document_edit(
     root: Option<PathBuf>,
 ) -> Result<(), String> {
     blocking(move || {
-        if let Some(root) = &root {
-            let grants = app.state::<Grants>();
-            granted(&grants, root)?;
-            for path in [&from, &to] {
-                let resolved = grants.check(path).map_err(|e| e.to_string())?;
-                document_edit::check_folder_path(root, path, &resolved)
+        let describe = |error| format!("{} → {}: {error}", from.display(), to.display());
+        match root {
+            Some(root) => {
+                let canonical = app
+                    .state::<Grants>()
+                    .check(&root)
                     .map_err(|e| e.to_string())?;
+                let relative_from = from.strip_prefix(&root).map_err(|e| e.to_string())?;
+                let relative_to = to.strip_prefix(&root).map_err(|e| e.to_string())?;
+                if before.is_none() && from != to {
+                    return Err("missing document baseline".into());
+                }
+                let edit = folder_edit::Edit::prepare(
+                    &canonical,
+                    relative_from,
+                    relative_to,
+                    after.is_some(),
+                )
+                .map_err(describe)?;
+                let commit = || {
+                    edit.commit(
+                        before.as_deref().map(str::as_bytes),
+                        after.as_deref().map(str::as_bytes),
+                    )
+                };
+                if from == to {
+                    commit().map_err(describe)
+                } else {
+                    let data = app_data_dir(&app)?;
+                    writing_tasks::relocate(&app, &from, &to, || {
+                        history::relocate(
+                            &data,
+                            &canonical.join(relative_from),
+                            &canonical.join(relative_to),
+                            commit,
+                        )
+                    })
+                    .map_err(describe)
+                }
+            }
+            None => {
+                let before = before.ok_or("missing document baseline")?;
+                let after = after.ok_or("missing document result")?;
+                relocate_entry(&app, &from, &to, || {
+                    document_edit::apply(&from, &to, before.as_bytes(), after.as_bytes())
+                })
+                .map_err(|error| format!("{} → {}: {error}", from.display(), to.display()))
             }
         }
-        let apply = || match (before.as_deref(), after.as_deref()) {
-            (Some(before), Some(after)) => {
-                document_edit::apply(&from, &to, before.as_bytes(), after.as_bytes())
-            }
-            (None, Some(after)) if root.is_some() && from == to => {
-                document_edit::create(&to, after.as_bytes())
-            }
-            _ => Err(std::io::Error::other("missing document baseline")),
-        };
-        if let (Some(_), Some(before), None) = (&root, &before, &after) {
-            if from != to {
-                return Err("cannot remove a document at a different destination".into());
-            }
-            document_edit::remove_checked(&from, before.as_bytes())
-                .map_err(|e| format!("{}: {e}", from.display()))?;
-            if let Some(parent) = from.parent() {
-                fs::sync_dir(parent);
-            }
-            return Ok(());
-        }
-        relocate_entry(&app, &from, &to, || {
-            if root.is_some() {
-                document_edit::with_destination(&to, apply)
-            } else {
-                apply()
-            }
-        })
-        .map_err(|e| format!("{} → {}: {e}", from.display(), to.display()))
     })
     .await
 }

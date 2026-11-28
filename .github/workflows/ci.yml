@@ -223,6 +223,9 @@ jobs:
             timeout 15s secret-tool clear mint-smoke setup
             gdbus call --session --dest org.a11y.Bus --object-path /org/a11y/bus --method org.a11y.Bus.GetAddress
             gdbus call --session --dest org.a11y.Bus --object-path /org/a11y/bus --method org.freedesktop.DBus.Properties.Set org.a11y.Status IsEnabled "<true>"
+            # The real Codex exec smoke talks only to the suite’s loopback Responses fixture.
+            export CODEX_HOME="$HOME/.codex" OPENAI_BASE_URL=http://127.0.0.1:8476/v1
+            export OPENAI_API_KEY=mint-smoke-fixture
             tauri-driver &
             driver_pid=$!
             cleanup() {

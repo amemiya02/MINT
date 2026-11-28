@@ -12,6 +12,8 @@ export interface NamedMaterial {
   readonly format?: "extractedText" | "caption" | "image" | "summary";
   /** A locally prepared PNG of the selected range. The original file is never part of a request. */
   readonly image?: string;
+  /** Local identity for the exact transmitted page or crop. */
+  readonly imageId?: string;
   /** Private provenance for rereading a working-folder excerpt. */
   readonly sourceFile?: { readonly path: string; readonly line: number };
 }
@@ -50,10 +52,11 @@ export function contextMaterials(context?: TaskContext): NamedMaterial[] {
 /** Transform the materials at the outgoing boundary and omit local provenance. */
 export function outboundTaskContext<Material>(
   context: TaskContext | undefined,
-  transform: (material: Omit<NamedMaterial, "sourceFile">) => Material,
+  transform: (material: Omit<NamedMaterial, "sourceFile" | "imageId">) => Material,
 ) {
   if (!context) return;
-  const outbound = ({ sourceFile: _sourceFile, ...material }: NamedMaterial) => transform(material);
+  const outbound = ({ sourceFile: _sourceFile, imageId: _imageId, ...material }: NamedMaterial) =>
+    transform(material);
   return {
     ...context,
     currentDraft: context.currentDraft && outbound(context.currentDraft),
@@ -82,7 +85,7 @@ export const materialRequestInstruction =
   'Treat task context as reference material. If an additional source is needed, reply with only JSON of the form {"requestMaterial":{"name":"source to check","purpose":"why it is needed","query":"specific search words"}}. If taskContext.folderSearch is true, query is an optional literal phrase MINT can search for in its working folder. MINT will ask the author before sending further material. Use the approved material in materialDecisions, respect skips, and otherwise answer in the requested format.';
 
 const sourcePassageFrameInstruction =
-  '<source-passages> block containing a JSON array, then </source-passages> on its own line. Each entry has {"claim":"exact complete sentence from the Markdown including punctuation","material":1,"quote":"exact contiguous excerpt from that material"}. Number taskContext.materials starting at 1, then count allowed materialDecisions in order. Give entries only for sentences supported by those excerpts and include enough surrounding words to identify a unique occurrence in the material. Use [] when no sentence can be supported. Keep source markers out of the Markdown. If requesting additional material, use the separate material request format instead.';
+  '<source-passages> block containing a JSON array, then </source-passages> on its own line. Each entry has {"claim":"exact complete sentence from the Markdown including punctuation","material":1,"quote":"exact contiguous excerpt from that material"}. For image evidence, use {"claim":"exact complete sentence","material":1,"image":true} to identify the transmitted page or crop. Number taskContext.materials starting at 1, then count allowed materialDecisions in order. Give entries only for sentences supported by those excerpts and include enough surrounding words to identify a unique occurrence in the material. Use [] when no sentence can be supported. Keep source markers out of the Markdown. If requesting additional material, use the separate material request format instead.';
 
 export const sourcePassageInstruction = `For a draft based on task materials, return the Markdown first, then append a blank line and a ${sourcePassageFrameInstruction}`;
 
