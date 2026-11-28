@@ -12,6 +12,7 @@ import {
 import { useT } from "../i18n/index.ts";
 import type { Platform } from "../platform/platform.ts";
 import { useTabStore } from "../tabs/context.ts";
+import { FocusedWritingReview, type ReviewEntry } from "./FocusedWritingReview.tsx";
 import { MaterialRequestNotice, useMaterialRequests } from "./MaterialRequest.tsx";
 import { ProposedSelectionEdit } from "./ProposedSelectionEdit.tsx";
 import { ReplyExcerpt } from "./ReplyExcerpt.tsx";
@@ -107,6 +108,14 @@ function restoreRange(editor: MintEditor, range: ReviewRange): Origin["range"] {
 function currentText({ range }: Suggestion, draft: string) {
   const { from, to } = range.current();
   return draft.slice(from, to);
+}
+
+function reviewStatus(suggestion: Suggestion, draft: string) {
+  return suggestion.batchApplied &&
+    suggestion.status === "applied" &&
+    currentText(suggestion, draft) === suggestion.before
+    ? "preview"
+    : suggestion.status;
 }
 
 function canRevert(suggestion: Suggestion) {
@@ -422,6 +431,8 @@ function Composer({
   const checkingDisk = useRef(false);
   const trackedSuggestions = useRef(new Set<TrackedRange>());
   const [showSource, setShowSource] = useState(restored?.task.showSource ?? false);
+  const [focusedReview, setFocusedReview] = useState(false);
+  const reading = useRef<ReturnType<MintEditor["captureReadingPosition"]> | null>(null);
   const [draft, setDraft] = useState(() => origin.editor.getText());
   const recipient = recipients.find((candidate) => candidate.id === recipientId);
   const labelFor = (candidate: WritingRecipient) =>
@@ -448,7 +459,10 @@ function Composer({
         updatedAt: Date.now(),
         baseline: editor.getText(),
         origin: { ...savedRange(origin.range), text: origin.text },
-        reading: { ...editor.getSelection(), top: editor.getVisibleRange().from },
+        reading: reading.current?.current() ?? {
+          ...editor.getSelection(),
+          top: editor.getVisibleRange().from,
+        },
         reviewScroll: reviewScroll.current,
         showSource,
         pending: pending.current,
@@ -456,10 +470,7 @@ function Composer({
           ...turn,
           suggestions: turn.suggestions?.map((item) => ({
             ...item,
-            range:
-              item.status === "preview" || canRevert(item)
-                ? savedRange(item.range)
-                : { from: 0, to: 0, located: false },
+            range: savedRange(item.range),
           })),
         })),
       };
@@ -535,6 +546,7 @@ function Composer({
       flushReadingCheckpoint();
       taskRunning.current = false;
       controller.current?.abort();
+      reading.current?.release();
       for (const range of tracked) range.release();
       tracked.clear();
     };
@@ -615,6 +627,19 @@ function Composer({
     origin.editor.focus();
   }
 
+  function openFocusedReview() {
+    reading.current ??= origin.editor.captureReadingPosition();
+    setFocusedReview(true);
+  }
+
+  function closeFocusedReview() {
+    reading.current?.restore();
+    reading.current?.release();
+    reading.current = null;
+    setFocusedReview(false);
+    close();
+  }
+
   function locate() {
     const { from, to } = origin.range.current();
     if (from === to) {
@@ -629,15 +654,20 @@ function Composer({
     if (trackedSuggestions.current.delete(range)) range.release();
   }
 
+  function retrackSuggestion(suggestion: Suggestion, range: TextRange) {
+    releaseRange(suggestion.range);
+    const tracked = origin.editor.trackRange(range);
+    trackedSuggestions.current.add(tracked);
+    return tracked;
+  }
+
   function recordApplied(
     suggestion: Suggestion,
     range: TextRange,
     appliedText: string,
     before = suggestion.before,
   ): Suggestion {
-    releaseRange(suggestion.range);
-    const tracked = origin.editor.trackRange(range);
-    trackedSuggestions.current.add(tracked);
+    const tracked = retrackSuggestion(suggestion, range);
     return { ...suggestion, range: tracked, appliedText, before, status: "applied" };
   }
 
@@ -701,7 +731,6 @@ function Composer({
       });
       origin.editor.replaceRanges(replacements, { lineEndings: "preserve" });
       const reverted = new Set(replacements.map(({ id }) => id));
-      for (const { id, range } of suggestions) if (reverted.has(id)) releaseRange(range);
       setTurns((previous) =>
         previous.map((turn, i) =>
           i === index
@@ -722,10 +751,29 @@ function Composer({
   }
 
   function preview(edits: SelectionEdit[]): Suggestion[] {
+    const live = origin.editor.getText();
     return edits.map((edit) => {
       const range = origin.range.trackSubrange(edit);
       trackedSuggestions.current.add(range);
-      return { id: edit.from, before: edit.before, after: edit.after, range, status: "preview" };
+      const target = range.current();
+      const surrounding =
+        range.hasBoundaries() && live.slice(target.from, target.to) === edit.before
+          ? origin.editor.getComparisonBlock(target)
+          : null;
+      return {
+        id: edit.from,
+        before: edit.before,
+        after: edit.after,
+        range,
+        status: "preview",
+        ...(surrounding && {
+          block: {
+            kind: surrounding.kind,
+            prefix: live.slice(surrounding.from, target.from),
+            suffix: live.slice(target.to, surrounding.to),
+          },
+        }),
+      };
     });
   }
 
@@ -749,38 +797,95 @@ function Composer({
     position: number,
     suggestion: Suggestion,
     acceptedText?: string,
+    keepReviewFocus = false,
   ) {
-    if (busy || checkingDisk.current || suggestion.status !== "preview") return;
-    let update: Partial<Suggestion> = { status: "discarded" };
+    if (busy || checkingDisk.current || reviewStatus(suggestion, draft) !== "preview") return false;
+    let update: Partial<Suggestion> = { status: "discarded", batchApplied: false };
     if (acceptedText !== undefined) {
       checkingDisk.current = true;
       try {
-        if (!(await refreshDisk()) || !mounted.current || !suggestion.range.hasBoundaries()) return;
+        if (!(await refreshDisk()) || !mounted.current || !suggestion.range.hasBoundaries())
+          return false;
         const range = suggestion.range.current();
-        if (origin.editor.getText().slice(range.from, range.to) !== acceptedText) return;
-        update = { status: "applied" };
+        if (origin.editor.getText().slice(range.from, range.to) !== acceptedText) return false;
+        update = { status: "applied", batchApplied: false };
         if (acceptedText !== suggestion.after) {
           const [inserted] = origin.editor.replaceRanges([{ ...range, text: suggestion.after }], {
             collapseSelection: range,
             lineEndings: "match",
           });
-          if (turns[index]?.direct && inserted) {
-            const edited = origin.editor.getText();
-            update = recordApplied(
-              suggestion,
-              inserted,
-              edited.slice(inserted.from, inserted.to),
-              acceptedText,
-            );
+          if (inserted) {
+            update = turns[index]?.direct
+              ? recordApplied(
+                  { ...suggestion, batchApplied: false },
+                  inserted,
+                  origin.editor.getText().slice(inserted.from, inserted.to),
+                  acceptedText,
+                )
+              : { ...update, range: retrackSuggestion(suggestion, inserted) };
           }
         }
-        if (isActive.current) origin.editor.focus();
+        if (isActive.current && !keepReviewFocus) origin.editor.focus();
       } finally {
         checkingDisk.current = false;
       }
     }
-    releaseRange(suggestion.range);
     updateSuggestion(index, position, update);
+    return true;
+  }
+
+  async function acceptSection(entries: readonly ReviewEntry[]) {
+    if (busy || checkingDisk.current) return 0;
+    checkingDisk.current = true;
+    try {
+      if (!(await refreshDisk()) || !mounted.current || !reading.current) return 0;
+      const editor = origin.editor;
+      const live = editor.getText();
+      const eligible = entries.flatMap(({ turn, position }) => {
+        const item = turns[turn]?.suggestions?.[position];
+        if (
+          !item ||
+          item.note ||
+          reviewStatus(item, live) !== "preview" ||
+          !item.range.hasBoundaries() ||
+          currentText(item, live) !== item.before
+        )
+          return [];
+        return [{ ...item.range.current(), text: item.after, item, direct: turns[turn]?.direct }];
+      });
+      // Different replies can propose edits to the same passage. Leave overlapping
+      // proposals pending for individual comparison.
+      let end = -1;
+      let start = -1;
+      const replacements = eligible
+        .sort((a, b) => a.from - b.from)
+        .filter(({ from, to }) => {
+          if (from < end || from === start) return false;
+          start = from;
+          end = to;
+          return true;
+        });
+      const ranges = editor.replaceRanges(replacements, { lineEndings: "match" });
+      const edited = editor.getText();
+      const updates = new Map<Suggestion, Suggestion>();
+      for (const [index, { item, direct }] of replacements.entries()) {
+        const range = ranges[index];
+        if (!range) continue;
+        const applied = direct
+          ? recordApplied(item, range, edited.slice(range.from, range.to))
+          : { ...item, range: retrackSuggestion(item, range), status: "applied" as const };
+        updates.set(item, { ...applied, batchApplied: true });
+      }
+      setTurns((previous) =>
+        previous.map((turn) => ({
+          ...turn,
+          suggestions: turn.suggestions?.map((item) => updates.get(item) ?? item),
+        })),
+      );
+      return updates.size;
+    } finally {
+      checkingDisk.current = false;
+    }
   }
 
   function reportSendError(problem: unknown) {
@@ -1096,6 +1201,16 @@ function Composer({
     [count, materials, name, sendingTo, setPlacement, status, store, tabId],
   );
   useWritingTask(report);
+  const sections = useMemo(() => {
+    if (!focusedReview) return [];
+    const parents: { level: number; text: string }[] = [];
+    return origin.editor.getOutline().map(({ level, text, from }, index) => {
+      while (parents.length && (parents.at(-1)?.level ?? 0) >= level) parents.pop();
+      parents.push({ level, text });
+      return { id: String(index), name: parents.map((heading) => heading.text).join(" › "), from };
+    });
+    // biome-ignore lint/correctness/useExhaustiveDependencies: draft keeps section offsets in sync with the editor.
+  }, [focusedReview, origin.editor, draft]);
 
   const canRetry = attempt && !busy && attempt.status !== "complete";
   const sameConnection = canRetry && recipients.find(({ id }) => id === attempt.recipientId);
@@ -1103,6 +1218,65 @@ function Composer({
   if (!placement) return null;
   const sidebar = placement === "sidebar";
   const latest = turns.at(-1);
+  if (focusedReview) {
+    const entries = turns
+      .flatMap((turn, index) =>
+        (turn.suggestions ?? []).map((suggestion, position): ReviewEntry & { from: number } => {
+          const { from } = suggestion.range.current();
+          const located = suggestion.range.hasBoundaries();
+          const section = located ? sections.findLast((heading) => heading.from <= from) : null;
+          return {
+            key: `${index}:${suggestion.id}`,
+            turn: index,
+            position,
+            from,
+            before: suggestion.before,
+            after: suggestion.after,
+            current: currentText(suggestion, draft),
+            status: reviewStatus(suggestion, draft),
+            note: suggestion.note,
+            block: suggestion.block,
+            section: section ?? {
+              id: located ? "intro" : "unlocated",
+              name: t(
+                !located
+                  ? "writing.review.unlocated"
+                  : sections.length
+                    ? "writing.review.intro"
+                    : "writing.scope.document",
+              ),
+            },
+            blocked: externalChange ? "disk" : !located ? "boundaries" : undefined,
+          };
+        }),
+      )
+      .sort((a, b) => a.from - b.from);
+    return (
+      <FocusedWritingReview
+        entries={entries}
+        source={showSource}
+        busy={busy}
+        onSource={setShowSource}
+        onLocate={({ turn, position }) => {
+          const range = turns[turn]?.suggestions?.[position]?.range;
+          if (range?.hasBoundaries()) {
+            const { from, to } = range.current();
+            origin.editor.setSelection({ anchor: from, head: to, scrollIntoView: "start" });
+          }
+        }}
+        onDecide={({ turn, position, current }, accept) => {
+          const suggestion = turns[turn]?.suggestions?.[position];
+          return suggestion
+            ? decide(turn, position, suggestion, accept ? current : undefined, true)
+            : Promise.resolve(false);
+        }}
+        onAcceptSection={acceptSection}
+        onRestore={({ turn, position }) => updateSuggestion(turn, position, { status: "preview" })}
+        onComment={({ turn, position }, note) => updateSuggestion(turn, position, { note })}
+        onClose={closeFocusedReview}
+      />
+    );
+  }
   if (
     !sidebar &&
     !busy &&
@@ -1128,6 +1302,11 @@ function Composer({
         <button type="button" className={buttonClass} onClick={viewChanges}>
           {t("writing.viewChanges")}
         </button>
+        {pending > 0 && (
+          <button type="button" className={buttonClass} onClick={openFocusedReview}>
+            {t("writing.review.title")}
+          </button>
+        )}
         {applied > 0 && (
           <button
             type="button"
@@ -1252,14 +1431,19 @@ function Composer({
         />
       )}
       {messages.some((turn) => turn.suggestions?.length) && (
-        <label className="flex items-center gap-1">
-          <input
-            type="checkbox"
-            checked={showSource}
-            onChange={(event) => setShowSource(event.target.checked)}
-          />
-          {t("writing.edit.source")}
-        </label>
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" className={buttonClass} onClick={openFocusedReview}>
+            {t("writing.review.title")}
+          </button>
+          <label className="flex items-center gap-1">
+            <input
+              type="checkbox"
+              checked={showSource}
+              onChange={(event) => setShowSource(event.target.checked)}
+            />
+            {t("writing.edit.source")}
+          </label>
+        </div>
       )}
       <div aria-live="polite" className="space-y-2">
         {messages.map((turn, position) => {

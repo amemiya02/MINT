@@ -23,6 +23,7 @@ const keys = {
   home: "\uE011",
   shift: "\uE008",
   enter: "\uE007",
+  escape: "\uE00C",
   tab: "\uE004",
 } as const;
 /** The element reference key of the WebDriver protocol. */
@@ -1583,12 +1584,35 @@ test("a saved writing review resumes after a native restart without contacting i
       "//section[@aria-label='Ask AI']//label[normalize-space(.)='Instruction']/input",
     );
     await keyActions([...typing(instruction), ...typing(keys.enter)]);
-    await clickPath(
-      "//fieldset[@aria-label='Proposed edit 1 of 4']//button[normalize-space(.)='Apply proposed edit']",
-    );
-    await clickPath(
-      "//fieldset[@aria-label='Proposed edit 2 of 4']//button[normalize-space(.)='Dismiss proposed edit']",
-    );
+    await click("Review proposed edits");
+    const reviewRoot = 'document.querySelector(\'dialog[open][aria-label="Review proposed edits"]\')';
+    const focusedEdit = (number: number) =>
+      waitForView(
+        `proposal ${number} to receive keyboard focus`,
+        `return ${reviewRoot}?.querySelector('h3') === document.activeElement &&
+          document.activeElement.textContent.trim() === 'Replacement · Edit ${number} of 4';`,
+      );
+    const pressReviewButton = async (label: string) => {
+      for (let index = 0; index < 20; index++) {
+        await keyActions(typing(keys.tab));
+        const found = await command<boolean>("POST", `/session/${session}/execute/sync`, {
+          script: `return ${reviewRoot}?.contains(document.activeElement) &&
+            document.activeElement?.matches('button') &&
+            document.activeElement.textContent.trim() === arguments[0];`,
+          args: [label],
+        });
+        if (!found) continue;
+        await keyActions(typing(keys.enter));
+        return;
+      }
+      assert.fail(`could not reach ${label} by keyboard`);
+    };
+    await focusedEdit(1);
+    await pressReviewButton("Apply proposed edit");
+    await focusedEdit(2);
+    await pressReviewButton("Dismiss proposed edit");
+    await focusedEdit(3);
+    await keyActions(typing(keys.escape));
     assert.deepEqual(JSON.parse(requests[0]?.messages.at(-1)?.content ?? ""), {
       instruction,
       selectedText: original,
@@ -1603,7 +1627,6 @@ test("a saved writing review resumes after a native restart without contacting i
     `,
     );
     await keyActions(chord(keys.control, keys.end));
-    await clickPath("//section[@aria-label='Ask AI']//button[normalize-space(.)='Close']");
     await nativeShortcut("ctrl+s");
     const accepted = original.replace("First draft.", "First edit.");
     await until(

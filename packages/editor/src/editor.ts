@@ -6,7 +6,7 @@ import {
   redo,
   undo,
 } from "@codemirror/commands";
-import { syntaxTree } from "@codemirror/language";
+import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
 import { selectNextOccurrence } from "@codemirror/search";
 import {
   type ChangeDesc,
@@ -27,6 +27,7 @@ import {
   rectangularSelection,
 } from "@codemirror/view";
 import { defaultDialect, renderHtml } from "@mint/markdown";
+import type { SyntaxNode } from "@lezer/common";
 import {
   type Annotation,
   type AnnotationTarget,
@@ -240,6 +241,8 @@ export interface MintEditor {
   getSelection(): TextSelection;
   /** Capture a file-text range or the current selection for a new annotation. */
   getAnnotationTarget(range?: TextRange): AnnotationTarget | null;
+  /** A table or formula containing this range, in file-text offsets. */
+  getComparisonBlock(range: TextRange): (TextRange & { readonly kind: "table" | "formula" }) | null;
   /** Scroll to and focus an existing annotation target. */
   revealAnnotation(annotation: Annotation): void;
   /** Every selection range (several when there are several cursors), in document order. */
@@ -282,6 +285,12 @@ export interface MintEditor {
   restoreReadingPosition(position: { anchor: number; head: number; top: number }): void;
   /** Capture the current scroll anchor and pixel offset for restoration after a modal view. */
   captureScrollPosition(): () => void;
+  /** Follow the current selection and scroll anchor while a review navigates the document. */
+  captureReadingPosition(): {
+    current(): TextSelection & { readonly top: number };
+    restore(): void;
+    release(): void;
+  };
   /** Matches of the find query set with the `setFindQuery` command. */
   getFindStatus(): FindStatus;
   /**
@@ -551,6 +560,30 @@ export function createEditor(options: EditorOptions): MintEditor {
       if (cell) return cellTarget(state, cell.table, cell.address);
       return from === to ? null : textTarget(state, from, to);
     },
+    getComparisonBlock(range) {
+      const { state } = view;
+      const from = fromFileOffset(state, range.from);
+      const to = fromFileOffset(state, range.to);
+      const tree = ensureSyntaxTree(state, to, 50) ?? syntaxTree(state);
+      for (const side of [1, -1] as const) {
+        for (let node: SyntaxNode | null = tree.resolveInner(from, side); node; node = node.parent) {
+          const kind =
+            node.name === "Table"
+              ? "table"
+              : node.name === "InlineMath" || node.name === "BlockMath"
+                ? "formula"
+                : null;
+          if (!kind || from < node.from || from > node.to) continue;
+          if (to > node.to && state.sliceDoc(node.to, to) !== "\n") continue;
+          return {
+            kind,
+            from: toFileOffset(state, node.from),
+            to: Math.max(range.to, toFileOffset(state, node.to)),
+          };
+        }
+      }
+      return null;
+    },
     revealAnnotation({ range, kind, implicitColumn }) {
       if (!range) return;
       const anchor = fromFileOffset(view.state, range.from);
@@ -641,6 +674,28 @@ export function createEditor(options: EditorOptions): MintEditor {
     captureScrollPosition() {
       const snapshot = view.scrollSnapshot();
       return () => view.dispatch({ effects: snapshot });
+    },
+    captureReadingPosition() {
+      let selection = view.state.selection;
+      let scroll = view.scrollSnapshot();
+      let top = fromFileOffset(view.state, this.getVisibleRange().from);
+      const track = (changes: ChangeDesc) => {
+        selection = selection.map(changes);
+        scroll = scroll.map(changes) ?? scroll;
+        top = changes.mapPos(top);
+      };
+      rangeTrackers.add(track);
+      return {
+        current: () => ({
+          anchor: toFileOffset(view.state, selection.main.anchor),
+          head: toFileOffset(view.state, selection.main.head),
+          top: toFileOffset(view.state, top),
+        }),
+        restore() {
+          view.dispatch({ selection, effects: scroll, userEvent: "select.restoreReading" });
+        },
+        release: () => rangeTrackers.delete(track),
+      };
     },
     getVisibleRange() {
       // The part of the scroller inside the window, in document coordinates.

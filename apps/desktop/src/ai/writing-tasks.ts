@@ -11,12 +11,21 @@ export interface ReviewRange {
   readonly located: boolean;
 }
 
+export interface ReviewBlock {
+  readonly kind: "table" | "formula";
+  readonly prefix: string;
+  readonly suffix: string;
+}
+
 export interface SavedSuggestion {
   readonly id: number;
   readonly before: string;
   readonly after: string;
   readonly status: EditStatus;
   readonly appliedText?: string;
+  readonly note?: string;
+  readonly batchApplied?: boolean;
+  readonly block?: ReviewBlock;
   readonly comments?: readonly (WritingTurn & { readonly id: number })[];
   readonly range: ReviewRange;
 }
