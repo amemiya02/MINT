@@ -1,4 +1,5 @@
 //! Immutable UTF-8 snapshots, kept outside the user's working folder.
+use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -61,6 +62,30 @@ pub fn record(dir: &Path, text: &str) -> io::Result<()> {
         );
     }
     fs::write_atomic(&dir.join(format!("{id}.md")), text.as_bytes())
+}
+
+// Share the document's private data directory so a move carries the annotations
+// along with the versions, without adding any files to the working folder.
+const ANNOTATIONS: &str = "annotations.json";
+
+pub fn read_annotations(dir: &Path) -> io::Result<Map<String, Value>> {
+    match crate::app_data::read(dir, ANNOTATIONS)? {
+        Some(text) => serde_json::from_str(&text).map_err(io::Error::other),
+        None => Ok(Map::new()),
+    }
+}
+
+pub fn update_annotations(dir: &Path, changes: Map<String, Value>) -> io::Result<()> {
+    let _guard = WRITER
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut annotations = read_annotations(dir)?;
+    annotations.extend(changes);
+    crate::app_data::write(
+        dir,
+        ANNOTATIONS,
+        &serde_json::to_string(&annotations).map_err(io::Error::other)?,
+    )
 }
 
 /// Transfer legacy path-keyed snapshots under the same writer lock as saves.

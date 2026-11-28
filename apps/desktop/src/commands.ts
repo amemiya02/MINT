@@ -137,6 +137,19 @@ export const commands = [
     menu: "edit",
     group: "spelling",
   },
+  {
+    id: "edit.addAnnotation",
+    title: "command.edit.addAnnotation",
+    accelerator: "CmdOrCtrl+Alt+M",
+    menu: "edit",
+    group: "annotations",
+  },
+  {
+    id: "view.annotations",
+    title: "command.view.annotations",
+    menu: "view",
+    group: "sidebar",
+  },
 
   heading(1),
   heading(2),

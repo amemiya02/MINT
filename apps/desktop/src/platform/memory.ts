@@ -20,6 +20,7 @@ import type {
   RecoverySnapshot,
   SettingsFile,
   SettingsValues,
+  StoredAnnotations,
   ZoteroItem,
 } from "./platform.ts";
 
@@ -258,7 +259,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     const restoring: [string, string][] = [];
     const detached = crypto.randomUUID();
     for (const [key, value] of [...appData]) {
-      const match = /^(history:|snapshot:\d+:)([\s\S]+)$/.exec(key);
+      const match = /^(history:|snapshot:\d+:|annotations:)([\s\S]+)$/.exec(key);
       const path = match?.[2];
       if (!match || !path) continue;
       if (within(path, from) && isFile(path)) {
@@ -376,6 +377,14 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       const id = Math.max(Date.now(), last + 1);
       appData.set(`snapshot:${id}:${path}`, text);
       appData.set(key, JSON.stringify([...ids, id]));
+    },
+    async readAnnotations(path) {
+      return JSON.parse(appData.get(`annotations:${path}`) ?? "{}") as StoredAnnotations;
+    },
+    async updateAnnotations(path, changes) {
+      const key = `annotations:${path}`;
+      const current = JSON.parse(appData.get(key) ?? "{}") as StoredAnnotations;
+      appData.set(key, JSON.stringify({ ...current, ...changes }));
     },
     async readBinaryFile(path) {
       const bytes = binaryFiles.get(path);

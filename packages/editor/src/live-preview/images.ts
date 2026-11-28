@@ -115,6 +115,8 @@ class ImageWidget extends WidgetType {
     readonly alt: string,
     readonly title: string,
     readonly block: boolean,
+    /** Offset from the widget's position into the image source. */
+    readonly cursorOffset: number,
   ) {
     super();
   }
@@ -124,28 +126,40 @@ class ImageWidget extends WidgetType {
       other.url === this.url &&
       other.alt === this.alt &&
       other.title === this.title &&
-      other.block === this.block
+      other.block === this.block &&
+      other.cursorOffset === this.cursorOffset
     );
   }
 
   toDOM(view: EditorView): HTMLElement {
-    const wrapper = document.createElement(this.block ? "div" : "span");
+    const wrapper: HTMLElement = document.createElement(this.block ? "div" : "span");
     wrapper.className = this.block ? "cm-mint-image cm-mint-image-block" : "cm-mint-image";
     const img = document.createElement("img");
     img.alt = this.alt;
     if (this.title) img.title = this.title;
     wrapper.append(img);
     displayImage(img, this.url, this.title, () => view.requestMeasure());
+    wrapper.addEventListener("mousedown", (event) => {
+      if (event.button !== 0 || event.shiftKey || event.metaKey || event.ctrlKey) return;
+      event.preventDefault();
+      const anchor = view.posAtDOM(wrapper) + this.cursorOffset;
+      view.dispatch({ selection: { anchor }, scrollIntoView: true });
+      view.focus();
+    });
     return wrapper;
   }
 
-  // Let the editor handle clicks: they place the cursor on the image, which reveals its source.
   override ignoreEvent(): boolean {
     return false;
   }
 }
 
-function widgetFor(state: EditorState, node: SyntaxNode, block: boolean): ImageWidget | null {
+function widgetFor(
+  state: EditorState,
+  node: SyntaxNode,
+  block: boolean,
+  position: number,
+): ImageWidget | null {
   const url = node.getChild("URL");
   if (!url) return null;
   const destination = state.sliceDoc(url.from, url.to);
@@ -156,6 +170,7 @@ function widgetFor(state: EditorState, node: SyntaxNode, block: boolean): ImageW
     // The tooltip: the Markdown title if there is one, otherwise the path.
     title ? state.sliceDoc(title.from + 1, title.to - 1) : imagePath(destination),
     block,
+    url.from - position,
   );
 }
 
@@ -173,9 +188,10 @@ function renderImage(node: SyntaxNode, cx: PreviewContext) {
   const { state } = cx;
   const alone = standsAlone(state, node);
   if (alone) {
-    const widget = widgetFor(state, node, true);
+    const revealed = cx.touchesSelectedLines(alone.from, alone.to);
+    const widget = widgetFor(state, node, true, revealed ? alone.to : alone.from);
     if (!widget) return;
-    if (cx.touchesSelectedLines(alone.from, alone.to)) {
+    if (revealed) {
       // Editing the source: keep the picture in view below it.
       cx.add(alone.to, alone.to, Decoration.widget({ widget, block: true, side: 1 }));
     } else {
@@ -184,7 +200,7 @@ function renderImage(node: SyntaxNode, cx: PreviewContext) {
     return;
   }
   if (cx.touchesSelection(node.from, node.to)) return;
-  const widget = widgetFor(state, node, false);
+  const widget = widgetFor(state, node, false, node.from);
   if (widget) cx.add(node.from, node.to, Decoration.replace({ widget }));
 }
 

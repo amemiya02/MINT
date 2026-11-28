@@ -654,6 +654,55 @@ test("reopen a bookmark after a native restart and remove it without touching th
   await waitForBookmark(false);
 });
 
+test("annotations survive a native restart outside the working folder", async () => {
+  const folder = await mkdtemp(join(dir, "annotations-"));
+  const path = join(folder, "annotated.md");
+  const original = Buffer.from("\uFEFFField notes.  \r\n\r\nUntouched.\n");
+  const note = "Check the native manuscript.";
+  await writeFile(path, original);
+  await restart([path]);
+  await clickPath("//div[contains(@class, 'cm-content')][contains(., 'Field notes.')]");
+  await keyActions([...chord(keys.control, keys.home), ...chord(keys.shift, keys.end)]);
+  await click("Add annotation");
+  const field = await command<Record<string, string>>("POST", `/session/${session}/element`, {
+    using: "css selector",
+    value: "dialog[open] textarea",
+  });
+  await command("POST", `/session/${session}/element/${field[elementKey]}/value`, { text: note });
+  await click("Save annotation");
+  await click("Mark resolved");
+  await until("the annotation decision to reach native app data", async () => {
+    const annotations = await invokeNative<Record<string, { note: string; resolved: boolean }>>(
+      "read_annotations",
+      { path },
+    );
+    return Object.values(annotations).some((item) => item.note === note && item.resolved) || null;
+  }).catch(explain);
+  await assert.rejects(
+    invokeNative("read_annotations", { path: join(tmpdir(), "mint-ungranted-annotation.md") }),
+    /outside the documents and folders/,
+  );
+
+  await restart([path]);
+  await click("Annotations");
+  await clickPath("//section[@aria-label='Resolved']//button[normalize-space(.)='Go to target']");
+  const visible = await command<{ excerpt: string; selected: string }>(
+    "POST",
+    `/session/${session}/execute/sync`,
+    {
+      script: `return {
+        excerpt: document.querySelector('section[aria-label="Resolved"] blockquote')?.textContent,
+        selected: getSelection()?.toString()
+      };`,
+      args: [],
+    },
+  );
+  assert.equal(visible.excerpt, "Field notes.  ");
+  assert.equal(visible.selected, "Field notes.  ");
+  assert.deepEqual(await readFile(path), original);
+  assert.deepEqual(await readdir(folder), ["annotated.md"]);
+});
+
 test("the native statistics view refuses a denied read and allows an explicit grant", async () => {
   const path = join(dir, "statistics.md");
   await writeFile(path, "a native draft");

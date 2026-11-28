@@ -2,6 +2,8 @@ import type { ExternalAgentPlatform } from "../ai/external-agent.ts";
 import type { NewModelConnection, SavedModelConnection, SendModelMessage } from "../ai/model.ts";
 import type { PrintJob } from "../print/protocol.ts";
 
+export type StoredAnnotations = Readonly<Record<string, unknown>>;
+
 /**
  * The platform interface: the only way the shell reaches the outside world
  * (file system, dialogs, window, native menu). Two implementations exist:
@@ -39,6 +41,10 @@ export interface Platform {
   listVersions(path: string): Promise<number[]>;
   recordVersion(path: string, text: string): Promise<void>;
   readVersion(path: string, id: number): Promise<string>;
+
+  /** Private annotations for the manuscript. Updates merge by annotation ID. */
+  readAnnotations(path: string): Promise<StoredAnnotations>;
+  updateAnnotations(path: string, changes: StoredAnnotations): Promise<void>;
 
   /**
    * Watch one document for changes made on disk: modified, created, deleted or

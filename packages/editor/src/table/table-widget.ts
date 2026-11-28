@@ -134,10 +134,17 @@ export function focusTableCell(
 
 /** Run `action` on the table widget that has focus in `view`; undefined when none has. */
 export function runInFocusedTable(view: EditorView, action: TableAction): boolean | undefined {
+  return focusedTable(view)?.run(action);
+}
+
+export function focusedTableCell(view: EditorView) {
+  return focusedTable(view)?.target();
+}
+
+function focusedTable(view: EditorView) {
   const active = view.dom.ownerDocument.activeElement;
   const dom = active?.closest<HTMLElement>(".cm-mint-table");
-  const controller = dom && view.contentDOM.contains(dom) ? controllers.get(dom) : undefined;
-  return controller?.run(action);
+  return dom && view.contentDOM.contains(dom) ? controllers.get(dom) : undefined;
 }
 
 /** Renders Markdown to HTML the way the export does (dialect included). */
@@ -377,6 +384,12 @@ class TableController {
     const lineFrom = this.view.posAtDOM(this.dom);
     const table = tableOnLine(this.view.state, lineFrom);
     return table ? { table, lineFrom } : null;
+  }
+
+  target() {
+    const current = this.current();
+    const address = this.focusedAddress();
+    return current && address ? { table: current.table, address } : null;
   }
 
   private dispatch(changes: ChangeSpec[] | null, userEvent: string): boolean {

@@ -8,6 +8,7 @@ import {
   Transaction,
 } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
+import { DocumentAnnotations } from "./annotations.ts";
 import { copyFileDocument, sharedFileEffects } from "./file-text.ts";
 
 import { ManualReview } from "./manual-review.ts";
@@ -18,6 +19,7 @@ const historyOwner = StateEffect.define<symbol>();
 /** Views of one manuscript share CodeMirror changes and the immutable history field.
  * Each view maps its own selection through a sibling's changes and keeps its own viewport. */
 export class SharedDocument {
+  readonly annotations = new DocumentAnnotations();
   readonly review = new ManualReview();
   private views = new Set<EditorView>();
   private history = new Compartment();
@@ -77,7 +79,10 @@ export class SharedDocument {
     } else {
       source.update(transactions);
     }
-    for (const transaction of changed) this.review.record(transaction);
+    for (const transaction of changed) {
+      this.review.record(transaction);
+      this.annotations.record(transaction);
+    }
     this.lastWriter = source.state.facet(viewOwner);
     for (const peer of this.views) {
       if (peer === source) continue;
