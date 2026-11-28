@@ -1120,6 +1120,186 @@ test("only granted Zotero reads reach the local service and the chosen item is s
   }
 });
 
+test("native citation verification reads Zotero only after approval and edits only the manuscript", async () => {
+  const draft = join(dir, "verify-zotero-citation.md");
+  const original = "The ridge study (Rivera, 2019) covered the northern trail.";
+  const corrected =
+    "The ridge study ([Rivera, 2024](zotero://select/library/items/RIDGE123)) covered the northern trail.";
+  const instruction = "Verify and correct this citation, apply directly";
+  const material = [
+    "Title: Ridge study",
+    "Creators: Ana Rivera, Ridge Field Station",
+    "Date: 2024",
+    "Publication: Field Reports",
+    "DOI: 10.5555/ridge.2024",
+    "Zotero link: zotero://select/library/items/RIDGE123",
+  ].join("\n");
+  const libraryRequests: {
+    method?: string;
+    path: string;
+    query: Record<string, string>;
+    body: string;
+  }[] = [];
+  const modelRequests: { method?: string; url?: string; task: unknown }[] = [];
+  const library = createServer(async (request, response) => {
+    let body = "";
+    for await (const chunk of request) body += chunk;
+    const url = new URL(request.url ?? "/", "http://127.0.0.1:23119");
+    libraryRequests.push({
+      method: request.method,
+      path: url.pathname,
+      query: Object.fromEntries(url.searchParams),
+      body,
+    });
+    if (request.method !== "GET" || url.pathname !== "/api/users/0/items/top") {
+      response.writeHead(405).end();
+      return;
+    }
+    const ridge = {
+      key: "RIDGE123",
+      data: {
+        itemType: "journalArticle",
+        title: "Ridge study",
+        creators: [
+          { firstName: "Ana", lastName: "Rivera", creatorType: "author" },
+          { name: "Ridge Field Station", creatorType: "author" },
+        ],
+        date: "2024",
+        publicationTitle: "Field Reports",
+        DOI: "10.5555/ridge.2024",
+        abstractNote: "Private abstract",
+        tags: [{ tag: "Private tag" }],
+      },
+    };
+    const other = { key: "OTHER123", data: { itemType: "book", title: "Unrelated notes" } };
+    response
+      .writeHead(200, { "Content-Type": "application/json" })
+      .end(
+        JSON.stringify(url.searchParams.get("q") === "Rivera & Ridge" ? [ridge] : [ridge, other]),
+      );
+  });
+  const model = createServer(async (request, response) => {
+    let body = "";
+    for await (const chunk of request) body += chunk;
+    modelRequests.push({
+      method: request.method,
+      url: request.url,
+      task: JSON.parse(JSON.parse(body).messages.at(-1).content),
+    });
+    response.writeHead(200, { "Content-Type": "application/json" }).end(
+      JSON.stringify({
+        choices: [{ message: { content: `<replacement>${corrected}</replacement>` } }],
+      }),
+    );
+  });
+  try {
+    for (const [server, port] of [
+      [library, 23119],
+      [model, 0],
+    ] as const) {
+      await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(port, "127.0.0.1", resolve);
+      });
+    }
+    const address = model.address();
+    assert.ok(address && typeof address !== "string");
+    const endpoint = `http://127.0.0.1:${address.port}/v1/chat/completions`;
+    await writeFile(draft, `Field notes.\n\n${original}`);
+    await restart([draft]);
+    await openSettings();
+    await clickSettingsButton("Model connections");
+    for (const [label, value] of [
+      ["Connection name", "Zotero review fixture"],
+      ["API address", endpoint],
+      ["Model name", "zotero-review"],
+    ] as const) {
+      await clickPath(`//dialog[@open]//label[normalize-space(.)='${label}']/input`);
+      await keyActions(typing(value));
+    }
+    await clickSettingsButton("Use for this launch");
+    await shows("Zotero review fixture");
+    await clickSettingsButton("Close");
+    await waitForView(
+      "the citation manuscript to receive focus",
+      `return document.activeElement?.matches('.cm-content') &&
+        document.activeElement.textContent.includes(${JSON.stringify(original)});`,
+    );
+    await keyActions([...chord(keys.control, keys.end), ...chord(keys.shift, keys.home)]);
+    await click("Ask AI");
+    const assistant = "//section[@aria-label='Ask AI']";
+    const picker = `${assistant}//fieldset[@aria-label='Zotero (read only)']`;
+    const chooseZotero = () =>
+      clickPath(`${assistant}//button[normalize-space(.)='Add from Zotero']`);
+    await chooseZotero();
+    assert.deepEqual(libraryRequests, []);
+    await clickPath(`${picker}//button[normalize-space(.)='Deny access']`);
+    await waitForView(
+      "the Zotero picker to close on denial",
+      `return !document.querySelector('section[aria-label="Ask AI"] fieldset[aria-label="Zotero (read only)"]');`,
+    );
+    assert.deepEqual(libraryRequests, []);
+    assert.deepEqual(modelRequests, []);
+
+    await chooseZotero();
+    await clickPath(`${picker}//button[normalize-space(.)='Allow once']`);
+    await clickPath(`${picker}//input[@type='search']`);
+    await keyActions(typing("Rivera & Ridge"));
+    await clickPath(`${picker}//button[not(@disabled) and normalize-space(.)='Search']`);
+    await clickPath(`${picker}//button[normalize-space(.)='Ridge study']`);
+    const recipient = `Zotero review fixture · ${endpoint}`;
+    await waitForView(
+      "the selected Zotero fields, tool and writing recipient before sending",
+      `const context = document.querySelector('section[aria-label="Ask AI"] form fieldset fieldset');
+        return context?.innerText.includes(${JSON.stringify(recipient)}) &&
+          context.innerText.includes('Zotero (read only)') &&
+          [...context.querySelectorAll('pre')].some((card) => card.textContent === ${JSON.stringify(material)});`,
+    );
+    assert.deepEqual(modelRequests, []);
+    await clickPath(`${assistant}//form//input`);
+    await keyActions(typing(instruction));
+    const send = `Apply directly · Current selection · ${recipient}`;
+    await clickPath(
+      `${assistant}//button[@type='submit' and not(@disabled) and normalize-space(.)='${send}']`,
+    );
+    await waitForView(
+      "the citation revision in the native editor",
+      `return document.querySelector('.cm-content')?.textContent.includes('Rivera, 2024');`,
+    );
+    await nativeShortcut("ctrl+s");
+    await until(
+      "the corrected Markdown on disk",
+      async () => (await readFile(draft, "utf8")) === `Field notes.\n\n${corrected}` || null,
+    ).catch(explain);
+    assert.deepEqual(modelRequests, [
+      {
+        method: "POST",
+        url: "/v1/chat/completions",
+        task: {
+          instruction,
+          selectedText: original,
+          taskContext: { materials: [{ name: "Zotero · Ridge study", text: material }] },
+        },
+      },
+    ]);
+    const browse = {
+      method: "GET",
+      path: "/api/users/0/items/top",
+      query: { v: "3", limit: "51", sort: "title", direction: "asc", start: "0" },
+      body: "",
+    };
+    assert.deepEqual(libraryRequests, [
+      browse,
+      { ...browse, query: { ...browse.query, q: "Rivera & Ridge", qmode: "titleCreatorYear" } },
+    ]);
+  } finally {
+    for (const server of [library, model]) {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }
+});
+
 test("a native model receives only the sample or live selection and edits through normal save", async () => {
   const draft = join(dir, "ask-ai-model.md");
   const manuscript = "\uFEFFPrivate notes.  \r\n\r\nSelected sentence.";

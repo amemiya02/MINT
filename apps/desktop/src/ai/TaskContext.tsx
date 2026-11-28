@@ -3,6 +3,7 @@ import { useT } from "../i18n/index.ts";
 import type { Platform } from "../platform/platform.ts";
 import { sourceLines } from "./MaterialCapacity.tsx";
 import type { NamedMaterial } from "./writing-sender.ts";
+import { ZoteroMaterialPicker } from "./ZoteroMaterialPicker.tsx";
 
 const materialLimit = 2 * 1024 * 1024;
 const encoder = new TextEncoder();
@@ -14,6 +15,7 @@ const buttonClass =
 export interface MaterialEntry {
   readonly id: string | number;
   readonly material: NamedMaterial;
+  readonly source?: "zotero";
 }
 
 function checkedMaterial(name: string, text: string): NamedMaterial {
@@ -28,8 +30,8 @@ export function useNamedMaterials() {
   const nextId = useRef(0);
   const [loading, setLoading] = useState(0);
   const [error, setError] = useState(false);
-  function add(materials: readonly NamedMaterial[]) {
-    const added = materials.map((material) => ({ id: nextId.current++, material }));
+  function add(materials: readonly NamedMaterial[], source?: MaterialEntry["source"]) {
+    const added = materials.map((material) => ({ id: nextId.current++, material, source }));
     setEntries((previous) => [...previous, ...added]);
   }
 
@@ -40,9 +42,9 @@ export function useNamedMaterials() {
     remove(id: MaterialEntry["id"]) {
       setEntries((previous) => previous.filter((entry) => entry.id !== id));
     },
-    paste(name: string, text: string) {
+    paste(name: string, text: string, source?: MaterialEntry["source"]) {
       try {
-        add([checkedMaterial(name, text)]);
+        add([checkedMaterial(name, text)], source);
         setError(false);
         return true;
       } catch {
@@ -155,9 +157,9 @@ export function TaskContextChecklist({
       </dl>
       {named.entries.length > 0 && (
         <ul className="space-y-1">
-          {named.entries.map(({ id, material: { name, text } }) => (
+          {named.entries.map(({ id, source, material: { name, text } }) => (
             <li key={id} className="flex items-start justify-between gap-2">
-              <details className="min-w-0 flex-1">
+              <details className="min-w-0 flex-1" open={source === "zotero" || undefined}>
                 <summary className="cursor-pointer wrap-anywhere">{name}</summary>
                 <p>
                   {t("materials.capacity.lineCount", { count: String(sourceLines(text).length) })}
@@ -221,6 +223,16 @@ export function MaterialPicker({
   const [pasted, setPasted] = useState("");
   return (
     <>
+      {named.entries.some(({ source }) => source === "zotero") && (
+        <dl className="flex flex-wrap gap-x-2">
+          <dt className="font-medium">{t("materials.tools")}</dt>
+          <dd>{t("materials.zotero.tool")}</dd>
+        </dl>
+      )}
+      <ZoteroMaterialPicker
+        platform={platform}
+        add={(name, text) => named.paste(name, text, "zotero")}
+      />
       <details className="space-y-2">
         <summary className="cursor-pointer">{t("materials.add")}</summary>
         <p className="text-(--mint-muted)">{t("materials.dropHint")}</p>
