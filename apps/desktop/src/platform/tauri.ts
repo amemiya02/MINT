@@ -14,6 +14,7 @@ import { message } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
+import { createModelSender, type ModelResponseEvent } from "../ai/model.ts";
 import { type PrintJob, printEvents } from "../print/protocol.ts";
 import { pickBrowserFile } from "./pick-file.ts";
 import type {
@@ -39,10 +40,33 @@ const nativeItems = {
   quit: "Quit",
 } as const satisfies Record<string, PredefinedMenuItemOptions["item"]>;
 
+type NativeModelEvent =
+  | Exclude<ModelResponseEvent, { kind: "data" }>
+  | { readonly kind: "data"; readonly bytes: number[] };
+
+const sendTauriModelMessage = createModelSender(async (request, receive) => {
+  let finish = () => {};
+  const completed = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const onEvent = new Channel<NativeModelEvent>((event) => {
+    receive(event.kind === "data" ? { ...event, bytes: Uint8Array.from(event.bytes) } : event);
+    if (event.kind === "done") finish();
+  });
+  try {
+    await invoke<void>("send_model_request", { request, onEvent });
+    // The invoke result can arrive before the ordered channel's last chunk.
+    await completed;
+  } finally {
+    onEvent.onmessage = () => {};
+  }
+});
+
 /** Platform implementation for the desktop app: Tauri IPC to the Rust backend. */
 export function createTauriPlatform(): Platform {
   return {
     locale: navigator.language,
+    sendModelMessage: sendTauriModelMessage,
     listZoteroItems: (start) => invoke("list_zotero_items", { start }),
     savesPdfDirectly: /Windows/.test(navigator.userAgent),
     readTextFile: (path) => invoke<string>("read_text_file", { path }),

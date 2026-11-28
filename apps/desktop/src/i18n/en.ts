@@ -209,6 +209,48 @@ export const en = {
   "update.checkFailed": "Could not check for updates: {reason}",
   "update.installFailed": "Could not install MINT {version}: {reason}",
 
+  "models.title": "Model connections",
+  "models.service": "Model service",
+  "models.custom": "Custom compatible service",
+  "models.openai": "OpenAI",
+  "models.deepseek": "DeepSeek",
+  "models.ollama": "Ollama (local)",
+  "models.address": "API address",
+  "models.addressHint":
+    "Enter an OpenAI-compatible API base or chat completions URL. Use HTTPS or a loopback address.",
+  "models.model": "Model name",
+  "models.key": "API key (this trial only)",
+  "models.prompt": "Sample prompt",
+  "models.sample":
+    'Shorten this sentence to at most six words: "The research team met again to discuss the results." Reply with only the new sentence, enclosed in <replacement> and </replacement>.',
+  "models.requestStreaming": "Request streaming",
+  "models.recipient": "Send the sample to {endpoint}",
+  "models.run": "Run sample",
+  "models.running": "Waiting for model…",
+  "models.reply": "Model reply",
+  "models.partial": "Partial reply",
+  "models.capabilities": "Connection capabilities",
+  "models.conversation": "Conversation: {state}",
+  "models.streaming": "Streaming: {state}",
+  "models.proposedEdit": "Proposed edit: {state}",
+  "models.multiFile": "Multi-file editing: {state}",
+  "models.verified": "Verified",
+  "models.unverified": "Unverified",
+  "models.unavailable": "Unavailable",
+  "models.error.address": "Enter an HTTPS or loopback API address without embedded credentials.",
+  "models.error.key": "The service rejected authorization. Check the API key and try again.",
+  "models.error.notFound":
+    "The service could not find the endpoint or model. Check the API address and model name.",
+  "models.error.rateLimit":
+    "The service limited this request. Check your quota or try again later.",
+  "models.error.http":
+    "The service returned HTTP {status}. Check the address and model, or try with streaming off.",
+  "models.error.network":
+    "Could not reach the model service. Check the address and whether the service is running.",
+  "models.error.reply":
+    "The service returned no readable reply. Check that the address supports chat completions.",
+  "models.error.interrupted": "The stream ended before the reply was complete. Try again.",
+  "models.error.timeout": "The service took too long to reply. Check the service and try again.",
   "settings.title": "Settings",
   "settings.close": "Close",
   "settings.storedIn": "Stored in {path}",
