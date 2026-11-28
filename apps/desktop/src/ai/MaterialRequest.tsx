@@ -5,6 +5,7 @@ import type { Platform } from "../platform/platform.ts";
 import { type MaterialPlan, materialBytes } from "./MaterialCapacity.tsx";
 import type { VisionCheck } from "./ModelVision.tsx";
 import { materialLabel } from "./material-display.ts";
+import type { McpTransport } from "./mcp.ts";
 import {
   type MaterialEntry,
   MaterialPicker,
@@ -12,6 +13,7 @@ import {
   materialDropHandlers,
   useNamedMaterials,
 } from "./TaskContext.tsx";
+import { useWritingToolApproval, type WritingToolPlan } from "./WritingTool.tsx";
 import type {
   MaterialDecision,
   TaskContext,
@@ -62,7 +64,8 @@ function requestedMaterial(reply: WritingReply): MaterialRequest | undefined {
 }
 
 /** Await author decisions while keeping the original prompt, recipient and draft snapshot. */
-export function useMaterialRequests() {
+export function useMaterialRequests(sendMcpRequest?: McpTransport) {
+  const externalTool = useWritingToolApproval();
   const [pending, setPending] = useState<PendingMaterial | null>(null);
   const sequence = useRef(0);
   const decision = useRef<((value: MaterialDecision | null) => void) | null>(null);
@@ -78,6 +81,7 @@ export function useMaterialRequests() {
 
   return {
     pending,
+    externalTool,
     decide(value: MaterialDecision) {
       const resolve = decision.current;
       decision.current = null;
@@ -85,12 +89,13 @@ export function useMaterialRequests() {
       resolve?.(value);
     },
     async send(
-      send: WritingSender,
+      sender: WritingSender,
       request: WritingRequest,
       recipient: string,
       folder: string | null,
       options?: Omit<WritingOptions, "onDelta"> & {
         readonly plan?: MaterialPlan;
+        readonly tool?: WritingToolPlan;
         readonly onContext?: (context: TaskContext | undefined) => void;
         readonly onApproval?: (text: string) => void;
         readonly onResume?: (decision: MaterialDecision | null, text: string) => void;
@@ -106,6 +111,18 @@ export function useMaterialRequests() {
       const completed: string[] = [];
       const combined = (text: string) => [...completed, text].filter(Boolean).join("\n\n");
       let approvalId = 0;
+      externalTool.resetOutcome();
+      const send =
+        options?.tool && sendMcpRequest
+          ? externalTool.wrap(
+              sendMcpRequest,
+              sender,
+              options.tool,
+              recipient,
+              () => onApproval?.(combined("")),
+              () => onResume?.(null, combined("")),
+            )
+          : sender;
 
       async function sendBatch(taskContext: TaskContext | undefined, index: number) {
         const instruction =

@@ -23,6 +23,13 @@ import {
 import { materialDropHandlers, TaskContextChecklist, useNamedMaterials } from "./TaskContext.tsx";
 import { useWritingTask, WritingTaskMaterials } from "./WritingTasks.tsx";
 import {
+  useWritingToolPicker,
+  WritingToolNotice,
+  WritingToolOutcome,
+  WritingToolPicker,
+  type WritingToolPlan,
+} from "./WritingTool.tsx";
+import {
   type AttemptStatus,
   failureStatus,
   isMaterialCapacityError,
@@ -118,7 +125,9 @@ export function DraftComposer({
   const named = useNamedMaterials();
   const [allowedFolder, setAllowedFolder] = useState<string | null>(null);
   const searchFolder = allowedFolder === folder ? folder : null;
-  const materialRequests = useMaterialRequests();
+  const materialRequests = useMaterialRequests(platform.sendMcpRequest);
+  const toolPicker = useWritingToolPicker(platform.sendMcpRequest);
+  const toolApproval = materialRequests.externalTool;
   const agent = agents.find(({ path }) => `agent:${path}` === choice);
   const remembered = models.find(({ id }) => `model:${id}` === choice);
   const custom = !choice;
@@ -208,6 +217,7 @@ export function DraftComposer({
   );
   const canSend =
     !!instruction.trim() &&
+    !toolPicker.incomplete &&
     !named.loading &&
     !named.unconfirmed &&
     (!named.hasImages || vision?.verified === true) &&
@@ -261,10 +271,11 @@ export function DraftComposer({
         folder: searchFolder,
       },
       connection,
+      toolPicker.plan,
     );
   }
 
-  async function runDraft(task: DraftTask, connection: DraftConnection) {
+  async function runDraft(task: DraftTask, connection: DraftConnection, tool?: WritingToolPlan) {
     if (controller.current) return;
     if (hasTaskImages(...task.plan.contexts) && !checkVision(connection.visionTarget)?.verified) {
       setError("materials.visionRequired");
@@ -273,6 +284,7 @@ export function DraftComposer({
     const running = new AbortController();
     const { signal } = running;
     controller.current = running;
+    toolPicker.clear();
     retryConnection.current = connection;
     const { id, label } = connection;
     const entry = { id: crypto.randomUUID(), task, connection: { id, label } };
@@ -302,6 +314,7 @@ export function DraftComposer({
         {
           signal,
           plan: task.plan,
+          tool,
           onContext(context) {
             sentContext = context;
           },
@@ -350,6 +363,7 @@ export function DraftComposer({
             recipient: connection.label,
             recipientId: connection.id,
             direct: inserted,
+            toolOutcome: toolApproval.result(),
             sourcePassages: passages.length ? passages : undefined,
             status,
           },
@@ -392,7 +406,7 @@ export function DraftComposer({
     controller.current = null;
   }
 
-  const pending = materialRequests.pending;
+  const pending = materialRequests.pending ?? toolApproval.pending;
   const report = useMemo(
     () =>
       attempt && {
@@ -502,6 +516,7 @@ export function DraftComposer({
             />
           </section>
         )}
+        <WritingToolOutcome outcome={toolApproval.outcome} />
         {saveFailed && <p role="alert">{t("writing.tasks.saveFailed")}</p>}
       </>
     );
@@ -533,11 +548,7 @@ export function DraftComposer({
           {t("settings.close")}
         </button>
       </div>
-      <fieldset
-        hidden={!!materialRequests.pending}
-        disabled={busy || !!unapplied}
-        className="space-y-2"
-      >
+      <fieldset hidden={!!pending} disabled={busy || !!unapplied} className="space-y-2">
         <label className="block">
           {t("draft.instruction")}
           <input
@@ -557,6 +568,7 @@ export function DraftComposer({
                 setChoice(event.target.value);
                 setKey("");
                 setAllowedFolder(null);
+                toolPicker.clear();
               }}
             >
               <option value="">{t("models.custom")}</option>
@@ -593,6 +605,7 @@ export function DraftComposer({
                   setAddress(event.target.value);
                   setKey("");
                   setAllowedFolder(null);
+                  toolPicker.clear();
                 }}
               />
             </label>
@@ -633,6 +646,7 @@ export function DraftComposer({
           onSearchChange={(checked) => setAllowedFolder(checked ? folder : null)}
         />
         {capacity.controls}
+        <WritingToolPicker picker={toolPicker} />
         {agent && (
           <details className="space-y-1 text-xs text-(--mint-muted)">
             <summary>
@@ -642,9 +656,18 @@ export function DraftComposer({
           </details>
         )}
         <button type="submit" disabled={!canSend} className={button}>
-          {t("draft.generate")}
+          {toolPicker.plan?.exact
+            ? t("mcp.send", {
+                send: t("draft.generate"),
+                effect: t(`mcp.effect.${toolPicker.plan.effect}`),
+              })
+            : t("draft.generate")}
         </button>
       </fieldset>
+      {toolApproval.pending && (
+        <WritingToolNotice pending={toolApproval.pending} onDecision={toolApproval.decide} />
+      )}
+      <WritingToolOutcome outcome={toolApproval.outcome} />
       {materialRequests.pending ? (
         <MaterialRequestNotice
           key={materialRequests.pending.id}
@@ -654,7 +677,7 @@ export function DraftComposer({
           onDecision={materialRequests.decide}
         />
       ) : (
-        busy && <p role="status">{t("draft.generating")}</p>
+        busy && !pending && <p role="status">{t("draft.generating")}</p>
       )}
       {attempt && (
         <WritingTaskMaterials
