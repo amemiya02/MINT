@@ -34,6 +34,7 @@ test("WebView2 saves the previewed A5 pages with the chosen margins and embedded
     },
     stdio: "inherit",
   });
+  app.on("exit", (code, signal) => console.log(`MINT exited with code ${code}, signal ${signal}`));
   const native = (action: string) =>
     exec("powershell.exe", [
       "-NoProfile",
@@ -88,6 +89,14 @@ test("WebView2 saves the previewed A5 pages with the chosen margins and embedded
     await verifyFieldNotes(await readFile(target), expected);
     assert.equal(await readFile(source, "utf8"), fieldNotes);
     console.log(`Verified ${expected.length} A5 pages from WebView2 at ${target}`);
+  } catch (error) {
+    const { stdout } = await exec("powershell.exe", [
+      "-NoProfile",
+      "-Command",
+      "Get-Process mint,msedgewebview2 -ErrorAction SilentlyContinue | Format-Table Id,Name,SessionId,MainWindowTitle | Out-String",
+    ]).catch(() => ({ stdout: "" }));
+    console.error(`MINT exit code ${app.exitCode}; native processes:\n${stdout}`);
+    throw error;
   } finally {
     if (app.pid && app.exitCode === null)
       await exec("taskkill.exe", ["/pid", String(app.pid), "/t", "/f"]).catch(() => undefined);
