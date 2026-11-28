@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { type PrintJob, printEvents } from "./protocol.ts";
@@ -11,21 +12,26 @@ import { type PrintJob, printEvents } from "./protocol.ts";
 const current = getCurrentWebviewWindow();
 const stop = await current.listen<PrintJob>(printEvents.document, (event) => {
   stop();
-  void show(event.payload).then(() => {
-    closeAfterPrinting();
-    window.print();
-  });
+  void show(event.payload)
+    .then(() => {
+      closeAfterPrinting();
+      return invoke("print_pages", { paper: event.payload.paper });
+    })
+    .catch((reason) => {
+      const error = document.createElement("p");
+      error.setAttribute("role", "alert");
+      error.textContent = String(reason);
+      document.body.prepend(error);
+    });
 });
 await emit(printEvents.ready, current.label);
 
 /**
- * Close this window once the print dialog is done with. WebView2 (Windows) and
- * WebKitGTK (Linux) fire `afterprint` when the dialog closes. On macOS the
- * webview may fire it while the dialog is still up, so the window stays open
- * there and the user closes it.
+ * WebView2 reports completion through afterprint. GTK closes the window from
+ * the native print operation. The macOS sheet can outlive afterprint.
  */
 function closeAfterPrinting() {
-  if (/Mac/.test(navigator.userAgent)) return;
+  if (!/Windows/.test(navigator.userAgent)) return;
   window.addEventListener("afterprint", () => void current.close(), { once: true });
 }
 

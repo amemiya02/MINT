@@ -61,10 +61,10 @@ export function createTauriPlatform(): Platform {
       invoke<string | null>("show_open_dialog", { title, filters }),
     showSaveDialog: ({ title, defaultPath, filters }) =>
       invoke<string | null>("show_save_dialog", { title, defaultPath, filters }),
-    async printDocument(html, { title }) {
+    async printDocument(html, { title, paper }) {
       // A window of its own shows the document and opens the print dialog on it (src/print/main.ts).
       const label = `print-${crypto.randomUUID()}`;
-      const job: PrintJob = { html, title };
+      const job: PrintJob = { html, title, paper };
       let deliver = (_sent: Promise<void>) => {};
       const delivered = new Promise<void>((resolve) => {
         deliver = resolve;
