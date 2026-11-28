@@ -550,11 +550,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     "edit.replace": () => showFind("replace"),
     "edit.searchFolder": () => setFolderSearch((request) => (request ?? 0) + 1),
     "edit.askAI": () => {
-      const selection = activeId === null ? undefined : store.editor(activeId)?.getSelection();
-      if (activeId === null || !selection || selection.anchor === selection.head) {
-        setShellError(t("writing.needSelection"));
-        return;
-      }
+      if (activeId === null || !store.editor(activeId)) return;
       setShellError(null);
       setWritingRequest({ tabId: activeId });
     },
