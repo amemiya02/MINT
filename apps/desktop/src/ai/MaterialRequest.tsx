@@ -37,6 +37,7 @@ interface PendingMaterial extends MaterialRequest {
 }
 
 function requestedMaterial(reply: WritingReply): MaterialRequest | undefined {
+  if (reply.taskCopy != null) return;
   if (reply.finishReason != null && reply.finishReason !== "stop") return;
   const text = reply.text.trim();
   // Preserve ordinary prose and Markdown. The protocol reserves one whole JSON reply.
@@ -250,6 +251,7 @@ export function MaterialRequestNotice({
                     line: String(line),
                   }),
                   text,
+                  sourceFile: { path: file.path, line },
                 },
               }));
             count += additions.length;

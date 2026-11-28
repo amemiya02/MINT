@@ -6,8 +6,8 @@ import { type VisionCheck, VisionControl } from "./ModelVision.tsx";
 import { materialLabel } from "./material-display.ts";
 import {
   type MaterialSource,
-  materialTextLimit,
   rangedSource,
+  readMaterialText,
   sourceLines,
   usableMaterialText,
 } from "./material-source.ts";
@@ -96,12 +96,8 @@ export function useNamedMaterials() {
           files.map(async ({ id, file }): Promise<MaterialEntry | RangeEntry> => {
             const source = rangedSource(file);
             if (source && file.size <= 32 * 1024 * 1024) return { id, source, editing: true };
-            if (file.size > materialTextLimit || source) throw new Error("invalidMaterial");
-            const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
-              await file.arrayBuffer(),
-            );
-            if (!usableMaterialText(text)) throw new Error("invalidMaterial");
-            return { id, material: { name: file.name, text } };
+            if (source) throw new Error("invalidMaterial");
+            return { id, material: { name: file.name, text: await readMaterialText(file) } };
           }),
         );
         const added: MaterialEntry[] = [];

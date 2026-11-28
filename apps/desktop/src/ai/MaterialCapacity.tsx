@@ -132,6 +132,7 @@ export function useMaterialCapacity({
   entries,
   folderSearch,
   editing = false,
+  wholeDraftEdit = false,
 }: {
   readonly recipient?: string;
   readonly selectedText?: string;
@@ -139,6 +140,7 @@ export function useMaterialCapacity({
   readonly entries: readonly MaterialEntry[];
   readonly folderSearch: boolean;
   readonly editing?: boolean;
+  readonly wholeDraftEdit?: boolean;
 }) {
   const t = useT();
   const [chosenMethod, setMethod] = useState<MaterialHandling>("full");
@@ -155,18 +157,18 @@ export function useMaterialCapacity({
         ...(!editing && selectedText
           ? [{ id: "selection", material: { name: selectionName, text: selectedText } }]
           : []),
-        ...(draftName !== undefined && draftText !== undefined
+        ...(!wholeDraftEdit && draftName !== undefined && draftText !== undefined
           ? [{ id: "currentDraft", material: { name: draftName, text: draftText } }]
           : []),
         ...entries,
       ].filter(({ material }) => material.text.length > 0 || !!material.image),
-    [editing, selectedText, draftName, draftText, entries, selectionName],
+    [editing, selectedText, draftName, draftText, entries, selectionName, wholeDraftEdit],
   );
   const textSources = sources.filter(({ material }) => !material.image);
   const canChooseTextHandling = textSources.length > 0;
   const method =
     (chosenMethod === "batch" && sources.length) || canChooseTextHandling ? chosenMethod : "full";
-  const hasMaterial = sources.length > 0 || selectedText !== undefined;
+  const hasMaterial = sources.length > 0 || selectedText !== undefined || wholeDraftEdit;
   const limit = (hasMaterial || folderSearch) && limitInput ? Number(limitInput) : undefined;
   const invalidLimit = limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1);
   const exceeded = !!recipient && rejected.has(recipient);
@@ -242,10 +244,21 @@ export function useMaterialCapacity({
         });
       }
     }
-    if (materials.length) return [{ materials, folderSearch: search }];
+    if (materials.length)
+      return [
+        {
+          currentDraft:
+            wholeDraftEdit && draftName !== undefined && draftText !== undefined
+              ? { name: draftName, text: draftText }
+              : undefined,
+          materials,
+          folderSearch: search,
+        },
+      ];
   }, [
     draftName,
     draftText,
+    wholeDraftEdit,
     editing,
     entries,
     folderSearch,

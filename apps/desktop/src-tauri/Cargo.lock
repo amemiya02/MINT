@@ -2638,6 +2638,7 @@ dependencies = [
  "gtk",
  "ignore",
  "keyring",
+ "libc",
  "notify",
  "notify-debouncer-full",
  "objc2-app-kit",

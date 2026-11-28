@@ -108,6 +108,7 @@ interface Origin extends WritingSelection {
 
 interface Task {
   readonly request: WritingRequest;
+  readonly documentBaseline?: string;
   readonly plan?: MaterialPlan;
   readonly action: Action;
   readonly scope: Scope;
@@ -271,7 +272,7 @@ export function WritingAssistant({
       setPlacement("sidebar");
       return;
     }
-    const selection = captureWritingSelection(editor, !!askRequest.folder);
+    const selection = captureWritingSelection(editor, true);
     if (!selection) return;
     setOrigin({ id: crypto.randomUUID(), ...selection, folder: askRequest.folder });
     setRestored(null);
@@ -452,7 +453,9 @@ function Composer({
   const t = useT();
   const [instruction, setInstruction] = useState("");
   const { settings } = useSettings();
-  const [scope, setScope] = useState<Scope>(origin.folder ? "folder" : "selection");
+  const [scope, setScope] = useState<Scope>(
+    origin.folder ? "folder" : origin.text ? "selection" : "document",
+  );
   const [actionOverride, setActionOverride] = useState<Action | null>(null);
   const [includeDraft, setIncludeDraft] = useState(false);
   const [allowedFolder, setAllowedFolder] = useState<string | null>(null);
@@ -485,7 +488,12 @@ function Composer({
   const busy = attempt?.status === "working" || attempt?.status === "approval";
   const store = useTabStore();
   const [error, setError] = useState<
-    "sendFailed" | "agentChanged" | "missingSelection" | "visionRequired" | null
+    | "sendFailed"
+    | "agentChanged"
+    | "agentTaskCopyUnavailable"
+    | "missingSelection"
+    | "visionRequired"
+    | null
   >(null);
   const input = useRef<HTMLInputElement>(null);
   const review = useRef<HTMLElement>(null);
@@ -523,12 +531,17 @@ function Composer({
       : t("writing.recipient.model", { name: candidate.name, endpoint: candidate.endpoint });
   const selectedText = scope === "selection" ? origin.text : undefined;
   const sendDraft = scope === "document" || (scope === "selection" && includeDraft);
-  const currentDraft = sendDraft ? { name, text: draft.replace(/^\uFEFF/, "") } : undefined;
+  const canEditDocument =
+    scope === "document" && recipient?.kind === "agent" && recipient.access === "taskCopy";
+  const canEdit = (scope === "selection" && !!origin.text) || canEditDocument;
   const explicitDirect = /(?:^|[,，]\s*)(?:apply directly|直接改)[.!。！]?\s*$/i.test(instruction);
-  const action =
-    scope !== "selection"
-      ? "comment"
-      : (actionOverride ?? (explicitDirect ? "direct" : turns.length ? "comment" : "preview"));
+  const action = !canEdit
+    ? "comment"
+    : (actionOverride ?? (explicitDirect ? "direct" : turns.length ? "comment" : "preview"));
+
+  const currentDraft = sendDraft
+    ? { name, text: canEditDocument && action !== "comment" ? draft : draft.replace(/^\uFEFF/, "") }
+    : undefined;
 
   const sendLabel = recipient
     ? t("writing.sendAuthorized", {
@@ -545,6 +558,7 @@ function Composer({
     entries: named.entries,
     folderSearch: !!searchFolder,
     editing: action !== "comment",
+    wholeDraftEdit: canEditDocument && action !== "comment",
   });
 
   const snapshot = useCallback(
@@ -950,9 +964,15 @@ function Composer({
     }
   }
 
-  function preview(edits: SelectionEdit[]): Suggestion[] {
+  function preview(edits: SelectionEdit[], documentBaseline?: string): Suggestion[] {
+    const map =
+      documentBaseline === undefined
+        ? undefined
+        : mapReviewRanges(documentBaseline, origin.editor.getText());
     return edits.map((edit) => {
-      const range = origin.range.trackSubrange(edit);
+      const range = map
+        ? restoreRange(origin.editor, map.range({ ...edit, located: true }))
+        : origin.range.trackSubrange(edit);
       trackedSuggestions.current.add(range);
       return { id: edit.from, before: edit.before, after: edit.after, range, status: "preview" };
     });
@@ -1105,7 +1125,11 @@ function Composer({
   function reportSendError(problem: unknown) {
     const code = problem instanceof Error ? problem.message : problem;
     setError(
-      code === "agentAccessRequired" || code === "agentChanged" ? "agentChanged" : "sendFailed",
+      code === "agentTaskCopyUnavailable"
+        ? code
+        : code === "agentAccessRequired" || code === "agentChanged"
+          ? "agentChanged"
+          : "sendFailed",
     );
   }
 
@@ -1156,7 +1180,7 @@ function Composer({
       checkingDisk.current
     )
       return;
-    if (restored && action !== "comment") {
+    if (restored && action !== "comment" && scope === "selection") {
       const { from, to } = origin.range.current();
       if (
         !origin.range.hasBoundaries() ||
@@ -1177,6 +1201,7 @@ function Composer({
       : [];
     const task: Task = {
       plan: capacity.plan,
+      documentBaseline: canEditDocument && action !== "comment" ? draft : undefined,
       request: {
         instruction: instruction.trim(),
         selectedText: capacity.plan.selectedText,
@@ -1232,10 +1257,12 @@ function Composer({
       recipientId: connection.id,
     };
     const editing = task.action !== "comment";
+    const fileEdit = editing && connection.kind === "agent" && connection.access === "taskCopy";
     let text = "";
     let approved: NamedMaterial[] = [];
     let status: AttemptStatus;
     let finalReplacement: string | undefined;
+    let ignoredChanges: boolean | undefined;
     let capacityRejected = false;
     setRetryId("");
     setError(null);
@@ -1275,7 +1302,16 @@ function Composer({
         await platform.writingTasks.createTemporary(origin.id);
       }
       const result = await materialRequests.send(
-        connection.send,
+        (request, options) => {
+          const { currentDraft, ...context } = request.taskContext ?? {};
+          if (!fileEdit && task.documentBaseline !== undefined && currentDraft) {
+            return connection.send(
+              { ...request, selectedText: currentDraft.text, taskContext: context },
+              options,
+            );
+          }
+          return connection.send(request, options);
+        },
         task.request,
         recipient,
         task.searchFolder,
@@ -1307,6 +1343,7 @@ function Composer({
         },
       );
       text = result.text;
+      ignoredChanges = result.ignoredChanges;
       status = signal.aborted ? "stopped" : replyStatus(result);
       if (editing && status === "complete") finalReplacement = replacementFromReply(result);
     } catch (problem) {
@@ -1324,13 +1361,16 @@ function Composer({
     if (signal.aborted) status = "stopped";
     const canApplyDirectly =
       status === "complete" && task.action === "direct" && task.seen.size === 0;
-    const progress = splitWritingProgress(text, editing);
+    const progress = splitWritingProgress(text, editing && !fileEdit);
     const replacement = status === "complete" ? finalReplacement : progress.replacement;
     const partial = status === "complete" ? "" : progress.partial;
     const edits =
       replacement === undefined
         ? undefined
-        : selectionEdits(task.rewrite?.current ?? origin.text, replacement);
+        : selectionEdits(
+            task.rewrite?.current ?? task.documentBaseline ?? origin.text,
+            replacement,
+          );
     const newEdits = edits?.filter((edit) => {
       const key = editKey(edit);
       if (task.seen.has(key)) return false;
@@ -1371,7 +1411,7 @@ function Composer({
         ),
       );
     }
-    let suggestions = !rewrite && newEdits ? preview(newEdits) : undefined;
+    let suggestions = !rewrite && newEdits ? preview(newEdits, task.documentBaseline) : undefined;
     if (canApplyDirectly && suggestions?.length) {
       try {
         suggestions = await applyDirectly(suggestions, signal);
@@ -1391,6 +1431,7 @@ function Composer({
           toolOutcome: toolApproval.result(),
           reply: rewrite ? "" : status === "complete" ? (replacement ?? text) : (replacement ?? ""),
           direct: task.action === "direct",
+          ignoredChanges,
           suggestions,
           status,
           partial,
@@ -1410,14 +1451,22 @@ function Composer({
     return status === "complete";
   }
 
-  const progress = splitWritingProgress(attempt?.partial ?? "", attempt?.task.action !== "comment");
+  const attemptConnection = recipients.find(({ id }) => id === attempt?.recipientId);
+  const progress = splitWritingProgress(
+    attempt?.partial ?? "",
+    attempt?.task.action !== "comment" &&
+      !(attemptConnection?.kind === "agent" && attemptConnection.access === "taskCopy"),
+  );
   const task = attempt?.task;
   const replacement = progress.replacement;
   const currentEdits = useMemo(
     () =>
       replacement === undefined
         ? []
-        : selectionEdits(task?.rewrite?.current ?? origin.text, replacement),
+        : selectionEdits(
+            task?.rewrite?.current ?? task?.documentBaseline ?? origin.text,
+            replacement,
+          ),
     [task, replacement, origin.text],
   );
   const distinct = task ? new Set([...task.seen, ...currentEdits.map(editKey)]).size : 0;
@@ -1906,8 +1955,17 @@ function Composer({
                   draft={turn.reply}
                   passages={turn.sourcePassages}
                   editor={turn.direct ? origin.editor : undefined}
+                  context={turn.context}
+                  platform={platform}
+                  recipients={recipients.map((recipient) => ({
+                    ...recipient,
+                    label: labelFor(recipient),
+                    agentAccess: recipient.kind === "agent" ? recipient.access : undefined,
+                  }))}
+                  originalRecipient={turn.recipientId}
                 />
               )}
+              {turn.ignoredChanges && <p role="status">{t("agent.taskCopyIgnored")}</p>}
               {!!turn.reply && renderReplyExcerpt(turn.reply, suggestions !== undefined)}
             </article>
           );
@@ -2007,9 +2065,11 @@ function Composer({
           {t(
             error === "agentChanged"
               ? "agent.reviewAgain"
-              : error === "visionRequired"
-                ? "materials.visionRequired"
-                : `writing.${error}`,
+              : error === "agentTaskCopyUnavailable"
+                ? "agent.taskCopyUnavailable"
+                : error === "visionRequired"
+                  ? "materials.visionRequired"
+                  : `writing.${error}`,
           )}
         </p>
       )}
@@ -2050,11 +2110,7 @@ function Composer({
                   onChange={(event) => setActionOverride(event.target.value as Action)}
                 >
                   {actions.map((id) => (
-                    <option
-                      key={id}
-                      value={id}
-                      disabled={scope !== "selection" && id !== "comment"}
-                    >
+                    <option key={id} value={id} disabled={!canEdit && id !== "comment"}>
                       {t(`writing.${id}`)}
                     </option>
                   ))}
@@ -2083,7 +2139,7 @@ function Composer({
                   }}
                 >
                   {(origin.folder ? (["folder"] as const) : scopes).map((id) => (
-                    <option key={id} value={id}>
+                    <option key={id} value={id} disabled={id === "selection" && !origin.text}>
                       {t(`writing.scope.${id}`)}
                     </option>
                   ))}
@@ -2123,13 +2179,9 @@ function Composer({
             </div>
             {recipient?.kind === "agent" && (
               <p className="text-xs text-(--mint-muted)">
-                {t("agent.processAccess")}{" "}
-                {t(
-                  recipient.access === "readOnly"
-                    ? "agent.readOnlyAccess"
-                    : "agent.configuredAccess",
-                )}{" "}
-                {t("agent.tools")} {t("agent.usesLogin")}
+                {t("agent.processAccess")} {t(`agent.${recipient.access}Access`)}{" "}
+                {t(recipient.access === "taskCopy" ? "agent.taskCopyTools" : "agent.tools")}{" "}
+                {t(recipient.access === "taskCopy" ? "agent.taskCopyLogin" : "agent.usesLogin")}
               </p>
             )}
             {loadFailed && <p role="alert">{t("writing.connectionsFailed")}</p>}

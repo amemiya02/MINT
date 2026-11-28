@@ -1,8 +1,7 @@
 import {
-  type MaterialDecision,
   materialImageLimit,
   materialRequestInstruction,
-  type NamedMaterial,
+  outboundTaskContext,
   replacementInstruction,
   sourcePassageInstruction,
   type TaskContext,
@@ -59,9 +58,8 @@ export type SendModelMessage = (
 ) => Promise<ModelReply>;
 
 function modelTaskContext(context: TaskContext | undefined, images: ModelMessagePart[]) {
-  if (!context) return;
   let imageBytes = 0;
-  function materialPart(material: NamedMaterial) {
+  return outboundTaskContext(context, (material) => {
     const { image, ...textMaterial } = material;
     if (image === undefined) return textMaterial;
     imageBytes += image.length;
@@ -76,17 +74,7 @@ function modelTaskContext(context: TaskContext | undefined, images: ModelMessage
     images.push({ type: "image_url", image_url: { url: image } });
     const { name, range, format } = material;
     return { name, range, format };
-  }
-  return {
-    ...context,
-    currentDraft: context.currentDraft && materialPart(context.currentDraft),
-    materials: context.materials?.map(materialPart),
-    materialDecisions: context.materialDecisions?.map((decision: MaterialDecision) =>
-      decision.outcome === "allowed"
-        ? { ...decision, material: materialPart(decision.material) }
-        : decision,
-    ),
-  };
+  });
 }
 
 /** Bind the model transport for use from the editor and from first-time setup. */

@@ -2441,6 +2441,7 @@ test("a native model reply stays editable and untitled until the author chooses 
   const sources = join(folder, "sources");
   const source = join(sources, "field-log.md");
   const excerpt = "The north ridge reopened on Tuesday.";
+  const revision = "The north ridge will remain closed until Friday.";
   const unapproved = "Private crew contact details.";
   await mkdir(sources);
   await writeFile(source, `${unapproved}\n${excerpt}\n`);
@@ -2478,7 +2479,9 @@ test("a native model reply stays editable and untitled until the author chooses 
               query: "north ridge reopened",
             },
           })
-        : groundedReply;
+        : requests.length === 2
+          ? groundedReply
+          : JSON.stringify([{ id: 1, assessment: "The revised log contradicts this statement." }]);
     response.end(JSON.stringify({ choices: [{ message: { content }, finish_reason: "stop" }] }));
   });
 
@@ -2615,7 +2618,14 @@ test("a native model reply stays editable and untitled until the author chooses 
       {
         from: 0,
         claim: supported,
-        excerpts: [{ name: "field-log.md · line 2", quote: excerpt, line: 1 }],
+        excerpts: [
+          {
+            name: "field-log.md · line 2",
+            quote: excerpt,
+            line: 1,
+            sourceFile: { path: source, line: 2 },
+          },
+        ],
       },
       { from: supported.length + 1, claim: unsupported, excerpts: [] },
     ]);
@@ -2628,6 +2638,74 @@ test("a native model reply stays editable and untitled until the author chooses 
       async () => (await readFile(path, "utf8")) === cited || null,
     );
     assert.equal(requests.length, 2);
+
+    await writeFile(source, `${unapproved}\n${revision}\n`);
+    await restart([sources, path]);
+    await invokeNative("save_model_connection", {
+      connection: {
+        name: "Source check fixture",
+        address: `http://127.0.0.1:${address.port}/v1`,
+        model: "native-source-check",
+        apiKey: "source-check-fixture",
+        lifetime: "session",
+      },
+    });
+    await nativeShortcut("ctrl+shift+p");
+    await waitForView(
+      "the Command Palette to receive focus",
+      `return document.activeElement?.matches('dialog[aria-label="Command Palette"] input');`,
+    );
+    await keyActions(typing("All writing tasks"));
+    await shows("All writing tasks");
+    await keyActions(typing(keys.enter));
+    await clickPath(
+      `//dialog[@aria-label='All writing tasks']//button[normalize-space(.)='${instruction}']`,
+    );
+    await clickPath(chooseClaim);
+    await waitForView(
+      "the original excerpt and the new on-disk source after restart",
+      `const review = document.querySelector('section[aria-label="Source passages"]');
+       const passage = review?.querySelector('section[aria-label="Excerpt used for this draft"]');
+       const comparison = passage?.querySelector('section[aria-label="Source comparison"]');
+       return passage?.querySelector('blockquote')?.textContent === ${JSON.stringify(excerpt)} &&
+         comparison?.querySelector('blockquote')?.textContent === ${JSON.stringify(revision)};`,
+    );
+    assert.equal(requests.length, 2, "restoring and comparing a changed source makes no request");
+    const affected = '//section[@aria-label="Affected statements"]';
+    await waitForView(
+      "the source check model to be selected",
+      `const select = document.querySelector('section[aria-label="Affected statements"] select');
+       const option = [...(select?.options ?? [])].find(item => item.label.startsWith('Source check fixture'));
+       if (!option) return false;
+       select.value = option.value;
+       select.dispatchEvent(new Event('change', { bubbles: true }));
+       return true;`,
+    );
+    await clickPath(
+      `${affected}//button[not(@disabled) and normalize-space(.)='Verify affected statements']`,
+    );
+    await waitForView(
+      "the assessment next to the affected statement",
+      `const affected = document.querySelector('section[aria-label="Affected statements"]');
+       return affected?.textContent.includes('The revised log contradicts this statement.') &&
+         affected.textContent.includes(${JSON.stringify(supported)}) &&
+         !affected.textContent.includes(${JSON.stringify(unsupported)});`,
+    );
+    assert.equal(requests.length, 3);
+    assert.equal(requests[2]?.path, "/v1/chat/completions");
+    assert.equal(requests[2]?.authorization, "Bearer source-check-fixture");
+    assert.equal(requests[2]?.body.model, "native-source-check");
+    const check = JSON.parse(requests[2]?.body.messages.at(-1)?.content ?? "");
+    assert.deepEqual(Object.keys(check).sort(), ["instruction", "selectedText"]);
+    assert.deepEqual(JSON.parse(check.selectedText), [
+      {
+        id: 1,
+        claim: supported,
+        evidence: [{ source: "field-log.md · line 2", original: excerpt, revised: revision }],
+      },
+    ]);
+    assert.equal(await readFile(path, "utf8"), cited);
+    assert.equal(await readFile(source, "utf8"), `${unapproved}\n${revision}\n`);
   } finally {
     endpoint.closeAllConnections();
     await new Promise<void>((resolve) => endpoint.close(() => resolve()));
@@ -3830,4 +3908,154 @@ if (prompt.instruction === ${JSON.stringify(cancelInstruction)}) {
   assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, callsBeforeReplacement);
   await clickSettingsButton("Forget Agent");
   await clickSettingsButton("Close");
+});
+
+test("a Codex task copy exposes approved files and applies only its manuscript diff", async () => {
+  const codex = process.env.MINT_SMOKE_CODEX;
+  assert.ok(codex, "the hosted smoke job provisions the Codex CLI sandbox");
+  const fixture = await mkdtemp(join(dir, "agent-task-copy-"));
+  const draft = join(fixture, "manuscript.md");
+  const sibling = join(fixture, "unapproved.md");
+  const executable = join(fixture, "fixture-codex");
+  const initial = "First paragraph.  \r\n\r\nOriginal.\r\n";
+  const unsaved = initial.replace("Original.", "Original. Unsaved note.");
+  const changed = unsaved.replace("Original.", "Revised.");
+  const approved = "Only the approved passage.";
+  await writeFile(draft, initial);
+  await writeFile(sibling, "Private text.");
+  await writeFile(
+    executable,
+    `#!/usr/bin/env node
+const fs = require("node:fs");
+const { spawnSync } = require("node:child_process");
+const codex = ${JSON.stringify(codex)};
+const args = process.argv.slice(2);
+if (args[0] === "sandbox") {
+  process.exit(spawnSync(codex, args, { stdio: "inherit" }).status ?? 1);
+}
+const prompt = JSON.parse(fs.readFileSync(0, "utf8"));
+const config = args.flatMap((arg, i) =>
+  arg === "-c" && args[i + 1].startsWith("permissions.") ? ["-c", args[i + 1]] : []);
+const sample = prompt.instruction.startsWith("Suggest one concise rewrite");
+const shell = sample ? ${JSON.stringify(`set -eu
+test "$(cat draft.md)" = "We are currently in the process of reviewing the draft."
+printf '%s' "We are reviewing the draft." > draft.md
+`)} : ${JSON.stringify(`set -eu
+test "$(ls -a)" = "$(printf '.\n..\ndraft.md\nmaterials')"
+test "$(ls materials)" = "1.txt"
+test "$(cat materials/1.txt)" = "$3"
+if cat "$1" >/dev/null 2>&1 || cat "$2" >/dev/null 2>&1; then exit 9; fi
+if (printf 'outside write' > "$1") 2>/dev/null || (printf 'outside write' > "$2") 2>/dev/null; then exit 10; fi
+printf '%s' "$4" > expected.txt
+cmp draft.md expected.txt
+rm expected.txt
+printf '%s' "$5" > draft.md
+printf 'unapproved new file' > unapproved-new.md
+`)};
+const result = spawnSync(codex, [
+  "sandbox", ...config, "--permission-profile", "mint-task-copy",
+  "--cd", process.cwd(), "--", "/bin/sh", "-c", shell, "fixture",
+  ${JSON.stringify(draft)}, ${JSON.stringify(sibling)}, ${JSON.stringify(approved)},
+  ${JSON.stringify(unsaved)}, ${JSON.stringify(changed)},
+], { stdio: "inherit" });
+if (result.status !== 0) process.exit(result.status ?? 1);
+console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "Edited task copy." } }));
+console.log(JSON.stringify({ type: "turn.completed" }));
+`,
+    { mode: 0o700 },
+  );
+
+  await restart([draft]);
+  await openSettings();
+  const autosave = await command<boolean>("POST", `/session/${session}/execute/sync`, {
+    script: `return Boolean([...document.querySelectorAll('dialog[open] label')]
+      .find(label => label.textContent.trim() === 'Save automatically')?.control.checked);`,
+    args: [],
+  });
+  if (autosave) {
+    await clickPath(
+      "//input[@type='checkbox' and @id=//label[normalize-space(.)='Save automatically']/@for]",
+    );
+  }
+  await clickSettingsButton("External Agents");
+  await clickPath("//label[normalize-space(.)='Codex executable']/input");
+  await keyActions(typing(executable));
+  await clickSettingsButton("Inspect Agent");
+  const select = (label: string, value: string) =>
+    command("POST", `/session/${session}/execute/sync`, {
+      script: `const select = [...document.querySelectorAll('label')].find(
+        label => label.firstChild?.textContent?.trim() === arguments[0])?.querySelector('select');
+        const option = [...(select?.options ?? [])].find(option => !option.disabled &&
+          (option.value === arguments[1] || option.textContent === arguments[1]));
+        if (!option)
+          throw new Error("Missing option " + arguments[1]);
+        select.value = option.value;
+        select.dispatchEvent(new Event('change', { bubbles: true }));`,
+      args: [label, value],
+    });
+  await shows("MINT launches this executable with your account’s file access.");
+  await select("Agent permissions", "taskCopy");
+  await clickSettingsButton("Try example");
+  await clickSettingsButton("Allow and send");
+  await shows("Task copy editing verified");
+  await clickSettingsButton("Close");
+
+  await clickPath("//button[@role='tab' and normalize-space(.)='manuscript.md']");
+  await clickPath("//div[contains(@class,'cm-line') and normalize-space(.)='Original.']");
+  await keyActions([...typing(keys.end), ...typing(" Unsaved note.")]);
+  await waitForView(
+    "the unsaved note in the editor",
+    `return document.querySelector('.cm-content')?.textContent.includes("Original. Unsaved note.");`,
+  );
+  async function send(action: "preview" | "direct") {
+    await nativeShortcut("ctrl+shift+p");
+    await waitForView(
+      "the Command Palette to receive focus",
+      `return document.activeElement?.matches('dialog[aria-label="Command Palette"] input');`,
+    );
+    await keyActions(typing("Ask AI"));
+    await shows("Ask AI");
+    await keyActions(typing(keys.enter));
+    await waitForView(
+      "the task copy recipient to load",
+      `return [...document.querySelectorAll('section[aria-label="Ask AI"] select option')]
+        .some(option => option.textContent.includes(${JSON.stringify(executable)}));`,
+    );
+    await select("Recipient", `Codex · ${executable}`);
+    await select("Scope", "document");
+    await select("Action", action);
+    await addPastedWritingMaterial(approved);
+    await clickPath(
+      "//section[@aria-label='Ask AI']//label[normalize-space(.)='Instruction']/input",
+    );
+    await keyActions([...typing("Revise the original sentence."), ...typing(keys.enter)]);
+  }
+
+  await send("preview");
+  await waitForView(
+    "the proposed edit and discarded extra file to be shown",
+    `const composer = document.querySelector('section[aria-label="Ask AI"]');
+     return composer?.innerText.includes("Apply proposed edit") &&
+       composer.innerText.includes("Other changes in the task copy were discarded.");`,
+  );
+  assert.equal(await readFile(draft, "utf8"), initial);
+  assert.equal(await readFile(sibling, "utf8"), "Private text.");
+  await clickPath("//section[@aria-label='Ask AI']//button[@aria-label='Close']");
+  await send("direct");
+  await waitForView(
+    "the manuscript change in the editor",
+    `return document.querySelector('.cm-content')?.textContent.includes("Revised. Unsaved note.");`,
+  );
+  assert.equal(await readFile(draft, "utf8"), initial);
+  await nativeShortcut("ctrl+s");
+  await until("only the approved change to be saved", async () =>
+    (await readFile(draft, "utf8")) === changed ? true : null,
+  );
+  assert.deepEqual((await readdir(fixture)).sort(), [
+    "fixture-codex",
+    "manuscript.md",
+    "unapproved.md",
+  ]);
+  assert.equal(await readFile(sibling, "utf8"), "Private text.");
+  await invokeNative("forget_external_agent", { path: executable });
 });

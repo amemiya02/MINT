@@ -4,7 +4,7 @@ import type { Platform } from "../platform/platform.ts";
 import { useSettings } from "../settings/useSettings.ts";
 import { useTabStore } from "../tabs/context.ts";
 import { ExternalAgentAccessNotice } from "./ExternalAgentPanel.tsx";
-import { type ExternalAgent, externalAgentSender } from "./external-agent.ts";
+import { type AgentAccess, type ExternalAgent, externalAgentSender } from "./external-agent.ts";
 import {
   type MaterialPlan,
   MaterialPlanPreview,
@@ -40,6 +40,7 @@ import {
 import {
   hasTaskImages,
   type NamedMaterial,
+  type TaskContext,
   type WritingRequest,
   type WritingSender,
 } from "./writing-sender.ts";
@@ -54,6 +55,7 @@ interface DraftConnection {
   readonly label: string;
   readonly send: WritingSender;
   readonly visionTarget?: VisionTarget;
+  readonly agentAccess?: AgentAccess;
 }
 
 interface DraftTask {
@@ -120,6 +122,8 @@ export function DraftComposer({
   const [applied, setApplied] = useState<{
     text: string;
     passages: readonly SourcePassage[];
+    context?: TaskContext;
+    connection: DraftConnection;
   } | null>(null);
   const appliedReply = applied?.text ?? "";
   const [showAppliedReply, setShowAppliedReply] = useState(false);
@@ -243,6 +247,7 @@ export function DraftComposer({
       id: `agent:${item.path}`,
       label: t("writing.recipient.agent", { path: item.path }),
       send: externalAgentSender(platform.externalAgent, item, item.preferredAccess),
+      agentAccess: item.preferredAccess,
     })),
   ];
 
@@ -272,6 +277,7 @@ export function DraftComposer({
         request: {
           instruction: t("draft.prompt", { instruction: instruction.trim() }),
           taskContext: capacity.plan.contexts[0],
+          responseFormat: "draft",
         },
         folder: searchFolder,
       },
@@ -329,9 +335,10 @@ export function DraftComposer({
             setAttempt({ ...entry, approved, partial, status: "working" });
           },
           mapBatchReply(reply, context) {
+            if (reply.taskCopy === null) throw "invalidReply";
             if (replyStatus(reply) !== "complete")
               return readingSources ? { ...reply, text: draftText(reply.text) } : reply;
-            const result = readDraftPassages(reply.text, context);
+            const result = readDraftPassages(reply.text, context, reply.taskCopy);
             if (!result.text.trim()) throw "invalidReply";
             for (const passage of result.passages)
               passages.push({ ...passage, from: passage.from + nextOffset });
@@ -368,6 +375,7 @@ export function DraftComposer({
             recipient: connection.label,
             recipientId: connection.id,
             direct: inserted,
+            ignoredChanges: reply.ignoredChanges,
             toolOutcome: toolApproval.result(),
             sourcePassages: passages.length ? passages : undefined,
             status,
@@ -377,7 +385,7 @@ export function DraftComposer({
           },
         });
         if (inserted) {
-          setApplied({ text: reply.text, passages });
+          setApplied({ text: reply.text, passages, context: sentContext, connection });
           setAttempt({ ...entry, approved, status, partial: "" });
           if (store.getState().activeId === tabId) store.editor(tabId)?.focus();
           return;
@@ -396,9 +404,11 @@ export function DraftComposer({
         setError(
           code === "agentChanged" || code === "agentAccessRequired"
             ? "agent.reviewAgain"
-            : code === "connectionMissing"
-              ? "draft.connectionUnavailable"
-              : "draft.failed",
+            : code === "agentTaskCopyUnavailable"
+              ? "agent.taskCopyUnavailable"
+              : code === "connectionMissing"
+                ? "draft.connectionUnavailable"
+                : "draft.failed",
         );
       }
     }
@@ -491,6 +501,14 @@ export function DraftComposer({
               draft={applied.text}
               passages={applied.passages}
               editor={store.editor(tabId)}
+              context={applied.context}
+              platform={platform}
+              recipients={
+                applied.connection.id
+                  ? connections
+                  : [{ ...applied.connection, id: "one-time-model" }, ...connections]
+              }
+              originalRecipient={applied.connection.id || "one-time-model"}
             />
           </div>
         )}
@@ -654,9 +672,7 @@ export function DraftComposer({
         <WritingToolPicker picker={toolPicker} />
         {agent && (
           <details className="space-y-1 text-xs text-(--mint-muted)">
-            <summary>
-              {t(agent.preferredAccess === "readOnly" ? "agent.readOnly" : "agent.configured")}
-            </summary>
+            <summary>{t(`agent.${agent.preferredAccess}`)}</summary>
             <ExternalAgentAccessNotice access={agent.preferredAccess} />
           </details>
         )}
