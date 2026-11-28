@@ -54,7 +54,7 @@ export function modelWritingSender(
   connection: ModelTarget,
   options?: ModelOptions,
 ): WritingSender<ModelReply> {
-  return ({ instruction, selectedText, taskContext, history, responseFormat }) => {
+  return ({ instruction, selectedText, annotationBatch, taskContext, history, responseFormat }) => {
     const messages: ModelMessage[] = [];
     if (responseFormat === "replacement")
       messages.push({ role: "system", content: replacementInstruction });
@@ -68,9 +68,9 @@ export function modelWritingSender(
     messages.push({
       role: "user",
       content:
-        selectedText === undefined && taskContext === undefined
+        selectedText === undefined && annotationBatch === undefined && taskContext === undefined
           ? instruction
-          : JSON.stringify({ instruction, selectedText, taskContext }),
+          : JSON.stringify({ instruction, selectedText, annotationBatch, taskContext }),
     });
     return send(connection, messages, options);
   };

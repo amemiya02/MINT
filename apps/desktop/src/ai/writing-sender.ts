@@ -30,9 +30,18 @@ export const materialRequestInstruction =
 export interface WritingRequest {
   readonly instruction: string;
   readonly selectedText?: string;
+  readonly annotationBatch?: readonly WritingAnnotation[];
   readonly taskContext?: TaskContext;
   readonly history?: readonly WritingTurn[];
   readonly responseFormat?: "replacement";
+}
+
+export interface WritingAnnotation {
+  readonly id: string;
+  readonly kind: string;
+  readonly excerpt: string;
+  readonly note: string;
+  readonly editable: boolean;
 }
 
 export interface WritingReply {
