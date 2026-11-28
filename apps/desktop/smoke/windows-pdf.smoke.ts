@@ -61,7 +61,7 @@ test("WebView2 saves the previewed A5 pages with the chosen margins and embedded
     await native("Export");
     const expected = await readProof("preview.json");
     assert.ok(Array.isArray(expected) && expected.length > 1);
-    await native("Save");
+    console.log((await native("Save")).stdout.trim());
     await expect
       .poll(
         async () => {

@@ -14,6 +14,9 @@ public static class PdfDialog {
     [DllImport("user32.dll")] public static extern int GetMenuItemCount(IntPtr menu);
     [DllImport("user32.dll")] public static extern uint GetMenuItemID(IntPtr menu, int index);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetMenuString(IntPtr menu, uint index, StringBuilder text, int length, uint flags);
+    [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr hwnd);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern IntPtr GetDlgItem(IntPtr hwnd, int id);
     [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hwnd, uint message, IntPtr wparam, IntPtr lparam);
     public static IntPtr NextWindow(IntPtr after, bool save) { return FindWindowEx(IntPtr.Zero,after,save ? "#32770" : null,save ? "Save PDF" : null); }
@@ -45,7 +48,19 @@ do {
             if ($id -ge 0 -and [PdfDialog]::PostMessage($window, 0x111, [IntPtr]$id, [IntPtr]::Zero)) { exit 0 }
         } else {
             $save = [PdfDialog]::GetDlgItem($window, 1)
-            if ($save -ne [IntPtr]::Zero -and [PdfDialog]::PostMessage($save, 0xf5, [IntPtr]::Zero, [IntPtr]::Zero)) { exit 0 }
+            if ($save -eq [IntPtr]::Zero -or ![PdfDialog]::IsWindowVisible($save) -or ![PdfDialog]::IsWindowEnabled($save)) { continue }
+            # A posted BM_CLICK can be ignored while the common dialog is opening.
+            # Deliver the Save button's BN_CLICKED notification to the dialog, then
+            # confirm Windows has actually dismissed it before polling the PDF.
+            if (![PdfDialog]::PostMessage($window, 0x111, [IntPtr]1, $save)) { continue }
+            $attempt = [DateTime]::UtcNow.AddSeconds(2)
+            do {
+                Start-Sleep -Milliseconds 100
+                if (![PdfDialog]::IsWindow($window) -or ![PdfDialog]::IsWindowVisible($window)) {
+                    Write-Output 'MINT native Save PDF dialog accepted'
+                    exit 0
+                }
+            } while ([DateTime]::UtcNow -lt $attempt)
         }
     } while ($true)
     Start-Sleep -Milliseconds 200
