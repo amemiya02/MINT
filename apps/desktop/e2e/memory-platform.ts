@@ -22,6 +22,10 @@ export async function launch(page: Page, options: MemoryPlatformOptions = {}): P
     (window as unknown as MintWindow).__MINT_MEMORY__ = seed;
   }, options);
   await page.goto("/");
+  // The first render installs the application's menu and keyboard accelerators.
+  await page.waitForFunction(
+    () => (window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__?.menu.length > 0,
+  );
 }
 
 /** Messages of the question dialogs (e.g. "save changes?") shown so far. */
