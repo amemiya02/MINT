@@ -10,6 +10,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { after, before, test } from "node:test";
 import { promisify } from "node:util";
 import JSZip from "jszip";
+import type { SavedWritingTask } from "../src/ai/writing-tasks.ts";
 
 const driver = process.env.TAURI_DRIVER_URL ?? "http://127.0.0.1:4444";
 const application = process.env.MINT_APP;
@@ -1635,6 +1636,15 @@ test("a saved writing review resumes after a native restart without contacting i
   const note = "Check this with the interviewer.";
   const requests: { messages: { content: string }[] }[] = [];
   let connectionId: string | undefined;
+  const savedReviewWithPending = (count: number) =>
+    until(`the saved writing review to have ${count} pending decisions`, async () => {
+      const [task] = await invokeNative<SavedWritingTask[]>("list_writing_tasks", { path: draft });
+      if (!task) return null;
+      const suggestions = task.turns[0]?.suggestions;
+      return suggestions?.filter(({ status }) => status === "preview").length === count
+        ? task
+        : null;
+    }).catch(explain);
   await writeFile(draft, original);
   const endpoint = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
@@ -1779,6 +1789,7 @@ test("a saved writing review resumes after a native restart without contacting i
       "only the two remaining Methods edits to reach disk",
       async () => (await readFile(draft)).equals(Buffer.from(batch)) || null,
     ).catch(explain);
+    await savedReviewWithPending(2);
     await keyActions(chord(keys.control, "z"));
     await nativeShortcut("ctrl+s");
     await until(
@@ -1787,10 +1798,9 @@ test("a saved writing review resumes after a native restart without contacting i
     ).catch(explain);
     const history = await until("the accepted document history to be recorded", async () => {
       const versions = await invokeNative<number[]>("list_versions", { path: draft });
-      return versions.length ? versions : null;
+      return versions.length === 2 ? versions : null;
     }).catch(explain);
-    const [review] = await invokeNative<{ id: string }[]>("list_writing_tasks", { path: draft });
-    assert.ok(review);
+    const review = await savedReviewWithPending(4);
     const links = await invokeNative<{ id: string; path: string; title: string }[]>(
       "list_writing_reviews_in_folder",
       { folder: dirname(draft) },

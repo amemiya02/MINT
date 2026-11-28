@@ -165,7 +165,7 @@ test("section acceptance preserves prior decisions and can be undone in one edit
   page,
 }) => {
   const source =
-    "# Methods\n\nOld opening.\n\nOld detail.\n\nOld context.\n\nOld sample.\n\nOld measure.\n\n# Results\n\nOld result.";
+    "# Methods\n\nOld opening.\n\nOld detail.\n\nOld context.\n\nKeep this protocol.\n\nOld sample.\n\nKeep these units.\n\nOld measure.\n\n# Results\n\nOld result.";
   const replacement = source.replaceAll("Old ", "New ").replace("New sample.\n\n", "");
   const { assistant, editor } = await openProposals(page, source, replacement);
   await tabTo(page, assistant.getByRole("button", { name: "Review proposed edits" }));
@@ -182,6 +182,9 @@ test("section acceptance preserves prior decisions and can be undone in one edit
   await page.keyboard.press("Enter");
 
   const section = review.getByRole("combobox", { name: "Section" });
+  await expect(
+    section.getByRole("option", { name: "Methods · 2 pending of 5 edits" }),
+  ).toBeAttached();
   await section.selectOption({ label: "Methods · 2 pending of 5 edits" });
   const accept = review.getByRole("button", { name: "Accept remaining edits in Methods" });
   await tabTo(page, accept);
@@ -201,9 +204,14 @@ test("section acceptance preserves prior decisions and can be undone in one edit
   await page.keyboard.press("ControlOrMeta+S");
   const accepted = source.replace("Old sample.\n\n", "").replace("Old measure.", "New measure.");
   await expect.poll(() => readFile(page, path)).toBe(accepted);
+  await page.getByRole("button", { name: "Open manuscript.md in other pane" }).click();
+  const peer = page.getByRole("tabpanel", { name: "manuscript.md" }).last().getByRole("textbox");
+  await expect(peer).toBeFocused();
   await page.keyboard.press("ControlOrMeta+Z");
   await page.keyboard.press("ControlOrMeta+S");
   await expect.poll(() => readFile(page, path)).toBe(source);
+  await page.getByRole("button", { name: "Close manuscript.md", exact: true }).last().click();
+  await expect(editor).toBeFocused();
 
   await page.keyboard.press("ControlOrMeta+Shift+P");
   await page.getByRole("combobox", { name: "Command Palette" }).fill("All writing tasks");
