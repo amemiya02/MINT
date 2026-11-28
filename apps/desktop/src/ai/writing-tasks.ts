@@ -3,7 +3,7 @@ import { compareLines, rawLines } from "../tabs/line-diff.ts";
 import type { FolderChange } from "./folder-changes.ts";
 import type { SourcePassage } from "./source-passages.ts";
 import type { AttemptStatus } from "./writing-attempt.ts";
-import type { TaskContext, WritingTurn } from "./writing-sender.ts";
+import type { TaskContext, WritingRequest, WritingTurn } from "./writing-sender.ts";
 
 export type EditStatus = "preview" | "applied" | "discarded" | "reverted" | "kept";
 
@@ -36,6 +36,12 @@ export interface WritingToolRecord {
 }
 
 export interface SavedTurn extends WritingTurn {
+  readonly id?: string;
+  readonly alternativeTo?: string;
+  readonly baseline?: {
+    readonly scope: "selection" | "document" | "instruction" | "folder";
+    readonly requests: readonly WritingRequest[];
+  };
   readonly status?: AttemptStatus;
   readonly partial?: string;
   readonly material?: string;

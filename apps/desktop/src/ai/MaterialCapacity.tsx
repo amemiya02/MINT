@@ -467,10 +467,7 @@ export function MaterialPlanPreview({
               })}
             </p>
           )}
-          {[
-            ...(context?.currentDraft ? [context.currentDraft] : []),
-            ...(context?.materials ?? []),
-          ].map((material, position) => (
+          {contextMaterials(context).map((material, position) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: Named sources may repeat.
             <details key={position}>
               <summary>{materialLabel(material, t)}</summary>
