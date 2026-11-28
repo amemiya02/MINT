@@ -4,6 +4,7 @@ import { baseName } from "../paths.ts";
 import { useModalDialog } from "../window/useModalDialog.ts";
 import { type WritingTask, writingTaskDecisionLabel } from "./WritingTasks.tsx";
 import {
+  hasProposedEdits,
   openWritingReviews,
   type SavedWritingTask,
   type WritingTasksPlatform,
@@ -16,7 +17,7 @@ export function WritingTasksDialog({
   liveTasks,
   path,
   currentTabIds,
-  all,
+  mode,
   onScopeChange,
   onClose,
   onOpen,
@@ -26,13 +27,18 @@ export function WritingTasksDialog({
   readonly liveTasks: ReadonlyMap<string, WritingTask>;
   readonly path: string | null;
   readonly currentTabIds: ReadonlySet<number>;
-  readonly all: boolean;
+  readonly mode: "current" | "all" | "review";
   readonly onScopeChange: (all: boolean) => void;
   readonly onClose: () => void;
   readonly onOpen: (task: SavedWritingTask | WritingTask) => Promise<boolean>;
   readonly onDelete: (id: string) => void;
 }) {
   const t = useT();
+  const all = mode === "all";
+  const reviewing = mode === "review";
+  const heading = t(
+    reviewing ? "writing.review.title" : all ? "writing.tasks.all" : "writing.tasks",
+  );
   const { props, close } = useModalDialog(onClose);
   const [entries, setEntries] = useState<readonly SavedWritingTask[] | null>(null);
   const [failed, setFailed] = useState(false);
@@ -44,10 +50,16 @@ export function WritingTasksDialog({
   useEffect(() => {
     let current = true;
     void writingTaskWrites(tasks)
-      .then(() => tasks.list(path, all))
+      .then(() => tasks.list(path, all || reviewing))
       .then(
         (items) => {
-          if (current) setEntries(items.sort((a, b) => b.updatedAt - a.updatedAt));
+          if (current)
+            setEntries(
+              (reviewing
+                ? items.filter((task) => task.path === path && hasProposedEdits(task))
+                : items
+              ).sort((a, b) => b.updatedAt - a.updatedAt),
+            );
         },
         () => {
           if (current) setFailed(true);
@@ -56,7 +68,7 @@ export function WritingTasksDialog({
     return () => {
       current = false;
     };
-  }, [tasks, path, all]);
+  }, [tasks, path, all, reviewing]);
 
   const reviews = openWritingReviews(tasks);
   const saved = new Map(
@@ -65,12 +77,15 @@ export function WritingTasksDialog({
         if (all) return true;
         const review = reviews.get(task.id);
         const tabId = liveTasks.get(task.id)?.tabId ?? review?.tabId;
-        return !task.folder && (path !== null || (tabId !== undefined && currentTabIds.has(tabId)));
+        return (
+          (reviewing || !task.folder) &&
+          (path !== null || (tabId !== undefined && currentTabIds.has(tabId)))
+        );
       })
       .map((task) => [task.id, task]),
   );
-  const live = [...liveTasks].filter(
-    ([, task]) => all || (!task.folder && currentTabIds.has(task.tabId)),
+  const live = [...liveTasks].filter(([id, task]) =>
+    reviewing ? saved.has(id) : all || (!task.folder && currentTabIds.has(task.tabId)),
   );
   const rowIds = new Set([...live.map(([id]) => id), ...saved.keys()]);
 
@@ -120,12 +135,12 @@ export function WritingTasksDialog({
           setConfirm(null);
         } else props.onCancel(event);
       }}
-      aria-label={t(all ? "writing.tasks.all" : "writing.tasks")}
+      aria-label={heading}
       className="m-auto max-h-[80vh] w-[min(32rem,90vw)] overflow-auto rounded-lg border border-(--mint-border) bg-(--mint-bg) p-4 text-(--mint-fg) backdrop:bg-black/30"
     >
       <header className="mb-3 flex items-center gap-2">
-        <h2 className="mr-auto font-medium">{t(all ? "writing.tasks.all" : "writing.tasks")}</h2>
-        {(!all || currentTabIds.size > 0) && (
+        <h2 className="mr-auto font-medium">{heading}</h2>
+        {!reviewing && (!all || currentTabIds.size > 0) && (
           <button
             type="button"
             className="rounded px-2 py-1 hover:bg-(--mint-hover)"
@@ -144,11 +159,23 @@ export function WritingTasksDialog({
           {t("settings.close")}
         </button>
       </header>
-      {openFailed && <p role="alert">{t("writing.tasks.openFailed")}</p>}
+      {openFailed && (
+        <p role="alert">
+          {t(reviewing ? "writing.review.fileOpenFailed" : "writing.tasks.openFailed")}
+        </p>
+      )}
       {failed && <p role="alert">{t("writing.tasks.loadFailed")}</p>}
       {!failed && !entries && <p role="status">{t("writing.tasks.loading")}</p>}
       {!!entries && !rowIds.size && (
-        <p>{t(all ? "writing.tasks.allEmpty" : "writing.tasks.empty")}</p>
+        <p>
+          {t(
+            reviewing
+              ? "writing.review.noSaved"
+              : all
+                ? "writing.tasks.allEmpty"
+                : "writing.tasks.empty",
+          )}
+        </p>
       )}
       {rowIds.size > 0 && (
         <ul className="space-y-2">
@@ -156,7 +183,8 @@ export function WritingTasksDialog({
             const record = saved.get(id);
             const running = liveTasks.get(id);
             const item = running ?? record;
-            if (!item) return null;
+            const task = reviewing ? record : item;
+            if (!item || !task) return null;
             const location = item.folder
               ? t("writing.tasks.folder", { folder: item.folder })
               : (running?.name ??
@@ -180,11 +208,11 @@ export function WritingTasksDialog({
                     type="button"
                     className="min-w-0 flex-1 rounded p-1 text-start wrap-anywhere hover:bg-(--mint-hover)"
                     disabled={opening || deleting}
-                    onClick={() => void open(item)}
+                    onClick={() => void open(task)}
                   >
                     {item.title}
                   </button>
-                  {record && (
+                  {record && !reviewing && (
                     <button
                       type="button"
                       className="rounded px-2 py-1 hover:bg-(--mint-hover) disabled:opacity-50"

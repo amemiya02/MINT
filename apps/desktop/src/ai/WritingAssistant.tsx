@@ -10,8 +10,10 @@ import {
   useState,
 } from "react";
 import { useT } from "../i18n/index.ts";
+import { isWithin, parentPath } from "../paths.ts";
 import type { Platform } from "../platform/platform.ts";
 import { useTabStore } from "../tabs/context.ts";
+import { FocusedWritingReview, type ReviewEntry } from "./FocusedWritingReview.tsx";
 import {
   type MaterialPlan,
   MaterialPlanPreview,
@@ -44,9 +46,11 @@ import {
   openWritingReviews,
   type ReviewRange,
   registerTaskCheckpoint,
+  type SavedReviewLink,
   type SavedSuggestion,
   type SavedTurn,
   type SavedWritingTask,
+  type WritingTaskOpenRequest,
   writeTaskCheckpoint,
   writingTaskWrites,
 } from "./writing-tasks.ts";
@@ -104,6 +108,7 @@ type Suggestion = Omit<SavedSuggestion, "range"> & {
 interface RestoredReview {
   readonly task: SavedWritingTask;
   readonly mapper: ReturnType<typeof mapReviewRanges>;
+  readonly restoreReading: boolean;
 }
 
 function savedRange(range: TrackedRange): ReviewRange {
@@ -118,6 +123,14 @@ function restoreRange(editor: MintEditor, range: ReviewRange): Origin["range"] {
 function currentText({ range }: Suggestion, draft: string) {
   const { from, to } = range.current();
   return draft.slice(from, to);
+}
+
+function reviewStatus(suggestion: Suggestion, draft: string) {
+  return suggestion.batchApplied &&
+    suggestion.status === "applied" &&
+    currentText(suggestion, draft) === suggestion.before
+    ? "preview"
+    : suggestion.status;
 }
 
 function canRevert(suggestion: Suggestion) {
@@ -140,11 +153,12 @@ interface Props {
   readonly platform: Platform;
   readonly folder: string | null;
   readonly askRequest: { readonly folder?: string } | null;
-  readonly taskRestore: { readonly task: SavedWritingTask } | null;
+  readonly taskRestore: WritingTaskOpenRequest | null;
   readonly taskListRevision: number;
   readonly settingsOpen: boolean;
   readonly onAsk: () => void;
   readonly onTasks: () => void;
+  readonly onOpenReview: (task: SavedWritingTask, returnToTab: number) => Promise<boolean>;
   readonly onActivate: () => void;
   readonly onSettings: () => void;
   readonly externalChange: boolean;
@@ -167,6 +181,7 @@ export function WritingAssistant({
   settingsOpen,
   onAsk,
   onTasks,
+  onOpenReview,
   onActivate,
   onSettings,
   externalChange,
@@ -179,6 +194,7 @@ export function WritingAssistant({
   const [restored, setRestored] = useState<RestoredReview | null>(null);
   const taskRunning = useRef(false);
   const [placement, setPlacement] = useState<"inline" | "sidebar" | null>(null);
+  const [reviewStart, setReviewStart] = useState<{ id: string; returnToTab: number } | null>(null);
   const [hasSavedTasks, setHasSavedTasks] = useState(false);
   const [busyTask, setBusyTask] = useState<string | null>(null);
   const lastAsk = useRef<typeof askRequest>(null);
@@ -234,9 +250,10 @@ export function WritingAssistant({
     reviews.set(origin.id, {
       tabId,
       busy: busyTask === origin.id,
-      focus() {
+      focus(returnToTab) {
         onActivate();
         setPlacement("sidebar");
+        if (returnToTab !== undefined) setReviewStart({ id: origin.id, returnToTab });
       },
       remove() {
         setPlacement(null);
@@ -249,10 +266,12 @@ export function WritingAssistant({
     };
   }, [busyTask, editor, onActivate, origin, platform, tabId]);
 
-  useEffect(() => {
-    if (!editor || !taskRestore || lastRestore.current === taskRestore) return;
-    lastRestore.current = taskRestore;
-    const { task } = taskRestore;
+  const restoreTask = useEffectEvent((editor: MintEditor, request: WritingTaskOpenRequest) => {
+    const { task, returnToTab } = request;
+    if (taskRunning.current) {
+      request.complete(false);
+      return;
+    }
     const mapper = mapReviewRanges(task.baseline, editor.getText());
     setOrigin({
       id: task.id,
@@ -261,8 +280,15 @@ export function WritingAssistant({
       range: restoreRange(editor, mapper.range(task.origin)),
       folder: task.folder,
     });
-    setRestored({ task, mapper });
+    setRestored({ task, mapper, restoreReading: returnToTab === undefined });
     setPlacement("sidebar");
+    if (returnToTab !== undefined) setReviewStart({ id: task.id, returnToTab });
+    request.complete(true);
+  });
+  useEffect(() => {
+    if (!editor || !taskRestore || lastRestore.current === taskRestore) return;
+    lastRestore.current = taskRestore;
+    restoreTask(editor, taskRestore);
   }, [editor, taskRestore]);
 
   return (
@@ -305,6 +331,7 @@ export function WritingAssistant({
           path={path}
           name={name}
           placement={placement}
+          reviewStart={reviewStart?.id === origin.id ? reviewStart : null}
           setPlacement={setPlacement}
           active={active}
           taskRunning={taskRunning}
@@ -319,6 +346,7 @@ export function WritingAssistant({
             if (!origin.folder) setHasSavedTasks(true);
           }}
           onTasks={onTasks}
+          onOpenReview={onOpenReview}
           onBusyChange={setBusyTask}
         />
       )}
@@ -332,6 +360,7 @@ function Composer({
   path,
   name,
   placement,
+  reviewStart,
   setPlacement,
   taskRunning,
   active,
@@ -344,6 +373,7 @@ function Composer({
   restored,
   onSaved,
   onTasks,
+  onOpenReview,
   onBusyChange,
 }: Pick<
   Props,
@@ -355,6 +385,7 @@ function Composer({
   | "folder"
   | "settingsOpen"
   | "onSettings"
+  | "onOpenReview"
   | "onTasks"
   | "externalChange"
   | "refreshDisk"
@@ -364,6 +395,7 @@ function Composer({
   readonly onSaved: () => void;
   readonly onBusyChange: (id: string | null) => void;
   readonly placement: "inline" | "sidebar" | null;
+  readonly reviewStart: { readonly returnToTab: number } | null;
   readonly taskRunning: { current: boolean };
   readonly setPlacement: (placement: "inline" | "sidebar" | null) => void;
 }) {
@@ -410,6 +442,10 @@ function Composer({
   const checkingDisk = useRef(false);
   const trackedSuggestions = useRef(new Set<TrackedRange>());
   const [showSource, setShowSource] = useState(restored?.task.showSource ?? false);
+  const [reviewSelection, setReviewSelection] = useState(restored?.task.reviewSelection);
+  const [focusedReview, setFocusedReview] = useState(false);
+  const returnTab = useRef(tabId);
+  const reading = useRef<ReturnType<MintEditor["captureReadingPosition"]> | null>(null);
   const [draft, setDraft] = useState(() => origin.editor.getText());
   const recipient = recipients.find((candidate) => candidate.id === recipientId);
   const labelFor = (candidate: WritingRecipient) =>
@@ -446,23 +482,24 @@ function Composer({
         updatedAt: Date.now(),
         baseline: editor.getText(),
         origin: { ...savedRange(origin.range), text: origin.text },
-        reading: { ...editor.getSelection(), top: editor.getVisibleRange().from },
+        reading: reading.current?.current() ?? {
+          ...editor.getSelection(),
+          top: editor.getVisibleRange().from,
+        },
         reviewScroll: reviewScroll.current,
+        reviewSelection,
         showSource,
         pending: pending.current,
         turns: turns.map((turn) => ({
           ...turn,
           suggestions: turn.suggestions?.map((item) => ({
             ...item,
-            range:
-              item.status === "preview" || canRevert(item)
-                ? savedRange(item.range)
-                : { from: 0, to: 0, located: false },
+            range: savedRange(item.range),
           })),
         })),
       };
     },
-    [origin, path, showSource, turns],
+    [origin, path, reviewSelection, showSource, turns],
   );
 
   const persist = useCallback(
@@ -520,11 +557,13 @@ function Composer({
           }),
         })),
       );
-      origin.editor.restoreReadingPosition({
-        anchor: mapper.point(task.reading.anchor),
-        head: mapper.point(task.reading.head),
-        top: mapper.point(task.reading.top),
-      });
+      if (restored.restoreReading) {
+        origin.editor.restoreReadingPosition({
+          anchor: mapper.point(task.reading.anchor),
+          head: mapper.point(task.reading.head),
+          top: mapper.point(task.reading.top),
+        });
+      }
       if (review.current) review.current.scrollTop = reviewScroll.current;
       setReady(true);
     }
@@ -533,6 +572,8 @@ function Composer({
       flushReadingCheckpoint();
       taskRunning.current = false;
       controller.current?.abort();
+      reading.current?.release();
+      reading.current = null;
       for (const range of tracked) range.release();
       tracked.clear();
     };
@@ -613,6 +654,42 @@ function Composer({
     origin.editor.focus();
   }
 
+  function openFocusedReview(returnToTab = tabId) {
+    returnTab.current = returnToTab;
+    reading.current ??= origin.editor.captureReadingPosition();
+    setFocusedReview(true);
+  }
+
+  const startFocusedReview = useEffectEvent(openFocusedReview);
+  useEffect(() => {
+    if (ready && reviewStart) startFocusedReview(reviewStart.returnToTab);
+  }, [ready, reviewStart]);
+
+  function closeFocusedReview(returnToOriginal = true) {
+    persist();
+    reading.current?.restore();
+    reading.current?.release();
+    reading.current = null;
+    setFocusedReview(false);
+    setPlacement(null);
+    if (returnToOriginal) {
+      const id = returnTab.current;
+      if (id !== tabId && store.getState().tabs.some((tab) => tab.id === id)) store.activate(id);
+      else origin.editor.focus();
+    }
+  }
+
+  async function switchReview({ id, path }: SavedReviewLink) {
+    const tasks = platform.writingTasks;
+    await writingTaskWrites(tasks);
+    const task = (await tasks.list(path, true)).find(
+      (task) => task.id === id && task.path === path,
+    );
+    if (!task || !(await onOpenReview(task, returnTab.current))) return false;
+    closeFocusedReview(false);
+    return true;
+  }
+
   function locate() {
     const { from, to } = origin.range.current();
     if (from === to) {
@@ -629,7 +706,6 @@ function Composer({
 
   function recordReversionDecision(ranges: readonly TrackedRange[], status: "reverted" | "kept") {
     const decided = new Set(ranges);
-    for (const range of decided) releaseRange(range);
     setTurns((previous) =>
       previous.map((turn) => ({
         ...turn,
@@ -766,16 +842,18 @@ function Composer({
     position: number,
     suggestion: Suggestion,
     acceptedText?: string,
+    keepReviewFocus = false,
   ) {
-    if (busy || checkingDisk.current || suggestion.status !== "preview") return;
-    let update: Partial<Suggestion> = { status: "discarded" };
+    if (busy || checkingDisk.current || reviewStatus(suggestion, draft) !== "preview") return false;
+    let update: Partial<Suggestion> = { status: "discarded", batchApplied: false };
     if (acceptedText !== undefined) {
       checkingDisk.current = true;
       try {
-        if (!(await refreshDisk()) || !mounted.current || !suggestion.range.hasBoundaries()) return;
+        if (!(await refreshDisk()) || !mounted.current || !suggestion.range.hasBoundaries())
+          return false;
         const range = suggestion.range.current();
-        if (origin.editor.getText().slice(range.from, range.to) !== acceptedText) return;
-        update = { status: "applied" };
+        if (origin.editor.getText().slice(range.from, range.to) !== acceptedText) return false;
+        update = { status: "applied", batchApplied: false };
         if (acceptedText !== suggestion.after) {
           const [inserted] = origin.editor.replaceRanges([{ ...range, text: suggestion.after }], {
             collapseSelection: range,
@@ -784,20 +862,70 @@ function Composer({
           if (inserted) {
             const edited = origin.editor.getText();
             update = recordApplied(
-              suggestion,
+              { ...suggestion, batchApplied: false },
               inserted,
               edited.slice(inserted.from, inserted.to),
               acceptedText,
             );
           }
         }
-        if (isActive.current) origin.editor.focus();
+        if (isActive.current && !keepReviewFocus) origin.editor.focus();
       } finally {
         checkingDisk.current = false;
       }
     }
-    releaseRange(suggestion.range);
     updateSuggestion(index, position, update);
+    return true;
+  }
+
+  async function acceptSection(entries: readonly ReviewEntry[]) {
+    if (busy || checkingDisk.current) return 0;
+    checkingDisk.current = true;
+    try {
+      if (!(await refreshDisk()) || !mounted.current || !reading.current) return 0;
+      const editor = origin.editor;
+      const live = editor.getText();
+      const eligible = entries.flatMap(({ turn, position }) => {
+        const item = turns[turn]?.suggestions?.[position];
+        if (
+          !item ||
+          item.note ||
+          reviewStatus(item, live) !== "preview" ||
+          !item.range.hasBoundaries() ||
+          currentText(item, live) !== item.before
+        )
+          return [];
+        return [{ ...item.range.current(), text: item.after, item }];
+      });
+      // Different replies can propose edits to the same passage. Leave overlapping
+      // proposals pending for individual comparison.
+      let end = -1;
+      eligible.sort((a, b) => a.from - b.from);
+      const replacements = eligible.filter(({ from, to }, index) => {
+        const overlapsEarlier = from < end || from === eligible[index - 1]?.from;
+        end = Math.max(end, to);
+        const next = eligible[index + 1]?.from;
+        return !overlapsEarlier && (next === undefined || (next >= to && next !== from));
+      });
+      const ranges = editor.replaceRanges(replacements, { lineEndings: "match" });
+      const edited = editor.getText();
+      const updates = new Map<Suggestion, Suggestion>();
+      for (const [index, { item }] of replacements.entries()) {
+        const range = ranges[index];
+        if (!range) continue;
+        const applied = recordApplied(item, range, edited.slice(range.from, range.to));
+        updates.set(item, { ...applied, batchApplied: true });
+      }
+      setTurns((previous) =>
+        previous.map((turn) => ({
+          ...turn,
+          suggestions: turn.suggestions?.map((item) => updates.get(item) ?? item),
+        })),
+      );
+      return updates.size;
+    } finally {
+      checkingDisk.current = false;
+    }
   }
 
   function reportSendError(problem: unknown) {
@@ -1014,7 +1142,10 @@ function Composer({
             ? {
                 ...turn,
                 suggestions: turn.suggestions?.map((suggestion, position) => {
-                  if (position !== rewrite.position || suggestion.status !== "preview")
+                  if (
+                    position !== rewrite.position ||
+                    reviewStatus(suggestion, origin.editor.getText()) !== "preview"
+                  )
                     return suggestion;
                   if (
                     replacement !== undefined &&
@@ -1157,6 +1288,16 @@ function Composer({
     ],
   );
   useWritingTask(report);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: document edits can move section headings.
+  const sections = useMemo(() => {
+    if (!focusedReview) return [];
+    const parents: { level: number; text: string }[] = [];
+    return origin.editor.getOutline().map(({ level, text, from }, index) => {
+      while (parents.length && (parents.at(-1)?.level ?? 0) >= level) parents.pop();
+      parents.push({ level, text });
+      return { id: String(index), name: parents.map((heading) => heading.text).join(" › "), from };
+    });
+  }, [focusedReview, origin.editor, draft]);
 
   const canRetry = attempt && !busy && !attempt.capacityRejected && attempt.status !== "complete";
   const sameConnection = canRetry && recipients.find(({ id }) => id === attempt.recipientId);
@@ -1164,6 +1305,83 @@ function Composer({
   if (!placement) return null;
   const sidebar = placement === "sidebar";
   const latest = turns.at(-1);
+  if (focusedReview) {
+    const entries = turns
+      .flatMap((turn, index) =>
+        (turn.suggestions ?? []).map((suggestion, position): ReviewEntry & { from: number } => {
+          const { from } = suggestion.range.current();
+          const located = suggestion.range.hasBoundaries();
+          const section = located ? sections.findLast((heading) => heading.from <= from) : null;
+          return {
+            key: `${index}:${suggestion.id}`,
+            turn: index,
+            position,
+            from,
+            before: suggestion.before,
+            after: suggestion.after,
+            current: currentText(suggestion, draft),
+            status: reviewStatus(suggestion, draft),
+            note: suggestion.note,
+            section: section ?? {
+              id: located ? "intro" : "unlocated",
+              name: t(
+                !located
+                  ? "writing.review.unlocated"
+                  : sections.length
+                    ? "writing.review.intro"
+                    : "writing.scope.document",
+              ),
+            },
+            blocked: externalChange ? "disk" : !located ? "boundaries" : undefined,
+          };
+        }),
+      )
+      .sort((a, b) => a.from - b.from);
+    return (
+      <FocusedWritingReview
+        entries={entries}
+        file={name}
+        path={path}
+        folder={folder && (!path || isWithin(path, folder)) ? folder : path && parentPath(path)}
+        tasks={platform.writingTasks}
+        onOpenFile={switchReview}
+        initialSelection={reviewSelection}
+        onSelection={setReviewSelection}
+        onCompare={({ turn, position }) => {
+          const range = turns[turn]?.suggestions?.[position]?.range;
+          if (!range?.hasBoundaries()) return null;
+          const target = range.current();
+          const surrounding = origin.editor.getComparisonBlock(target);
+          if (!surrounding) return null;
+          return {
+            kind: surrounding.kind,
+            prefix: draft.slice(surrounding.from, target.from),
+            suffix: draft.slice(target.to, surrounding.to),
+          };
+        }}
+        source={showSource}
+        busy={busy}
+        onSource={setShowSource}
+        onLocate={({ turn, position }) => {
+          const range = turns[turn]?.suggestions?.[position]?.range;
+          if (range?.hasBoundaries()) {
+            const { from, to } = range.current();
+            origin.editor.setSelection({ anchor: from, head: to, scrollIntoView: "start" });
+          }
+        }}
+        onDecide={({ turn, position, current }, accept) => {
+          const suggestion = turns[turn]?.suggestions?.[position];
+          return suggestion
+            ? decide(turn, position, suggestion, accept ? current : undefined, true)
+            : Promise.resolve(false);
+        }}
+        onAcceptSection={acceptSection}
+        onRestore={({ turn, position }) => updateSuggestion(turn, position, { status: "preview" })}
+        onComment={({ turn, position }, note) => updateSuggestion(turn, position, { note })}
+        onClose={() => closeFocusedReview()}
+      />
+    );
+  }
   if (
     !sidebar &&
     !busy &&
@@ -1173,7 +1391,7 @@ function Composer({
   ) {
     const { suggestions } = latest;
     const applied = suggestions.filter((suggestion) => isApplied(suggestion, draft)).length;
-    const pending = suggestions.filter(({ status }) => status === "preview").length;
+    const pending = suggestions.filter((item) => reviewStatus(item, draft) === "preview").length;
     const summary =
       pending === 0 && applied === 0
         ? t("writing.edit.noneApplied")
@@ -1189,6 +1407,11 @@ function Composer({
         <button type="button" className={buttonClass} onClick={viewChanges}>
           {t("writing.viewChanges")}
         </button>
+        {pending > 0 && (
+          <button type="button" className={buttonClass} onClick={() => openFocusedReview()}>
+            {t("writing.review.title")}
+          </button>
+        )}
         {applied > 0 && (
           <button
             type="button"
@@ -1330,14 +1553,19 @@ function Composer({
         />
       )}
       {messages.some((turn) => turn.suggestions?.length) && (
-        <label className="flex items-center gap-1">
-          <input
-            type="checkbox"
-            checked={showSource}
-            onChange={(event) => setShowSource(event.target.checked)}
-          />
-          {t("writing.edit.source")}
-        </label>
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" className={buttonClass} onClick={() => openFocusedReview()}>
+            {t("writing.review.title")}
+          </button>
+          <label className="flex items-center gap-1">
+            <input
+              type="checkbox"
+              checked={showSource}
+              onChange={(event) => setShowSource(event.target.checked)}
+            />
+            {t("writing.edit.source")}
+          </label>
+        </div>
       )}
       <div aria-live="polite" className="space-y-2">
         {messages.map((turn, position) => {
@@ -1360,8 +1588,9 @@ function Composer({
               {sidebar && renderSentContext(turn.context, turn.searchFolder)}
               {suggestions?.length ? (
                 suggestions.map((suggestion, position) => {
-                  const pending = suggestion.status === "preview";
-                  const revertible = canRevert(suggestion);
+                  const status = reviewStatus(suggestion, draft);
+                  const pending = status === "preview";
+                  const revertible = !pending && canRevert(suggestion);
                   const current = pending || revertible ? currentText(suggestion, draft) : "";
                   const conflict = pending && current !== suggestion.before;
                   const located = suggestion.range.hasBoundaries();
@@ -1378,19 +1607,26 @@ function Composer({
                       })}
                       before={suggestion.before}
                       after={suggestion.appliedText ?? suggestion.after}
-                      status={reverted ? "reverted" : suggestion.status}
+                      status={reverted ? "reverted" : status}
                       showAppliedComparison={revertible}
                       source={showSource}
                       current={conflict || revertConflict ? current : undefined}
                       blocked={pending || (revertible && !reverted) ? blocked : undefined}
                       busy={busy}
                       recipient={turn.recipient}
-                      conversation={suggestion.comments?.map(({ id, instruction, reply }) => (
-                        <div key={id} className="rounded bg-(--mint-hover) p-2">
-                          <p className="font-medium">{instruction}</p>
-                          {renderReplyExcerpt(reply)}
-                        </div>
-                      ))}
+                      conversation={
+                        <>
+                          {suggestion.note && (
+                            <p className="whitespace-pre-wrap wrap-anywhere">{suggestion.note}</p>
+                          )}
+                          {suggestion.comments?.map(({ id, instruction, reply }) => (
+                            <div key={id} className="rounded bg-(--mint-hover) p-2">
+                              <p className="font-medium">{instruction}</p>
+                              {renderReplyExcerpt(reply)}
+                            </div>
+                          ))}
+                        </>
+                      }
                       onApply={
                         blocked || !pending
                           ? undefined
