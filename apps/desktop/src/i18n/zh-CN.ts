@@ -212,6 +212,8 @@ export const zhCN: Messages = {
   "export.title": "导出",
   "export.format": "格式",
   "export.html.title": "导出为 HTML",
+  "export.docx.saveTitle": "导出为 DOCX",
+  "export.docx.chooseAnotherFile": "请选择与原稿不同的文件。",
   "export.html.saveTitle": "导出为 HTML",
   "export.html.embedImages": "内嵌图片",
   "export.html.export": "导出",
