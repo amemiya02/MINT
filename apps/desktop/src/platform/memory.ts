@@ -637,6 +637,12 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       } else if (files.get(from) !== before) {
         throw new Error(`${from}: file changed`);
       }
+      if (after === undefined) {
+        if (before === undefined || from !== to) throw new Error("Invalid file removal");
+        files.delete(from);
+        notify(from);
+        return;
+      }
       const parents = [];
       for (let parent = parentPath(to); parent !== root; parent = parentPath(parent)) {
         if (isFile(parent)) throw new Error(`Not a directory: ${parent}`);

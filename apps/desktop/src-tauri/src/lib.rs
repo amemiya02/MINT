@@ -468,7 +468,7 @@ async fn apply_document_edit(
     from: PathBuf,
     to: PathBuf,
     before: Option<String>,
-    after: String,
+    after: Option<String>,
     root: Option<PathBuf>,
 ) -> Result<(), String> {
     blocking(move || {
@@ -481,13 +481,26 @@ async fn apply_document_edit(
                     .map_err(|e| e.to_string())?;
             }
         }
-        let apply = || match before {
-            Some(ref before) => {
+        let apply = || match (before.as_deref(), after.as_deref()) {
+            (Some(before), Some(after)) => {
                 document_edit::apply(&from, &to, before.as_bytes(), after.as_bytes())
             }
-            None if root.is_some() && from == to => document_edit::create(&to, after.as_bytes()),
-            None => Err(std::io::Error::other("missing document baseline")),
+            (None, Some(after)) if root.is_some() && from == to => {
+                document_edit::create(&to, after.as_bytes())
+            }
+            _ => Err(std::io::Error::other("missing document baseline")),
         };
+        if let (Some(_), Some(before), None) = (&root, &before, &after) {
+            if from != to {
+                return Err("cannot remove a document at a different destination".into());
+            }
+            document_edit::remove_checked(&from, before.as_bytes())
+                .map_err(|e| format!("{}: {e}", from.display()))?;
+            if let Some(parent) = from.parent() {
+                fs::sync_dir(parent);
+            }
+            return Ok(());
+        }
         relocate_entry(&app, &from, &to, || {
             if root.is_some() {
                 document_edit::with_destination(&to, apply)

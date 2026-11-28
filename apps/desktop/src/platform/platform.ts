@@ -386,4 +386,9 @@ export interface DocumentEdit {
   after: string;
 }
 
-export type FolderDocumentEdit = Omit<DocumentEdit, "before"> & { before?: string | undefined };
+export type FolderDocumentEdit =
+  | (Omit<DocumentEdit, "before" | "after"> & {
+      before?: string;
+      after: string;
+    })
+  | (Omit<DocumentEdit, "after"> & { after?: undefined });

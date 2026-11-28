@@ -8,6 +8,7 @@ export function ProposedSelectionEdit({
   before,
   after,
   status,
+  statusLabel,
   showAppliedComparison,
   label,
   source,
@@ -29,6 +30,7 @@ export function ProposedSelectionEdit({
   readonly before: string;
   readonly after: string;
   readonly status: EditStatus;
+  readonly statusLabel?: string | undefined;
   readonly showAppliedComparison?: boolean | undefined;
   readonly label: string;
   readonly source: boolean;
@@ -85,7 +87,7 @@ export function ProposedSelectionEdit({
   ) {
     return (
       <fieldset aria-label={label} className="min-w-0 space-y-1">
-        <p>{t(`writing.edit.${status}`)}</p>
+        <p>{statusLabel ?? t(`writing.edit.${status}`)}</p>
         {status !== "kept" && <pre className="whitespace-pre-wrap wrap-anywhere">{after}</pre>}
         {conversation}
         {restore}
@@ -122,7 +124,7 @@ export function ProposedSelectionEdit({
       className="@container min-w-0 space-y-2 rounded border border-(--mint-border) p-2"
     >
       <legend className="px-1 text-xs font-medium">{label}</legend>
-      {status !== "preview" && <p>{t(`writing.edit.${status}`)}</p>}
+      {status !== "preview" && <p>{statusLabel ?? t(`writing.edit.${status}`)}</p>}
       {(current !== undefined || blocked) && (
         <p role="alert">
           {t(
