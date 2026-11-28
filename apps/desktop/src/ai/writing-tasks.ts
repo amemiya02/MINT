@@ -26,6 +26,14 @@ export interface SavedSuggestion {
   readonly range: ReviewRange;
 }
 
+export interface WritingToolRecord {
+  readonly name: string;
+  readonly endpoint: string;
+  readonly effect: "read" | "modify" | "send";
+  readonly arguments?: string;
+  readonly status: "done" | "denied" | "outside" | "failed";
+}
+
 export interface SavedTurn extends WritingTurn {
   readonly status?: AttemptStatus;
   readonly partial?: string;
@@ -36,6 +44,7 @@ export interface SavedTurn extends WritingTurn {
   readonly recipientId: string;
   readonly ignoredChanges?: boolean;
   readonly direct: boolean;
+  readonly toolOutcome?: WritingToolRecord;
   readonly sourcePassages?: readonly SourcePassage[];
   readonly suggestions?: readonly SavedSuggestion[];
 }
