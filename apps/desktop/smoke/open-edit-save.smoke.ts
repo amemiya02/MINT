@@ -129,16 +129,16 @@ async function nativeShortcut(chord: string) {
   await exec("xdotool", ["key", "--clearmodifiers", chord], { timeout: 5000 });
 }
 
-async function nativeSettingsMenu(mode: "wait" | "activate") {
+async function nativeMenuItem(menu: string, item: string, mode: "wait" | "activate" = "activate") {
   await exec(
     "/usr/bin/python3",
-    ["smoke/activate-gtk-menu.py", mode, await instancePid(), "MINT", "Settings…"],
+    ["smoke/activate-gtk-menu.py", mode, await instancePid(), menu, item],
     { timeout: 20_000 },
   ).catch(explain);
 }
 
 async function openSettings() {
-  await nativeSettingsMenu("activate");
+  await nativeMenuItem("MINT", "Settings…");
   await waitForView(
     "the native Settings menu command to open Settings",
     "return document.querySelector('dialog[open] h2')?.textContent === 'Settings'",
@@ -191,7 +191,7 @@ async function invokeNative<T>(name: string, args: object): Promise<T> {
 async function explain(e: unknown): Promise<never> {
   const page = await command<string>("POST", `/session/${session}/execute/sync`, {
     script:
-      'return document.body.innerText + "\\n(focus: " + document.activeElement?.className + ")"',
+      'return document.body.innerText + "\\n(document focused: " + document.hasFocus() + ", active element: " + document.activeElement?.className + ")"',
     args: [],
   }).catch((err: unknown) => `(cannot read the page: ${String(err)})`);
   throw new Error(`${String(e)}\n--- the window shows ---\n${page}`);
@@ -318,7 +318,7 @@ async function restart(args: string[]) {
   session = created.sessionId;
   await busCall("GetNameOwner", instanceName);
   // A live window and D-Bus owner can precede registration of GTK accelerators.
-  await nativeSettingsMenu("wait");
+  await nativeMenuItem("MINT", "Settings…", "wait");
 }
 
 test("saved versions survive a native restart outside the working folder", async () => {
@@ -574,16 +574,16 @@ const shows = (text: string) => showsIn("dialog[open]", text);
 
 const chooseSettingsOption = (setting: string, label: string) =>
   until(`${setting} to offer ${label}`, () =>
-    command<boolean>("POST", `/session/${session}/execute/sync`, {
+    command<string | null>("POST", `/session/${session}/execute/sync`, {
       script: `const select = [...document.querySelectorAll('dialog[open] label')]
         .find(label => label.textContent.trim() === arguments[0])?.control;
         const option = select && [...select.options].find(item => item.text === arguments[1]);
-        if (!option) return false;
+        if (!option || option.disabled || select.disabled) return null;
         select.value = option.value;
         select.dispatchEvent(new Event('change', { bubbles: true }));
-        return true;`,
+        return option.value;`,
       args: [setting, label],
-    }).then((chosen) => chosen || null),
+    }),
   ).catch(explain);
 
 test("preview, disambiguate, move and undo wikilinks in a native folder", async () => {
@@ -918,6 +918,22 @@ const waitForView = (message: string, script: string) =>
         args: [],
       })) || null,
   ).catch(explain);
+
+async function runPaletteCommand(title: string, query = title) {
+  await nativeMenuItem("View", "Command Palette…");
+  const palette = 'dialog[open][aria-label="Command Palette"]';
+  await waitForView(
+    "the Command Palette to receive focus",
+    `return document.activeElement?.matches(${JSON.stringify(`${palette} input`)});`,
+  );
+  await keyActions(typing(query));
+  await waitForView(
+    `${title} to be selected in the Command Palette`,
+    `return document.querySelector(${JSON.stringify(`${palette} [role=option][aria-selected=true] > span`)})
+      ?.textContent === ${JSON.stringify(title)};`,
+  );
+  await keyActions(typing(keys.enter));
+}
 
 async function tabToView(what: string, script: string) {
   for (let step = 0; step < 24; step++) {
@@ -1285,8 +1301,17 @@ test("native citation verification reads Zotero only after approval and edits on
     await click("Ask AI");
     const assistant = "//section[@aria-label='Ask AI']";
     const picker = `${assistant}//fieldset[@aria-label='Zotero (read only)']`;
-    const chooseZotero = () =>
-      clickPath(`${assistant}//button[normalize-space(.)='Add from Zotero']`);
+    const chooseZotero = async () => {
+      // The trigger sits inside the scrolling inline composer. Reach it by keyboard.
+      await tabToView(
+        "Add from Zotero",
+        `const button = document.activeElement;
+         return button?.matches('section[aria-label="Ask AI"] button[aria-expanded=false]') &&
+           button.textContent.trim() === 'Add from Zotero';`,
+      ).catch(explain);
+      await keyActions(typing(keys.enter));
+      await showsIn('section[aria-label="Ask AI"]', "Read the local Zotero library for this task?");
+    };
     await chooseZotero();
     assert.deepEqual(libraryRequests, []);
     await clickPath(`${picker}//button[normalize-space(.)='Deny access']`);
@@ -2114,14 +2139,7 @@ test("a saved writing review resumes after a native restart without contacting i
     );
     await nativeShortcut("ctrl+w");
     await nativeShortcut("ctrl+n");
-    await nativeShortcut("ctrl+shift+p");
-    await waitForView(
-      "the Command Palette to receive focus",
-      `return document.activeElement?.matches('dialog[aria-label="Command Palette"] input');`,
-    );
-    await keyActions(typing("All writing tasks"));
-    await shows("All writing tasks");
-    await keyActions(typing(keys.enter));
+    await runPaletteCommand("All writing tasks");
     await waitForView(
       "the closed document's task and outstanding decisions in All writing tasks",
       `const dialog = document.querySelector('dialog[aria-label="All writing tasks"]');
@@ -2169,13 +2187,29 @@ test("a saved writing review resumes after a native restart without contacting i
     await click(instruction);
     const first = "//fieldset[@aria-label='Proposed edit 1 of 6']";
     await clickPath(`${first}//button[normalize-space(.)='Revert to selected text']`);
+    await showsIn(
+      'aside[aria-label="Writing Assistant"] fieldset[aria-label="Proposed edit 1 of 6"]',
+      "Edit reverted.",
+    );
+    await clickPath("//aside[@aria-label='Writing Assistant']//button[normalize-space(.)='Close']");
+    // Each pane renders only the Markdown near its own reading position.
+    const panes = "[role=tabpanel]:not([hidden]) .cm-content";
+    for (const index of [0, 1]) {
+      await waitForView(
+        `native editor pane ${index + 1} to receive focus`,
+        `const editors = document.querySelectorAll(${JSON.stringify(panes)});
+         if (editors.length !== 2) return false;
+         editors[${index}].focus();
+         return editors[${index}] === document.activeElement;`,
+      );
+      await keyActions(chord(keys.control, keys.home));
+    }
     await waitForView(
       "both native panes to show the chosen reversion and preserve the external edit",
-      `const panes = [...document.querySelectorAll('[role=tabpanel]:not([hidden]) .cm-content')];
+      `const panes = [...document.querySelectorAll(${JSON.stringify(panes)})];
       return panes.length === 2 && panes.every(pane =>
         pane.textContent.includes('First draft.') && pane.textContent.includes('External third.'));`,
     );
-    await clickPath("//aside[@aria-label='Writing Assistant']//button[normalize-space(.)='Close']");
     await nativeShortcut("ctrl+s");
     await until(
       "reverting an accepted proposal from the restored task to preserve the external edit",
@@ -2202,6 +2236,28 @@ test("inline completion sends the live manuscript excerpt through the native mod
   const name = "Completion fixture";
   let endpointOffline = false;
   let previousSettings: Record<string, unknown> | undefined;
+  const selectAndSave = async (setting: string, label: string, key: string) => {
+    const value = await chooseSettingsOption(setting, label);
+    await until(`${setting} to reach disk`, async () => {
+      const { values } = await invokeNative<{ values?: Record<string, unknown> }>(
+        "read_settings",
+        {},
+      );
+      return values?.[key] === value || null;
+    }).catch(explain);
+  };
+  const setCompletion = (label: string) =>
+    selectAndSave("Inline completion", label, "inlineCompletionModel");
+  const typeInManuscript = async (text: string) => {
+    await clickPath("//main//div[@role='textbox']");
+    await nativeShortcut("ctrl+End");
+    // CodeMirror requires focus in the top-level document, as well as its content element.
+    await waitForView(
+      "the native window and manuscript editor to have keyboard focus",
+      "return document.hasFocus() && document.activeElement?.matches('.cm-content');",
+    );
+    await exec("xdotool", ["type", "--clearmodifiers", "--", text], { timeout: 5000 });
+  };
   await writeFile(draft, initial);
   const requests: {
     method?: string;
@@ -2252,8 +2308,8 @@ test("inline completion sends the live manuscript excerpt through the native mod
       await keyActions(typing(value));
     }
     await clickPath("//button[not(@disabled) and normalize-space(.)='Use for this launch']");
-    await chooseSettingsOption("Default writing connection", name);
-    await chooseSettingsOption("Inline completion", "Use the default writing connection");
+    await selectAndSave("Default writing connection", name, "defaultWritingConnection");
+    await setCompletion("Use the default writing connection");
     await clickSettingsButton("Run sample", "Inline completion");
     await shows(continuation.trim());
     const [sample] = requests.splice(0);
@@ -2264,9 +2320,8 @@ test("inline completion sends the live manuscript excerpt through the native mod
       sample.body.messages.filter(({ role }) => role === "user"),
       [{ role: "user", content: '{"before":"The path follows the","after":""}' }],
     );
-    await click("Close");
-    await clickPath("//main//div[@role='textbox']");
-    await keyActions([...chord(keys.control, keys.end), ...typing(" trail")]);
+    await clickSettingsButton("Close");
+    await typeInManuscript(" trail");
     await until(
       "the live excerpt to reach the model receiver",
       async () => requests[0] ?? null,
@@ -2292,7 +2347,7 @@ test("inline completion sends the live manuscript excerpt through the native mod
     );
     assert.ok(!(await readFile(draft, "utf8")).includes(continuation));
 
-    await keyActions(typing(keys.tab));
+    await nativeShortcut("Tab");
     await nativeShortcut("ctrl+s");
     await until(
       "Tab to save the continuation with the original line endings",
@@ -2300,10 +2355,9 @@ test("inline completion sends the live manuscript excerpt through the native mod
     ).catch(explain);
 
     await openSettings();
-    await chooseSettingsOption("Inline completion", "Off");
-    await click("Close");
-    await clickPath("//main//div[@role='textbox']");
-    await keyActions([...chord(keys.control, keys.end), ...typing(" Today.")]);
+    await setCompletion("Off");
+    await clickSettingsButton("Close");
+    await typeInManuscript(" Today.");
     await nativeShortcut("ctrl+s");
     await until(
       "writing after switching inline completion off",
@@ -2314,11 +2368,10 @@ test("inline completion sends the live manuscript excerpt through the native mod
     assert.equal(requests.length, 1, "switching inline completion off stops subsequent requests");
 
     await openSettings();
-    await chooseSettingsOption("Inline completion", "Use the default writing connection");
-    await click("Close");
+    await setCompletion("Use the default writing connection");
+    await clickSettingsButton("Close");
     endpointOffline = true;
-    await clickPath("//main//div[@role='textbox']");
-    await keyActions([...chord(keys.control, keys.end), ...typing(" Still writing.")]);
+    await typeInManuscript(" Still writing.");
     await waitForView(
       "the native local connection failure with the author's typing intact",
       `return document.querySelector('section[aria-label="Inline completion"]')?.innerText.includes('Local model is unreachable') &&
@@ -3104,13 +3157,7 @@ test("a shared writing skill uses fresh materials and the recipient's native con
     await keyActions(chord(keys.control, "a"));
     return `Comment only · Current selection · ${name} · ${base}/chat/completions`;
   }
-  const skillsMenu = async () => {
-    await exec(
-      "/usr/bin/python3",
-      ["smoke/activate-gtk-menu.py", await instancePid(), "Edit", "Writing Skills…"],
-      { timeout: 35_000 },
-    ).catch(explain);
-  };
+  const skillsMenu = () => nativeMenuItem("Edit", "Writing Skills…");
   const chooseRecipient = (name: string) =>
     waitForView(
       `the ${name} connection to be available`,
@@ -3153,12 +3200,20 @@ test("a shared writing skill uses fresh materials and the recipient's native con
     await click("Save as writing skill");
     await fill("Skill name", "input", "Agreement review");
     await fill("Result format", "textarea", format);
-    await clickPath("//div[contains(concat(' ', normalize-space(@class), ' '), ' cm-content ')]");
+    // The inline skill form covers the editor's center. Focus the manuscript to select by keyboard.
+    await waitForView(
+      "the author manuscript to regain keyboard focus for the trial",
+      `const editor = document.querySelector('[role=tabpanel]:not([hidden]) .cm-content');
+       if (!editor) return false;
+       editor.focus();
+       return editor === document.activeElement;`,
+    );
     await keyActions(chord(keys.control, "a"));
     await waitForView(
       "the fresh trial selection to be available",
       `const option = document.querySelector("section[aria-label='Ask AI'] select option[value='selection']");
-       if (!option || option.disabled) return false;
+       if (!option || option.disabled || getSelection()?.toString() !== ${JSON.stringify(source)})
+         return false;
        option.parentElement.value = option.value;
        option.parentElement.dispatchEvent(new Event('change', { bubbles: true }));
        return true;`,
@@ -3898,12 +3953,7 @@ test("the daily journal creates one ordinary Markdown file only after permission
   await writeFile(draft, "Another manuscript.  \r\n");
   await restart([folder, draft]);
   const plugin = "//fieldset[@aria-label='Daily journal']";
-  const chooseJournal = async () => {
-    await nativeShortcut("ctrl+shift+p");
-    await keyActions(typing("journal"));
-    await shows("Open today’s journal");
-    await keyActions(typing(keys.enter));
-  };
+  const chooseJournal = () => runPaletteCommand("Open today’s journal", "journal");
   await clickPath("//*[@role='treeitem' and @aria-label='draft.md']");
   await openSettings();
   await clickPath(`${plugin}//button[normalize-space(.)='Install']`);
@@ -3929,6 +3979,7 @@ test("the daily journal creates one ordinary Markdown file only after permission
   ).catch(explain);
   const path = join(folder, filename);
   assert.equal(await readFile(path, "utf8"), `# ${filename.slice(0, -3)}\n\n`);
+  await waitForActiveDocument(path);
   await click(`Close ${filename}`, "aria-label");
   const external = Buffer.from("\uFEFF# Field notes\r\n\r\nFrom another editor.  \r\n");
   await writeFile(path, external);
@@ -4097,6 +4148,15 @@ if (prompt.instruction === ${JSON.stringify(cancelInstruction)}) {
       scope.dispatchEvent(new Event('change', { bubbles: true }));`,
     args: [],
   });
+  const historyLabel = "Send earlier instructions and replies with this message";
+  await clickPath(
+    `//aside[@aria-label='Writing Assistant']//label[normalize-space(.)='${historyLabel}']/input[@type='checkbox']`,
+  );
+  await waitForView(
+    "earlier instructions and replies to be approved for the follow-up",
+    `return [...document.querySelectorAll('aside[aria-label="Writing Assistant"] label')]
+      .find(label => label.textContent.trim() === ${JSON.stringify(historyLabel)})?.control.checked === true;`,
+  );
   await clickPath("//aside[@aria-label='Writing Assistant']//input[not(@type='checkbox')]");
   await keyActions([...typing("What would help?"), ...typing(keys.enter)]);
   await waitForView(
@@ -4674,14 +4734,7 @@ console.log(JSON.stringify({ type: "turn.completed" }));
     `return document.querySelector('.cm-content')?.textContent.includes("Original. Unsaved note.");`,
   );
   async function send(action: "preview" | "direct") {
-    await nativeShortcut("ctrl+shift+p");
-    await waitForView(
-      "the Command Palette to receive focus",
-      `return document.activeElement?.matches('dialog[aria-label="Command Palette"] input');`,
-    );
-    await keyActions(typing("Ask AI"));
-    await shows("Ask AI");
-    await keyActions(typing(keys.enter));
+    await runPaletteCommand("Ask AI");
     await waitForView(
       "the task copy recipient to load",
       `return [...document.querySelectorAll('section[aria-label="Ask AI"] select option')]
@@ -4834,14 +4887,7 @@ console.log(JSON.stringify({ type: "turn.completed" }));
     "//div[contains(@class,'cm-line') and normalize-space(.)='Revised. Unsaved note.']",
   );
   await keyActions([...typing(keys.end), ...typing(" New note.")]);
-  await nativeShortcut("ctrl+shift+p");
-  await waitForView(
-    "the folder command to receive focus",
-    `return document.activeElement?.matches('dialog[aria-label="Command Palette"] input');`,
-  );
-  await keyActions(typing("Ask AI about working folder"));
-  await shows("Ask AI about working folder");
-  await keyActions(typing(keys.enter));
+  await runPaletteCommand("Ask AI about working folder");
   const assistant = "//aside[@aria-label='Writing Assistant']";
   await waitForView(
     "the working-folder Codex recipient to load",
@@ -4931,14 +4977,7 @@ console.log(JSON.stringify({ type: "turn.completed" }));
     "next/moved.md",
   ];
   await clickPath(`${assistant}//button[normalize-space(.)='Close']`);
-  await nativeShortcut("ctrl+shift+p");
-  await waitForView(
-    "the Command Palette to receive focus for the authorized batch",
-    `return document.activeElement?.matches('dialog[aria-label="Command Palette"] input');`,
-  );
-  await keyActions(typing("Ask AI about working folder"));
-  await shows("Ask AI about working folder");
-  await keyActions(typing(keys.enter));
+  await runPaletteCommand("Ask AI about working folder");
   await waitForView(
     "the folder Agent to load for the authorized batch",
     `return [...document.querySelectorAll('aside[aria-label="Writing Assistant"] option')]
@@ -5007,14 +5046,7 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   assert.equal((await readFile(batchReceived, "utf8")).trim().split("\n").length, 1);
   await clickPath(`${assistant}//button[normalize-space(.)='Close']`);
   await restart([fixture, draft]);
-  await nativeShortcut("ctrl+shift+p");
-  await waitForView(
-    "the Command Palette to receive focus after restarting",
-    `return document.activeElement?.matches('dialog[aria-label="Command Palette"] input');`,
-  );
-  await keyActions(typing("All writing tasks"));
-  await shows("All writing tasks");
-  await keyActions(typing(keys.enter));
+  await runPaletteCommand("All writing tasks");
   await clickPath(
     `//dialog[@aria-label='All writing tasks']//button[normalize-space(.)='${instruction}']`,
   );
