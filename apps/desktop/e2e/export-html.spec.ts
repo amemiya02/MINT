@@ -169,8 +169,8 @@ test("exports the current draft as HTML from the format chooser", async ({ page 
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.insertText("\nCurrent draft.");
   await page.keyboard.press("ControlOrMeta+Shift+P");
-  await page.getByRole("option", { name: "Export…", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Export", exact: true });
+  await page.getByRole("option", { name: "Import / Export…", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Import / Export", exact: true });
   await expect(dialog.getByLabel("Format")).toHaveValue("html");
   await dialog.getByLabel("Embed images").uncheck();
   await dialog.getByRole("button", { name: "Export", exact: true }).click();

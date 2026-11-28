@@ -7,6 +7,7 @@ import {
   install,
   installations,
   isManifest,
+  notionImporter,
   type PluginManifest,
   readStatistics,
   tagBrowser,
@@ -33,6 +34,7 @@ export function useInstallations() {
 
 const button = "rounded border border-(--mint-border) px-2 py-1 text-sm hover:bg-(--mint-hover)";
 export function pluginName(m: PluginManifest, t: Translate) {
+  if (m.id === notionImporter.id) return t("notion.name");
   if (m.id === timingDiagrams.id) return t("plugin.timing");
   if (m.id === writingTemplates.id) return t("plugin.templates");
   if (m.id === tagBrowser.id) return t("plugin.tags");
@@ -40,6 +42,7 @@ export function pluginName(m: PluginManifest, t: Translate) {
 }
 
 function permission(manifest: PluginManifest, t: Translate) {
+  if ("importer" in manifest) return t("notion.permission");
   if ("templates" in manifest) return t("plugin.write");
   return t("sidebar" in manifest ? "plugin.folderRead" : "plugin.read");
 }
@@ -58,9 +61,13 @@ export function PluginSettings() {
       setFailed(true);
     }
   }
-  const available = [writingStatistics, writingTemplates, tagBrowser, timingDiagrams].filter(
-    (m) => !installed.some((i) => i.manifest.id === m.id),
-  );
+  const available = [
+    writingStatistics,
+    writingTemplates,
+    tagBrowser,
+    timingDiagrams,
+    notionImporter,
+  ].filter((m) => !installed.some((i) => i.manifest.id === m.id));
   return (
     <section aria-label={t("plugin.title")} className="flex flex-col gap-2">
       <h3 className="font-medium">{t("plugin.title")}</h3>

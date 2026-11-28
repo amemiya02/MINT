@@ -140,7 +140,7 @@ test("switches a dark HTML draft to a light PDF from the format chooser", async 
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.insertText("Pending revision.");
   await runMenuItem(page, "file.export");
-  const dialog = page.getByRole("dialog", { name: "Export", exact: true });
+  const dialog = page.getByRole("dialog", { name: "Import / Export", exact: true });
   await expect(dialog.getByLabel("Appearance")).toHaveValue("dark");
   await dialog.getByLabel("Embed images").uncheck();
   await dialog.getByLabel("Format").selectOption("pdf");

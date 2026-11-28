@@ -11,7 +11,7 @@ export function useOverlays() {
   const [recordingShortcut, setRecordingShortcut] = useState(false);
   /** The tab being exported, and to what, while the export dialog shows. */
   const [exporting, setExporting] = useState<{
-    readonly tab: number;
+    readonly tab: number | null;
     readonly format?: ExportFormat;
   } | null>(null);
   const [find, setFind] = useState<{ mode: FindMode; request: number } | null>(null);

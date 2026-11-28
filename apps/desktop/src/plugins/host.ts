@@ -27,7 +27,21 @@ interface DiagramManifest extends ManifestBase {
   diagram: "timing";
 }
 
+interface ImportManifest extends ManifestBase {
+  permissions: ["archive.import"];
+  importer: "notion";
+}
+
+export const notionImporter: ImportManifest = {
+  apiVersion: 1,
+  id: "mint.notion-import",
+  name: "Notion import",
+  permissions: ["archive.import"],
+  importer: "notion",
+};
+
 export type PluginManifest =
+  | ImportManifest
   | StatisticsManifest
   | TemplatesManifest
   | SidebarManifest
@@ -105,6 +119,13 @@ export function isManifest(value: unknown): value is PluginManifest {
     m.permissions.length !== 1
   )
     return false;
+  if ("importer" in m) {
+    return (
+      m.importer === "notion" &&
+      m.permissions[0] === "archive.import" &&
+      !["diagram", "sidebar", "statistics", "templates"].some((key) => key in m)
+    );
+  }
   if ("diagram" in m) {
     return (
       m.diagram === "timing" &&
@@ -211,4 +232,9 @@ export function insertTemplate(id: string, name: string, insert: (text: string) 
 export function canReadFolder(id: string): boolean {
   const item = installed(id);
   return Boolean(item?.enabled && item.granted && "sidebar" in item.manifest);
+}
+
+export function canImportArchive(id: string): boolean {
+  const item = installed(id);
+  return Boolean(item?.enabled && item.granted && "importer" in item.manifest);
 }

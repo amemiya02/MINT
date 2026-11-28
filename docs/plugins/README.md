@@ -76,3 +76,21 @@ A local MINT package can contribute the same renderer with this manifest.
   "diagram": "timing"
 }
 ```
+
+## Notion import
+
+In **Settings → Plugins**, install **Notion import** and allow it to read a selected archive and create a folder in a selected destination. Open **File → Import / Export…**, select **Notion import**, and choose a Notion Markdown & CSV or HTML export ZIP. Set the new folder’s name and click **Import** to choose its parent directory. You can start with an empty window.
+
+MINT preserves the page hierarchy and attachment filenames, converts HTML pages to Markdown, and resolves links to included pages. CSV files remain available as attachments. An export ZIP containing numbered Notion ZIP parts is also supported. The import uses a new folder and leaves the ZIP untouched. Choose **Open imported folder** to browse the result. For missing targets, the dialog and the saved text report give the converted document’s path, line number, and original link or attachment reference.
+
+A MINT package can contribute the format under its own name. The host supplies the conversion and checks the installation and grant when it runs. The picker selects the archive, and the destination picker authorizes creating the new folder.
+
+```json
+{
+  "apiVersion": 1,
+  "id": "example.workspace-import",
+  "name": "Workspace archive",
+  "permissions": ["archive.import"],
+  "importer": "notion"
+}
+```
