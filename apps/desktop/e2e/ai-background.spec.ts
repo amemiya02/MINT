@@ -95,6 +95,7 @@ test("a background edit keeps complete suggestions and partial replies across st
     await page.keyboard.press("End");
     await page.keyboard.insertText(" I can keep writing.");
     const tasks = page.getByRole("region", { name: "Writing tasks" });
+    await tasks.getByText("Writing tasks", { exact: true }).click();
     await expect(tasks).toContainText("origin.md");
     await expect(tasks).toContainText("Current selection");
     await expect(tasks).toContainText("1 suggestion");

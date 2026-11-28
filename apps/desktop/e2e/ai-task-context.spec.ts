@@ -154,6 +154,7 @@ for (const decision of ["allow", "skip"] as const) {
       await page.keyboard.press("ControlOrMeta+N");
       await expect(page.getByRole("tabpanel", { name: "Untitled" })).toBeVisible();
       const tasks = page.getByRole("region", { name: "Writing tasks" });
+      await tasks.getByText("Writing tasks", { exact: true }).click();
       await expect(tasks).toContainText("Waiting for approval");
       await expect(tasks).toContainText("Operating hours");
       await expect(tasks).toContainText("interview.txt");

@@ -1,10 +1,9 @@
-import { createContext, useContext, useEffect, useId } from "react";
+import { createContext, useContext, useEffect, useId, useRef } from "react";
 import { useT } from "../i18n/index.ts";
 import type { AttemptStatus } from "./writing-attempt.ts";
 import type { NamedMaterial, WritingRequest } from "./writing-sender.ts";
 
 export interface WritingTask {
-  readonly tabId: number;
   readonly name: string;
   readonly recipient: string;
   readonly material: string;
@@ -27,26 +26,28 @@ export function useWritingTask(task: WritingTask | null) {
   useEffect(() => () => publish(id, null), [id, publish]);
 }
 
-export function WritingTasks({
-  tasks,
-  activeId,
-}: {
-  readonly tasks: ReadonlyMap<string, WritingTask>;
-  readonly activeId: number | null;
-}) {
+export function WritingTasks({ tasks }: { readonly tasks: ReadonlyMap<string, WritingTask> }) {
   const t = useT();
+  const drawer = useRef<HTMLDetailsElement>(null);
   if (!tasks.size) return null;
   return (
     <section
       aria-label={t("writing.tasks")}
-      className="absolute top-2 right-3 z-20 max-w-[min(30rem,calc(100%-1.5rem))] rounded-md border border-(--mint-border) bg-(--mint-bg) px-2 py-1 text-sm shadow-sm"
+      className="relative z-20 shrink-0 border-b border-l border-(--mint-border) bg-(--mint-bg) text-sm"
     >
-      <details open={[...tasks.values()].some((task) => task.tabId !== activeId)}>
-        <summary className="cursor-pointer">{t("writing.tasks")}</summary>
-        <ul className="mt-1 max-h-36 space-y-1 overflow-auto wrap-anywhere">
+      <details ref={drawer}>
+        <summary className="h-8 cursor-pointer px-3 py-1.5">{t("writing.tasks")}</summary>
+        <ul className="absolute top-full right-0 max-h-40 w-[min(28rem,calc(100vw-3rem))] space-y-1 overflow-auto wrap-anywhere rounded-md border border-(--mint-border) bg-(--mint-bg) p-2 shadow-lg">
           {[...tasks].map(([id, task]) => (
             <li key={id} className="flex flex-wrap items-baseline gap-x-3">
-              <button className="underline" type="button" onClick={task.reveal}>
+              <button
+                className="underline"
+                type="button"
+                onClick={() => {
+                  if (drawer.current) drawer.current.open = false;
+                  task.reveal();
+                }}
+              >
                 {t("writing.task.open", { name: task.name })}
               </button>
               <span>{task.recipient}</span>

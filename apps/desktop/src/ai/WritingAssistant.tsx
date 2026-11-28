@@ -745,7 +745,6 @@ function Composer({
     () =>
       status && sendingTo
         ? {
-            tabId,
             name,
             recipient: sendingTo,
             material: materials,

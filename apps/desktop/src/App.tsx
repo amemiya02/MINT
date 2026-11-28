@@ -707,8 +707,20 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
                     : "grid grid-cols-2 divide-x divide-(--mint-border)"
                 }
               >
-                <TabBar pane="primary" />
-                {selected.reference !== null && <TabBar pane="reference" />}
+                <div className="flex min-w-0">
+                  <div className="min-w-0 flex-1">
+                    <TabBar pane="primary" />
+                  </div>
+                  {selected.reference === null && <WritingTasks tasks={writingTasks} />}
+                </div>
+                {selected.reference !== null && (
+                  <div className="flex min-w-0">
+                    <div className="min-w-0 flex-1">
+                      <TabBar pane="reference" />
+                    </div>
+                    <WritingTasks tasks={writingTasks} />
+                  </div>
+                )}
               </div>
             )}
             {find && active && (
@@ -721,7 +733,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
               />
             )}
             <main
-              className={`relative grid min-h-0 flex-1 grid-rows-1 ${selected.reference === null ? "grid-cols-1" : "grid-cols-2"}`}
+              className={`grid min-h-0 flex-1 grid-rows-1 ${selected.reference === null ? "grid-cols-1" : "grid-cols-2"}`}
             >
               {tabs.map((tab) => (
                 <TabPanel
@@ -795,7 +807,6 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
                   onOpenFolder={(path) => void openFolder(path)}
                 />
               )}
-              <WritingTasks tasks={writingTasks} activeId={activeId} />
             </main>
             {active && (
               <StatusBar
@@ -916,7 +927,6 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
         <ExternalAgentDialog
           platform={platform.externalAgent}
           selection={agentSelection.origin.text}
-          tabId={agentSelection.tabId}
           name={agentTab ? tabName(t, agentTab) : t("writing.scope.untitled")}
           visible={agentDialogVisible}
           onReveal={() => {

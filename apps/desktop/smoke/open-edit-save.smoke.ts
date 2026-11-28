@@ -1140,6 +1140,13 @@ test("a native model receives only the sample or live selection and edits throug
     }
     const payload = JSON.parse(body);
     const instruction = payload.messages.at(-1)?.content ?? "";
+    if (instruction.includes(stopInstruction) && stopped) {
+      response.writeHead(200, { "Content-Type": "text/event-stream" });
+      response.end(
+        'data: {"choices":[{"delta":{"content":"<replacement>Ready to review.</replacement>"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
+      );
+      return;
+    }
     if (instruction.includes(stopInstruction)) {
       response.once("close", () => {
         stopped = !response.writableEnded;
@@ -1468,6 +1475,7 @@ test("a native model receives only the sample or live selection and edits throug
       "the second document to have focus during native streaming",
       "return document.querySelector('[role=tab][aria-selected=true]')?.textContent === 'Untitled' && document.activeElement?.matches('.cm-content');",
     );
+    await clickPath("//section[@aria-label='Writing tasks']//summary");
     await clickPath(
       "//section[@aria-label='Writing tasks']//button[normalize-space(.)='Stop generation']",
     );
@@ -1485,6 +1493,23 @@ test("a native model receives only the sample or live selection and edits throug
       "only the complete native edit to be autosaved",
       async () => (await readFile(draft, "utf8")) === "\uFEFFReady to review." || null,
     ).catch(explain);
+    await keyActions(chord(keys.control, "z"));
+    await until(
+      "undo to restore the native baseline before retry",
+      async () => (await readFile(draft, "utf8")) === externallyEdited || null,
+    ).catch(explain);
+    await clickPath(
+      "//aside[@aria-label='Writing Assistant']//button[normalize-space(.)='Retry generation']",
+    );
+    await waitForView(
+      "the native retry to finish with no duplicate proposal",
+      `const sidebar = document.querySelector('aside[aria-label="Writing Assistant"]');
+        return sidebar && !sidebar.innerText.includes('Generating') &&
+          ![...sidebar.querySelectorAll('button')].some((button) =>
+            ['Retry generation', 'Apply proposed edit'].includes(button.textContent.trim()));`,
+    );
+    assert.deepEqual(requests.at(-1), requests.at(-2), "retry sent the original native request");
+    assert.equal(await readFile(draft, "utf8"), externallyEdited);
   } finally {
     endpoint.closeAllConnections();
     await new Promise<void>((resolve) => endpoint.close(() => resolve()));

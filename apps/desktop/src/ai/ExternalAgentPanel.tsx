@@ -47,7 +47,6 @@ export function ExternalAgentSettings({ platform }: { readonly platform: Externa
 }
 
 interface AgentTaskTarget {
-  readonly tabId: number;
   readonly name: string;
   readonly reveal: () => void;
   readonly engaged: { current: boolean };
@@ -57,7 +56,6 @@ export function ExternalAgentDialog({
   onClose,
   onHide,
   onReveal,
-  tabId,
   name,
   visible,
   renderReply,
@@ -66,7 +64,6 @@ export function ExternalAgentDialog({
   readonly onClose: () => void;
   readonly onHide: () => void;
   readonly onReveal: () => void;
-  readonly tabId: number;
   readonly name: string;
   readonly visible: boolean;
   readonly renderReply: (reply: string, close: () => void) => ReactNode;
@@ -79,12 +76,11 @@ export function ExternalAgentDialog({
   reveal.current = onReveal;
   const target = useMemo(
     () => ({
-      tabId,
       name,
       engaged,
       reveal: () => reveal.current(),
     }),
-    [name, tabId],
+    [name],
   );
   useEffect(() => {
     if (visible) dialog.current?.showModal();
@@ -171,7 +167,6 @@ function ExternalAgentPanel({
     () =>
       target && taskStatus && taskRecipient
         ? {
-            tabId: target.tabId,
             name: target.name,
             recipient: t("writing.recipient.agent", { path: taskRecipient }),
             material: t("writing.scope.selection"),

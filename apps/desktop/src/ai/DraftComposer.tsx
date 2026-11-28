@@ -273,7 +273,6 @@ export function DraftComposer({
   const report = useMemo(
     () =>
       attempt && {
-        tabId,
         name,
         recipient: attempt.connection.label,
         material: [
