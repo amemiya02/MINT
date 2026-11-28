@@ -1,5 +1,7 @@
-import type { WordCount } from "@mint/editor";
+import type { AnnotationTarget, WordCount } from "@mint/editor";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { AnnotationDialog, AnnotationPanel } from "./annotations/Annotations.tsx";
+import { createAnnotationStorage } from "./annotations/annotation-storage.ts";
 import { createAutosave } from "./autosave/autosave.ts";
 import { Backlinks } from "./backlinks/Backlinks.tsx";
 import { CommandPalette } from "./command-palette/CommandPalette.tsx";
@@ -127,6 +129,26 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   const { shortcuts, wikilinkFolders } = useSettings().settings;
   const active = tabs.find((tab) => tab.id === activeId) ?? null;
   const [historyPath, setHistoryPath] = useState<string | null>(null);
+  const [annotationsOpen, setAnnotationsOpen] = useState(false);
+  const [annotationError, setAnnotationError] = useState<{ path: string; reason: string } | null>(
+    null,
+  );
+  const [annotationStorage] = useState(() =>
+    createAnnotationStorage(platform, store, (path, error) =>
+      setAnnotationError({ path, reason: reasonOf(error) }),
+    ),
+  );
+  useEffect(() => annotationStorage.start(), [annotationStorage]);
+  const [annotationDraft, setAnnotationDraft] = useState<{
+    readonly tab: NonNullable<typeof active>;
+    readonly target: AnnotationTarget;
+  } | null>(null);
+  function addAnnotation() {
+    if (!active) return;
+    setAnnotationsOpen(true);
+    const target = store.editor(active.id)?.getAnnotationTarget();
+    if (target) setAnnotationDraft({ tab: active, target });
+  }
   const [toolbarPositions, setToolbarPositions] = useState<Record<Pane, ToolbarPosition>>({
     primary: "top",
     reference: "top",
@@ -371,6 +393,10 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     "edit.find": () => showFind("find"),
     "edit.replace": () => showFind("replace"),
     "edit.searchFolder": () => setFolderSearch((request) => (request ?? 0) + 1),
+    "edit.addAnnotation": addAnnotation,
+    "view.annotations": () => {
+      if (active) setAnnotationsOpen((open) => !open);
+    },
     "edit.pastePlainText": () => {
       const editor = activeId === null ? undefined : store.editor(activeId);
       if (!editor) return;
@@ -439,10 +465,10 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
       platform.onCloseRequested(async () => {
         if (!(await store.closeAll())) return false;
         // Closed tabs need no recovery: let their snapshots be removed before the window goes.
-        await recovery.settled();
+        await Promise.all([recovery.settled(), annotationStorage.settled()]);
         return true;
       }),
-    [platform, store, recovery],
+    [platform, store, recovery, annotationStorage],
   );
 
   const exportedTab = tabs.find((tab) => tab.id === exporting?.tab) ?? null;
@@ -468,6 +494,14 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
       <UpdateNotice updates={updates} />
       <SettingsIssues />
       <ThemeIssue />
+      {annotationError && (
+        <div
+          role="alert"
+          className="border-b border-(--mint-border) bg-(--mint-error-bg) px-4 py-2 text-sm text-(--mint-error-fg)"
+        >
+          {t("annotations.storageError", annotationError)}
+        </div>
+      )}
       {undoMove && (
         <button
           className="self-end px-3 py-1 text-sm underline"
@@ -564,69 +598,84 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
               onHide={hideSidebar}
             />
           )}
-        <div className="flex min-w-0 flex-1 flex-col">
-          {tabs.length > 0 && (
-            <div
-              className={
-                selected.reference === null
-                  ? "grid"
-                  : "grid grid-cols-2 divide-x divide-(--mint-border)"
-              }
-            >
-              <TabBar pane="primary" />
-              {selected.reference !== null && <TabBar pane="reference" />}
-            </div>
-          )}
-          {find && active && (
-            <FindBar
-              mode={find.mode}
-              request={find.request}
-              editorKey={active.id}
-              getEditor={() => store.editor(active.id)}
-              onClose={() => setFind(null)}
-            />
-          )}
-          <main
-            className={`grid min-h-0 flex-1 grid-rows-1 ${selected.reference === null ? "grid-cols-1" : "grid-cols-2"}`}
-          >
-            {tabs.map((tab) => (
-              <TabPanel
-                key={tab.id}
-                tab={tab}
-                wikilinkFolder={
-                  wikilinkFolder && tab.path && isWithin(tab.path, wikilinkFolder)
-                    ? wikilinkFolder
-                    : null
+        <div className="flex min-w-0 flex-1 flex-col md:flex-row">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            {tabs.length > 0 && (
+              <div
+                className={
+                  selected.reference === null
+                    ? "grid"
+                    : "grid grid-cols-2 divide-x divide-(--mint-border)"
                 }
-                onLinkError={setShellError}
-                codeBlockRenderers={codeBlockRenderers}
-                active={tab.id === activeId}
-                visible={selected[tab.pane] === tab.id}
-                toolbarPosition={toolbarPositions[tab.pane]}
-                platform={platform}
-                onModeChange={modeChanged}
-                onEditorChange={editorsChanged}
-                onEdited={onEdited}
-                onWordCount={setWordCount}
-              />
-            ))}
-            {tabs.length === 0 && (
-              <Welcome
-                recent={recent}
-                onPickDocument={() => void open()}
-                onPickFolder={() => void pickFolder()}
-                onOpenDocument={(path) => void store.openDocument(path)}
-                onOpenFolder={(path) => void openFolder(path)}
+              >
+                <TabBar pane="primary" />
+                {selected.reference !== null && <TabBar pane="reference" />}
+              </div>
+            )}
+            {find && active && (
+              <FindBar
+                mode={find.mode}
+                request={find.request}
+                editorKey={active.id}
+                getEditor={() => store.editor(active.id)}
+                onClose={() => setFind(null)}
               />
             )}
-          </main>
-          {active && (
-            <StatusBar
-              openHistory={() => setHistoryPath(active.path)}
-              tab={active}
-              name={name ?? ""}
-              mode={mode}
-              wordCount={wordCount}
+            <main
+              className={`grid min-h-0 flex-1 grid-rows-1 ${selected.reference === null ? "grid-cols-1" : "grid-cols-2"}`}
+            >
+              {tabs.map((tab) => (
+                <TabPanel
+                  key={tab.id}
+                  tab={tab}
+                  wikilinkFolder={
+                    wikilinkFolder && tab.path && isWithin(tab.path, wikilinkFolder)
+                      ? wikilinkFolder
+                      : null
+                  }
+                  onLinkError={setShellError}
+                  codeBlockRenderers={codeBlockRenderers}
+                  active={tab.id === activeId}
+                  visible={selected[tab.pane] === tab.id}
+                  toolbarPosition={toolbarPositions[tab.pane]}
+                  platform={platform}
+                  onModeChange={modeChanged}
+                  onEditorChange={editorsChanged}
+                  onEdited={onEdited}
+                  onWordCount={setWordCount}
+                />
+              ))}
+              {tabs.length === 0 && (
+                <Welcome
+                  recent={recent}
+                  onPickDocument={() => void open()}
+                  onPickFolder={() => void pickFolder()}
+                  onOpenDocument={(path) => void store.openDocument(path)}
+                  onOpenFolder={(path) => void openFolder(path)}
+                />
+              )}
+            </main>
+            {active && (
+              <StatusBar
+                openHistory={() => setHistoryPath(active.path)}
+                addAnnotation={addAnnotation}
+                toggleAnnotations={() => run.current("view.annotations")}
+                annotationsOpen={annotationsOpen}
+                tab={active}
+                name={name ?? ""}
+                mode={mode}
+                wordCount={wordCount}
+              />
+            )}
+          </div>
+          {active && annotationsOpen && (
+            <AnnotationPanel
+              annotations={active.document.annotations}
+              onClose={() => {
+                setAnnotationsOpen(false);
+                store.editor(active.id)?.focus();
+              }}
+              onReveal={(item) => store.editor(active.id)?.revealAnnotation(item)}
             />
           )}
         </div>
@@ -689,6 +738,20 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
           onClose={() => {
             setHistoryPath(null);
             if (activeId !== null) store.editor(activeId)?.focus();
+          }}
+        />
+      )}
+      {annotationDraft && (
+        <AnnotationDialog
+          target={annotationDraft.target}
+          onClose={() => {
+            setAnnotationDraft(null);
+            store.editor(annotationDraft.tab.id)?.focus();
+          }}
+          onSave={(note) => {
+            const { tab, target } = annotationDraft;
+            const editor = store.editor(tab.id);
+            if (editor) tab.document.annotations.add(target, note, editor.getText());
           }}
         />
       )}

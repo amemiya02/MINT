@@ -16,6 +16,14 @@ import {
   rectangularSelection,
 } from "@codemirror/view";
 import { defaultDialect, renderHtml } from "@mint/markdown";
+import {
+  type Annotation,
+  type AnnotationTarget,
+  annotationCellAt,
+  cellTarget,
+  markdownTarget,
+  textTarget,
+} from "./annotations.ts";
 import { type EditorDialect, markdownSupport } from "./dialect.ts";
 import {
   fileText,
@@ -57,6 +65,7 @@ import { pasteText, richPaste } from "./rich-paste.ts";
 import type { SharedDocument } from "./shared-document.ts";
 import { type TableCommands, tableCommands } from "./table/commands.ts";
 import {
+  focusedTableCell,
   focusTableCell,
   runInFocusedTable,
   tableRenderer,
@@ -189,6 +198,10 @@ export interface MintEditor {
   replaceText(text: string): void;
   /** The main selection range. */
   getSelection(): TextSelection;
+  /** Capture the selected manuscript content for a new annotation. */
+  getAnnotationTarget(): AnnotationTarget | null;
+  /** Scroll to and focus an existing annotation target. */
+  revealAnnotation(annotation: Annotation): void;
   /** Every selection range (several when there are several cursors), in document order. */
   getSelections(): TextSelection[];
   /** Put a cursor or selection at each range; there must be at least one. The last range is the main one. */
@@ -394,6 +407,29 @@ export function createEditor(options: EditorOptions): MintEditor {
     getSelection() {
       const { anchor, head } = view.state.selection.main;
       return { anchor: toFileOffset(view.state, anchor), head: toFileOffset(view.state, head) };
+    },
+    getAnnotationTarget() {
+      const { state } = view;
+      const focused = focusedTableCell(view);
+      if (focused) return cellTarget(state, focused.table, focused.address);
+      const { from, to } = state.selection.main;
+      const object = markdownTarget(state, from, to);
+      if (object) return object;
+      const cell = annotationCellAt(state, from, to);
+      if (cell) return cellTarget(state, cell.table, cell.address);
+      return from === to ? null : textTarget(state, from, to);
+    },
+    revealAnnotation({ range, kind, implicitColumn }) {
+      if (!range) return;
+      const anchor = fromFileOffset(view.state, range.from);
+      const head = fromFileOffset(view.state, range.from + range.source.length);
+      if (kind === "cell" && mode === "livePreview") {
+        const hit = annotationCellAt(view.state, anchor, head, implicitColumn);
+        if (hit && focusTableCell(view, view.state.doc.lineAt(hit.table.from).from, hit.address))
+          return;
+      }
+      view.dispatch({ selection: { anchor, head }, scrollIntoView: true });
+      view.focus();
     },
     getSelections() {
       return view.state.selection.ranges.map(({ anchor, head }) => ({

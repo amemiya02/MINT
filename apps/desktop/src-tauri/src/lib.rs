@@ -283,6 +283,27 @@ async fn read_version(app: AppHandle, path: PathBuf, id: u64) -> Result<String, 
         .await
 }
 
+#[tauri::command]
+async fn read_annotations(app: AppHandle, path: PathBuf) -> Result<Map<String, Value>, String> {
+    blocking(move || {
+        history::read_annotations(&history_directory(&app, &path)?).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+async fn update_annotations(
+    app: AppHandle,
+    path: PathBuf,
+    changes: Map<String, Value>,
+) -> Result<(), String> {
+    blocking(move || {
+        history::update_annotations(&history_directory(&app, &path)?, changes)
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
 /// Save a pasted or dropped asset (base64 `data`) under a name that is not
 /// taken yet in `directory`; returns the new file's path.
 #[tauri::command]
@@ -726,6 +747,8 @@ pub fn run() {
             record_version,
             list_versions,
             read_version,
+            read_annotations,
+            update_annotations,
             save_asset,
             show_open_dialog,
             show_save_dialog,

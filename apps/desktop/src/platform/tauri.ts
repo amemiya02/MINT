@@ -53,6 +53,8 @@ export function createTauriPlatform(): Platform {
     recordVersion: (path, text) => invoke<void>("record_version", { path, text }),
     listVersions: (path) => invoke<number[]>("list_versions", { path }),
     readVersion: (path, id) => invoke<string>("read_version", { path, id }),
+    readAnnotations: (path) => invoke("read_annotations", { path }),
+    updateAnnotations: (path, changes) => invoke<void>("update_annotations", { path, changes }),
     async watchFile(path, onChange) {
       const channel = new Channel<null>();
       channel.onmessage = () => onChange();

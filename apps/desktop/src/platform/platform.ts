@@ -1,4 +1,7 @@
+import type { Annotation } from "@mint/editor";
 import type { PrintJob } from "../print/protocol.ts";
+
+export type StoredAnnotations = Readonly<Record<string, Annotation>>;
 
 /**
  * The platform interface: the only way the shell reaches the outside world
@@ -32,6 +35,10 @@ export interface Platform {
   listVersions(path: string): Promise<number[]>;
   recordVersion(path: string, text: string): Promise<void>;
   readVersion(path: string, id: number): Promise<string>;
+
+  /** Private annotations for the manuscript. Updates merge by annotation ID. */
+  readAnnotations(path: string): Promise<StoredAnnotations>;
+  updateAnnotations(path: string, changes: StoredAnnotations): Promise<void>;
 
   /**
    * Watch one document for changes made on disk: modified, created, deleted or
