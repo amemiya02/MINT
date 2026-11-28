@@ -696,6 +696,11 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     async writeAppData(name, text) {
       appData.set(name, text);
     },
+    async compareAndWriteAppData(name, expected, text) {
+      if ((appData.get(name) ?? null) !== expected) return false;
+      appData.set(name, text);
+      return true;
+    },
     async readClipboardText() {
       if (clipboardText === null) throw new Error("The clipboard holds no text");
       return clipboardText;

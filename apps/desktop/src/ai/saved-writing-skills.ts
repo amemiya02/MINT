@@ -25,9 +25,14 @@ export function writingSkillMaterials(materials: readonly NamedMaterial[] = []):
   return [...new Set(materials.map((material) => material.range?.kind ?? "text"))];
 }
 
-export function writingSkillContext(context?: TaskContext) {
+function writingSkillContext(context?: TaskContext) {
   return {
-    materials: writingSkillMaterials(context?.materials),
+    materials: writingSkillMaterials([
+      ...(context?.materials ?? []),
+      ...(context?.materialDecisions?.flatMap((decision) =>
+        decision.outcome === "allowed" ? [decision.material] : [],
+      ) ?? []),
+    ]),
     includeDraft: context?.currentDraft ? (true as const) : undefined,
     folderSearch: context?.folderSearch,
   };
@@ -71,28 +76,29 @@ export function makeWritingSkillDraft(
         .join("\n")
     : (turn.skillInstruction ?? turn.instruction);
   const format = turn.method?.format;
+  const scope =
+    turn.method?.scope ??
+    turn.baseline?.scope ??
+    (first?.selectedText !== undefined || turn.material !== undefined
+      ? "selection"
+      : turn.context?.currentDraft
+        ? "document"
+        : "instruction");
+  const context = writingSkillContext(turn.context);
   return {
-    ...writingSkillContext(turn.context),
     ...turn.method,
     name: "",
     steps: turn.method?.steps ?? steps,
     result:
       turn.method?.result ??
       (format === "draft" ? t("writing.skill.draftFormat") : writingSkillResult(t, action)),
-    scope:
-      turn.method?.scope ??
-      turn.baseline?.scope ??
-      (first?.selectedText !== undefined || turn.material !== undefined
-        ? "selection"
-        : turn.context?.currentDraft
-          ? "document"
-          : "instruction"),
+    scope,
     action,
     format,
+    materials: [...new Set([...(turn.method?.materials ?? []), ...context.materials])],
     includeDraft:
-      (turn.method?.scope ?? turn.baseline?.scope) === "document"
-        ? undefined
-        : (turn.method?.includeDraft ?? (turn.context?.currentDraft ? true : undefined)),
+      scope === "document" ? undefined : (turn.method?.includeDraft ?? context.includeDraft),
+    folderSearch: turn.method?.folderSearch ?? context.folderSearch,
     tools:
       turn.method?.tools ??
       (turn.toolOutcome?.status === "done"
@@ -111,7 +117,7 @@ export function savedSkillInstruction(
     skill.steps,
     t("writing.skill.requestedFormat", { format: skill.result }),
     extra && t("writing.skill.authorInstruction", { instruction: extra }),
-    writingSkillResult(t, action),
+    skill.format !== "draft" && writingSkillResult(t, action),
   ]
     .filter(Boolean)
     .join("\n");
@@ -119,7 +125,6 @@ export function savedSkillInstruction(
 
 const library = "writing-skills.json";
 const changes = new EventTarget();
-const pending = new WeakMap<Platform, Promise<unknown>>();
 
 export function watchWritingSkills(onChange: () => void) {
   changes.addEventListener("change", onChange);
@@ -131,7 +136,10 @@ export function watchWritingSkills(onChange: () => void) {
 }
 
 export async function readWritingSkills(platform: Platform): Promise<readonly SavedWritingSkill[]> {
-  const text = await platform.readAppData(library);
+  return parseLibrary(await platform.readAppData(library));
+}
+
+function parseLibrary(text: string | null): readonly SavedWritingSkill[] {
   if (text === null) return [];
   const value: unknown = JSON.parse(text);
   if (!Array.isArray(value)) throw new Error("invalidWritingSkill");
@@ -159,32 +167,32 @@ export function validWritingSkillDraft(draft: WritingSkillDraft) {
   );
 }
 
-export function saveWritingSkill(platform: Platform, draft: WritingSkillDraft) {
-  const operation = (pending.get(platform) ?? Promise.resolve()).then(async () => {
-    draft = methodFromJSON(draft);
-    const skills = await readWritingSkills(platform);
-    const slug = [
-      ...draft.name
-        .toLowerCase()
-        .replace(/[^\p{L}\p{N}]+/gu, "-")
-        .replace(/^-|-$/g, ""),
-    ]
-      .slice(0, 64)
-      .join("");
-    const base = slug || "skill";
+export async function saveWritingSkill(platform: Platform, draft: WritingSkillDraft) {
+  const method = methodFromJSON(draft);
+  const slug = [
+    ...method.name
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, "-")
+      .replace(/^-|-$/g, ""),
+  ]
+    .slice(0, 64)
+    .join("");
+  const base = slug || "skill";
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const previous = await platform.readAppData(library);
+    const skills = parseLibrary(previous);
     const occupied = new Set(["copyedit", "clarify", ...skills.map(({ id }) => id)]);
     let id = base;
     for (let suffix = 2; occupied.has(id); suffix++) id = `${base}-${suffix}`;
-    const skill: SavedWritingSkill = { ...draft, version: 1, id };
-    await platform.writeAppData(library, JSON.stringify([...skills, skill]));
-    changes.dispatchEvent(new Event("change"));
-    return skill;
-  });
-  pending.set(
-    platform,
-    operation.catch(() => {}),
-  );
-  return operation;
+    const skill: SavedWritingSkill = { ...method, version: 1, id };
+    if (
+      await platform.compareAndWriteAppData(library, previous, JSON.stringify([...skills, skill]))
+    ) {
+      changes.dispatchEvent(new Event("change"));
+      return skill;
+    }
+  }
+  throw new Error("writingSkillsChanged");
 }
 
 const packageKind = "mint-writing-skill";

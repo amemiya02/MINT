@@ -162,6 +162,9 @@ export interface Platform {
   /** Write a small named file to MINT's app data directory, atomically. */
   writeAppData(name: string, text: string): Promise<void>;
 
+  /** Replace private app data atomically if the existing bytes match the last read. */
+  compareAndWriteAppData(name: string, expected: string | null, text: string): Promise<boolean>;
+
   /**
    * Absolute path of the theme folder (`themes` in the app data directory),
    * created if missing. User themes are the `.css` files in it; read, list and

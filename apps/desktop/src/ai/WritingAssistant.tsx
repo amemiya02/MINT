@@ -45,6 +45,7 @@ import {
 import { SourcePassageReview } from "./SourcePassageReview.tsx";
 import {
   makeWritingSkillDraft,
+  type SavedWritingSkill,
   savedSkillInstruction,
   saveWritingSkill,
   validWritingSkillDraft,
@@ -589,7 +590,7 @@ function Composer({
   const [skillDraft, setSkillDraft] = useState<WritingSkillDraft | null>(null);
   const [savingSkill, setSavingSkill] = useState(false);
   const [skillSaveFailed, setSkillSaveFailed] = useState(false);
-  const [lastSavedSkill, setLastSavedSkill] = useState("");
+  const [lastSavedSkill, setLastSavedSkill] = useState<SavedWritingSkill>();
   const [trialResult, setTrialResult] = useState<{
     status: AttemptStatus;
     text: string;
@@ -948,10 +949,17 @@ function Composer({
     refresh();
     return origin.editor.subscribe((event) => {
       if (event.type === "change") refresh();
-      if (event.type === "selection") setLiveSelection(origin.editor.getSelection());
       if (event.type === "rangeHistory") onBatchHistory(event);
     });
   }, [origin]);
+
+  const buildingSkill = !!skillDraft;
+  useEffect(() => {
+    if (!buildingSkill) return;
+    return origin.editor.subscribe(({ type }) => {
+      if (type === "selection") setLiveSelection(origin.editor.getSelection());
+    });
+  }, [buildingSkill, origin]);
 
   useEffect(() => {
     if (settingsOpen) return;
@@ -1423,7 +1431,7 @@ function Composer({
           : next.custom.scope === "folder" || (next.custom.scope === "selection" && !origin.text)
             ? origin.text
               ? "selection"
-              : "document"
+              : "instruction"
             : next.custom.scope,
       );
       setAllowedFolder(null);
@@ -1464,7 +1472,7 @@ function Composer({
     toolPicker.changeAddress("");
     callLimit.setValue("");
     setSkillSaveFailed(false);
-    setLastSavedSkill("");
+    setLastSavedSkill(undefined);
   }
 
   async function saveSkill() {
@@ -1473,7 +1481,7 @@ function Composer({
     setSkillSaveFailed(false);
     try {
       const saved = await saveWritingSkill(platform, skillDraft);
-      setLastSavedSkill(saved.id);
+      setLastSavedSkill(saved);
       setSkillDraft(null);
     } catch {
       setSkillSaveFailed(true);
@@ -2975,7 +2983,12 @@ function Composer({
         </p>
       )}
       {saveFailed && <p role="alert">{t("writing.tasks.saveFailed")}</p>}
-      {lastSavedSkill && <p role="status">{t("writing.skill.saved", { id: lastSavedSkill })}</p>}
+      {lastSavedSkill && (
+        <div className="flex flex-wrap items-center gap-2">
+          <p role="status">{t("writing.skill.saved", { id: lastSavedSkill.id })}</p>
+          <ExportWritingSkillButton platform={platform} skill={lastSavedSkill} />
+        </div>
+      )}
       {skillSaveFailed && <p role="alert">{t("writing.skill.saveFailed")}</p>}
       {skillDraft && (
         <WritingSkillEditor

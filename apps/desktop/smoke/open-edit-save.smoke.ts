@@ -2997,6 +2997,20 @@ test("a shared writing skill uses fresh materials and the recipient's native con
       { timeout: 35_000 },
     ).catch(explain);
   };
+  const chooseRecipient = (name: string) =>
+    waitForView(
+      `the ${name} connection to be available`,
+      `
+      const select = [...document.querySelectorAll(${JSON.stringify(`${composer} label`)})]
+        .find(label => label.firstChild?.textContent === 'Recipient')?.control;
+      const option = [...(select?.options ?? [])]
+        .find(option => option.text.startsWith(${JSON.stringify(name)}));
+      if (!option) return false;
+      select.value = option.value;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    `,
+    );
   const expectReply = () =>
     waitForView(
       "the native model comment",
@@ -3007,6 +3021,7 @@ test("a shared writing skill uses fresh materials and the recipient's native con
     const authorSend = await start(authorDraft, "Author skill fixture", "author", authorKey);
     await click("Ask AI");
     await fill("Instruction", "input", "/copyedit");
+    await chooseRecipient("Author skill fixture");
     await showsIn(composer, "Correct spelling, punctuation, and grammar.");
     await waitForView(
       "comment-only action can be selected",
@@ -3066,6 +3081,7 @@ test("a shared writing skill uses fresh materials and the recipient's native con
     assert.equal(received.length, 2);
     await click("Save skill");
     await click("/agreement-review-2 · Agreement review");
+    await chooseRecipient("Recipient skill fixture");
     await addPastedWritingMaterial(recipientMaterial);
     await click(recipientSend);
     await expectReply();

@@ -234,3 +234,51 @@ test("trial and share a successful writing skill using each author’s chosen ma
     await receiver.close();
   }
 });
+
+test("a shared draft skill runs from Draft with AI", async ({ page }) => {
+  const endpoint = "https://draft-skill.example.test/v1/chat/completions";
+  const result = "# Meeting summary";
+  const instructions: string[] = [];
+  await page.route(endpoint, (route) => {
+    const { messages } = route.request().postDataJSON();
+    instructions.push(messages.at(-1).content);
+    return route.fulfill({
+      json: { choices: [{ message: { content: result }, finish_reason: "stop" }] },
+    });
+  });
+  await launch(page, { locale: "en-US" });
+  await connect(page, "Draft fixture", endpoint);
+  await runMenuItem(page, "edit.writingSkills");
+  const ask = page.getByRole("region", { name: "Ask AI" });
+  await pickFile(page, ask.getByRole("button", { name: "Import skill" }), {
+    name: "meeting-summary.mint-skill.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(
+      JSON.stringify({
+        kind: "mint-writing-skill",
+        version: 1,
+        skill: {
+          name: "Meeting summary",
+          steps: "Summarize the meeting decisions.",
+          result: "Return a Markdown heading and concise bullets.",
+          scope: "instruction",
+          action: "direct",
+          format: "draft",
+          tools: [],
+        },
+      }),
+    ),
+  });
+  await ask.getByRole("button", { name: "Save skill" }).click();
+  await ask.getByRole("button", { name: "/meeting-summary · Meeting summary" }).waitFor();
+  await ask.getByRole("button", { name: "Close", exact: true }).click();
+
+  await runMenuItem(page, "file.draftWithAi");
+  const draft = page.getByRole("form", { name: "Draft with AI" });
+  await draft.getByRole("textbox", { name: "Drafting instruction" }).fill("/");
+  await draft.getByRole("button", { name: "/meeting-summary · Meeting summary" }).click();
+  await draft.getByRole("button", { name: "Generate draft" }).click();
+  await expect(page.locator(".cm-content:visible")).toContainText("Meeting summary");
+  expect(instructions).toEqual([expect.stringContaining("Summarize the meeting decisions.")]);
+  expect(instructions[0]).toContain("Return a Markdown heading and concise bullets.");
+});
