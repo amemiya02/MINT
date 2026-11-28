@@ -317,3 +317,25 @@ test("each view of a long manuscript keeps its chapter while editing and undoing
     .poll(() => readFile(page, path))
     .toBe(draft.replace("Definition", "New Definition").replace("Conclusion", "Summary"));
 });
+
+test("a split keeps the manuscript's line ending after its last line break was edited out", async ({
+  page,
+}) => {
+  const path = "/notes/crlf.md";
+  await launch(page, {
+    files: { ...files, [path]: "alpha\r\nomega" },
+    openDialogResults: [path],
+    locale: "en-US",
+  });
+  await page.keyboard.press("ControlOrMeta+O");
+  await expect(page.getByRole("textbox")).toBeFocused();
+  await page.keyboard.press("ControlOrMeta+a");
+  await page.keyboard.type("new");
+  await page.getByRole("button", { name: "Open crlf.md in other pane" }).click();
+  await expect(page.getByRole("textbox").nth(1)).toBeFocused();
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.press("Enter");
+  await page.getByRole("button", { name: "Close crlf.md", exact: true }).first().click();
+  await page.keyboard.press("ControlOrMeta+s");
+  await expect.poll(() => readFile(page, path)).toBe("new\r\n");
+});
