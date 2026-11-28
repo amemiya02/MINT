@@ -224,6 +224,36 @@ test("saved versions survive a native restart outside the working folder", async
   await keyActions(typing("\uE00C"));
 });
 
+test("history restores and undo autosave the exact native file", async () => {
+  const current = Buffer.from("\uFEFF# Smoke\r\n\r\nfirst line  \r\n[second line](#smoke)");
+  const earlier = Buffer.from("\uFEFF# Smoke\r\n\r\nfirst line  \r\nsecond line");
+  async function click(using: string, value: string) {
+    const id = await until(value, async () => {
+      const item = await command<Record<string, string>>("POST", `/session/${session}/element`, {
+        using,
+        value,
+      });
+      return item[elementKey] ?? null;
+    }).catch(explain);
+    await command("POST", `/session/${session}/element/${id}/click`, {});
+  }
+  for (const action of ["Restore this change", "Restore entire version"]) {
+    await click("css selector", 'footer button[aria-label="Version History"]');
+    await click("css selector", "dialog label:first-child select option:first-child");
+    await click("css selector", 'dialog select option[value="0"]');
+    await click("xpath", `//dialog//button[normalize-space(.)='${action}']`);
+    await until(action, async () => (await readFile(document)).equals(earlier) || null).catch(
+      explain,
+    );
+    await keyActions(chord(keys.control, "z"));
+    await until(
+      "undo to autosave",
+      async () => (await readFile(document)).equals(current) || null,
+    ).catch(explain);
+  }
+  assert.deepEqual(await readdir(dir), ["smoke.md"]);
+});
+
 test("the native statistics view refuses a denied read and allows an explicit grant", async () => {
   const click = async (label: string) => {
     const element = await until(label, async () => {

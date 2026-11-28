@@ -1,6 +1,7 @@
 import type { WordCount } from "@mint/editor";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { createAutosave } from "./autosave/autosave.ts";
+import { Backlinks } from "./backlinks/Backlinks.tsx";
 import { CommandPalette } from "./command-palette/CommandPalette.tsx";
 import {
   buildMenu,
@@ -390,6 +391,17 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
             }}
           />
         )}
+        {folderSearch === null && sidebarVisible && sidebarView === "backlinks" && (
+          <Backlinks
+            key={JSON.stringify([folder, activePath])}
+            platform={platform}
+            tree={tree}
+            targetPath={activePath}
+            onOpen={(link) =>
+              void store.openDocument(link.sourcePath, { sourceFrom: link.from, sourceTo: link.to })
+            }
+          />
+        )}
         {folderSearch === null && sidebarVisible && selectedPlugin && (
           <TagBrowser
             key={JSON.stringify([selectedPlugin.manifest.id, folder, selectedPlugin.granted])}
@@ -511,9 +523,10 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
           onClose={() => setQuickOpenVisible(false)}
         />
       )}
-      {historyPath && (
+      {historyPath && active?.path === historyPath && (
         <HistoryDialog
           path={historyPath}
+          editor={store.editor(active.id)}
           platform={platform}
           onClose={() => {
             setHistoryPath(null);
