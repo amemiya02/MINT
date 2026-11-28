@@ -430,6 +430,14 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       directories.add(path);
       notify(path);
     },
+    async applyDocumentEdit({ from, to, before, after }) {
+      if (files.get(from) !== before) throw new Error(`${from}: file changed`);
+      if (from !== to && exists(to)) throw new Error(`${to} already exists`);
+      requireParent(to);
+      files.delete(from);
+      files.set(to, after);
+      notify(from, to);
+    },
     async rename(from, to) {
       if (!exists(from)) throw new Error(`No such file or directory: ${from}`);
       if (exists(to)) throw new Error(`${to} already exists`);
