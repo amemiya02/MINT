@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { launch } from "./memory-platform.ts";
+import { forgetExternalAgent, launch } from "./memory-platform.ts";
 
 test("settings tries a discovered Agent only after the author allows its access", async ({
   page,
@@ -45,6 +45,50 @@ test("settings tries a discovered Agent only after the author allows its access"
       },
     },
   ]);
+});
+
+test("Settings asks again for the same Agent permissions when approval is gone", async ({
+  page,
+}) => {
+  const path = "/opt/agents/fixture-codex";
+  const received: unknown[] = [];
+  await page.route("**/__test/external-agent", (route) => {
+    received.push(route.request().postDataJSON());
+    return route.fulfill({ json: { text: "Fixture reply." } });
+  });
+  await launch(page, {
+    locale: "en-US",
+    externalAgent: { executables: [path], endpoint: "/__test/external-agent" },
+  });
+
+  await page.keyboard.press("ControlOrMeta+,");
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  await settings.getByRole("button", { name: "External Agents", exact: true }).click();
+  await settings.getByLabel("Codex executable").fill(path);
+  await settings.getByRole("button", { name: "Inspect Agent" }).click();
+  const permissions = settings.getByLabel("Agent permissions");
+  await permissions.selectOption("configured");
+  const tryExample = settings.getByRole("button", { name: "Try example" });
+  await tryExample.click();
+  await settings.getByRole("button", { name: "Allow and send" }).click();
+  await expect(settings.getByText("Fixture reply.")).toBeVisible();
+  expect(received).toEqual([expect.objectContaining({ path, access: "configured" })]);
+
+  await forgetExternalAgent(page, path);
+  await tryExample.click();
+  await expect(
+    settings.getByText("Agent access changed. Review its permissions before sending."),
+  ).toBeVisible();
+  await expect(permissions).toHaveValue("configured");
+  await tryExample.click();
+  await expect(
+    settings.getByText("Use Codex’s configured permissions and send the task shown above.", {
+      exact: false,
+    }),
+  ).toBeVisible();
+  await settings.getByRole("button", { name: "Decline" }).click();
+  await expect(settings.getByText("Agent access declined.")).toBeVisible();
+  expect(received).toHaveLength(1);
 });
 
 test("a manually added Agent receives only the selected unsaved text after consent", async ({

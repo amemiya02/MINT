@@ -1,17 +1,23 @@
 import { expect, type Page, test } from "@playwright/test";
-import { launch, readFile, settingsPath } from "./memory-platform.ts";
+import type { MemoryPlatform } from "../src/platform/memory.ts";
+import { launch, readFile, runMenuItem, settingsPath } from "./memory-platform.ts";
 
 const path = "/notes/quick-edit.md";
 const endpoint = "http://127.0.0.1:9876/v1/chat/completions";
 const instruction = "缩短一半，直接改";
 
-async function openManuscript(page: Page, source: string, autosave: boolean) {
+async function openManuscript(
+  page: Page,
+  source: string,
+  autosave: boolean,
+  primary = "ControlOrMeta",
+) {
   await launch(page, {
     locale: "en-US",
     files: { [path]: source, [settingsPath]: JSON.stringify({ autosave }) },
     openedPaths: [{ path, kind: "file" }],
   });
-  await page.keyboard.press("ControlOrMeta+,");
+  await page.keyboard.press(`${primary}+,`);
   const settings = page.getByRole("dialog", { name: "Settings" });
   await settings.getByRole("button", { name: "Model connections" }).click();
   await settings.getByLabel("Connection name").fill("Quick edit fixture");
@@ -98,15 +104,26 @@ test("one Enter edits the live selection, keeps both panes usable, and saves and
   await expect(left.getByText(live, { exact: true })).toBeInViewport();
 });
 
-test("autosave writes independent changes and leaves a concurrent edit for comparison", async ({
+test("Windows redo autosaves independent direct edits with mixed line endings", async ({
   page,
 }) => {
-  const source =
-    "\uFEFFOpening line.\nExtra opening detail.\r\n\r\nMiddle line.\n\nKeep these spaces.  \r\n\r\nClosing line.\nClosing detail.\r\n";
+  await autosaveConcurrentDirectEdit(page, "\n");
+});
+
+test("Windows redo autosaves independent direct edits in a CRLF document", async ({ page }) => {
+  await autosaveConcurrentDirectEdit(page, "\r\n");
+});
+
+async function autosaveConcurrentDirectEdit(page: Page, lineBreak: "\n" | "\r\n") {
+  await page.context().addInitScript(() => {
+    Object.defineProperty(Navigator.prototype, "platform", { get: () => "Win32" });
+  });
+  const opening = `Opening line.${lineBreak}Extra opening detail.`;
+  const closing = `Closing line.${lineBreak}Closing detail.`;
+  const shortClosing = `Short close.${lineBreak}Short detail.`;
+  const source = `\uFEFF${opening}\r\n\r\nMiddle line.${lineBreak}${lineBreak}Keep these spaces.  \r\n\r\n${closing}\r\n`;
   const author = source.replace("Middle line.", "Author's middle line.");
-  const expected = author
-    .replace("Opening line.\nExtra opening detail.", "Short opening.")
-    .replace("Closing line.\nClosing detail.", "Short close.\nShort detail.");
+  const expected = author.replace(opening, "Short opening.").replace(closing, shortClosing);
   let releaseReply!: () => void;
   const pending = new Promise<void>((resolve) => {
     releaseReply = resolve;
@@ -122,14 +139,14 @@ test("autosave writes independent changes and leaves a concurrent edit for compa
       ),
     });
   });
-  await openManuscript(page, source, true);
+  await openManuscript(page, source, true, "Control");
   await page.getByRole("button", { name: "Track changes", exact: true }).click();
   const trackedChanges = page.getByRole("region", { name: "Tracked changes" });
   const trackedEdits = trackedChanges.getByRole("button", { name: "Reject", exact: true });
 
   const editor = page.locator(".cm-content");
   await expect(editor).toBeFocused();
-  await editor.press("ControlOrMeta+A");
+  await editor.press("Control+A");
   await page.getByRole("button", { name: "Ask AI", exact: true }).click();
   const input = page.getByRole("textbox", { name: "Instruction" });
   await input.fill(instruction);
@@ -140,6 +157,7 @@ test("autosave writes independent changes and leaves a concurrent edit for compa
   await editor.press("Home");
   await editor.press("Shift+End");
   await page.keyboard.insertText("Author's middle line.");
+  await expect.poll(() => readFile(page, path)).toBe(author);
   releaseReply();
   await expect(page.getByRole("status")).toHaveText("2 edits applied · 1 to review");
   await expect.poll(() => readFile(page, path)).toBe(expected);
@@ -152,12 +170,19 @@ test("autosave writes independent changes and leaves a concurrent edit for compa
   await expect(conflict.getByRole("button", { name: "Apply to compared text" })).toBeVisible();
   await review.getByRole("button", { name: "Close", exact: true }).click();
 
-  await editor.press("ControlOrMeta+Z");
-  await expect.poll(() => readFile(page, path)).toBe(author);
-  await expect(trackedEdits).toHaveCount(1);
-  await editor.press("ControlOrMeta+Shift+Z");
-  await expect.poll(() => readFile(page, path)).toBe(expected);
-  await expect(trackedEdits).toHaveCount(3);
+  for (const redoShortcut of ["Control+Y", "Control+Shift+Z"]) {
+    await editor.press("Control+Z");
+    await expect.poll(() => readFile(page, path)).toBe(author);
+    await expect(trackedEdits).toHaveCount(1);
+    await editor.press(redoShortcut);
+    await expect(
+      editor.getByText("Short opening.", { exact: true }),
+      `${redoShortcut} should restore the rewritten opening`,
+    ).toBeVisible();
+    await expect(editor.getByText("Short close.", { exact: true })).toBeVisible();
+    await expect.poll(() => readFile(page, path)).toBe(expected);
+    await expect(trackedEdits).toHaveCount(3);
+  }
 
   await editor.getByText("Short close.", { exact: true }).click();
   await editor.press("Home");
@@ -167,9 +192,111 @@ test("autosave writes independent changes and leaves a concurrent edit for compa
   await page.getByRole("button", { name: "Undo direct edits", exact: true }).click();
   await expect
     .poll(() => readFile(page, path))
-    .toBe(author.replace("Closing line.\nClosing detail.", "Author's closing.\nShort detail."));
+    .toBe(author.replace(closing, shortClosing.replace("Short close.", "Author's closing.")));
   const changed = review.getByRole("group", { name: "Proposed edit 3 of 3" });
   await expect(changed.getByText(/Author's closing\./)).toBeVisible();
   await changed.getByRole("button", { name: "Revert to selected text" }).click();
   await expect.poll(() => readFile(page, path)).toBe(author);
+}
+
+test("reverting a restored task across turns preserves later manuscript edits", async ({
+  page,
+  browser,
+}) => {
+  const title = "Revise the opening.";
+  const source =
+    "\uFEFFOpening draft.\r\n\r\nMargin note.  \n\nMiddle draft.\r\n\r\nKeep this.\n\nClosing draft.";
+  const applied = source
+    .replace("Opening draft.", "Opening revision.")
+    .replace("Middle draft.", "Middle revision.")
+    .replace("Closing draft.", "Closing revision.");
+  const handEdited = applied.replace("Margin note.", "Author's Margin note.");
+  const author = handEdited.replace("Closing revision.", "Author's closing.");
+  const expected = author
+    .replace("Opening revision.", "Opening draft.")
+    .replace("Middle revision.", "Middle draft.");
+  await page.route(endpoint, (route) => {
+    const { messages } = route.request().postDataJSON();
+    const { instruction } = JSON.parse(messages.at(-1).content);
+    const replacement =
+      instruction === title
+        ? source.replace("Opening draft.", "Opening revision.")
+        : source
+            .replace("Middle draft.", "Middle revision.")
+            .replace("Closing draft.", "Closing revision.");
+    return route.fulfill({ json: replacementReply(replacement.slice(1)) });
+  });
+  await openManuscript(page, source, false);
+  const editor = page.locator(".cm-content");
+  await editor.press("ControlOrMeta+A");
+  await page.getByRole("button", { name: "Ask AI", exact: true }).click();
+  const inline = page.getByRole("region", { name: "Ask AI" });
+  const first = inline.getByRole("textbox", { name: "Instruction" });
+  await first.fill(title);
+  await first.press("Enter");
+  await inline.getByRole("button", { name: "Apply proposed edit", exact: true }).click();
+  await inline.getByRole("button", { name: "Continue in sidebar" }).click();
+  const sidebar = page.getByRole("complementary", { name: "Writing Assistant" });
+  const second = sidebar.getByRole("textbox", { name: "Instruction" });
+  await second.fill("Revise the middle and closing, apply directly");
+  await second.press("Enter");
+  await expect(editor).toContainText("Closing revision.");
+  await expect(sidebar.getByRole("group", { name: "Proposed edit 2 of 2" })).toContainText(
+    "Applied",
+  );
+  await sidebar.getByRole("button", { name: "Close", exact: true }).click();
+  await editor.getByText("Margin note.", { exact: true }).click();
+  await editor.press("Home");
+  await page.keyboard.insertText("Author's ");
+  await editor.press("ControlOrMeta+S");
+  await expect.poll(() => readFile(page, path)).toBe(handEdited);
+  const appData = await page.evaluate(() =>
+    Object.fromEntries(
+      (window as unknown as { __MINT_MEMORY_PLATFORM__: MemoryPlatform }).__MINT_MEMORY_PLATFORM__
+        .appData,
+    ),
+  );
+
+  const rebooted = await browser.newContext();
+  try {
+    const resumed = await rebooted.newPage();
+    await launch(resumed, {
+      locale: "en-US",
+      files: { [path]: author, [settingsPath]: '{"autosave":false}' },
+      openedPaths: [{ path, kind: "file" }],
+      appData,
+    });
+    await runMenuItem(resumed, "view.openInOtherPane");
+    await runMenuItem(resumed, "edit.writingTasks");
+    await resumed.getByRole("button", { name: title, exact: true }).click();
+    const review = resumed.getByRole("complementary", { name: "Writing Assistant" });
+    const revertAll = review.getByRole("button", { name: "Revert all task edits" });
+    await expect(revertAll).toBeVisible();
+    await revertAll.click();
+    const overlap = review.getByRole("group", { name: "Proposed edit 2 of 2" });
+    await expect(overlap.getByText("Author's closing.", { exact: true })).toBeVisible();
+    await expect(overlap.getByRole("button", { name: "Revert to selected text" })).toBeVisible();
+    const panes = resumed.locator(".cm-content");
+    await expect(panes).toHaveCount(2);
+    for (const pane of await panes.all()) {
+      await expect(pane).toContainText("Opening draft.");
+      await expect(pane).toContainText("Middle draft.");
+      await expect(pane).toContainText("Author's Margin note.");
+      await expect(pane).toContainText("Author's closing.");
+    }
+    expect(await readFile(resumed, path)).toBe(author);
+    await panes.last().press("ControlOrMeta+S");
+    await expect.poll(() => readFile(resumed, path)).toBe(expected);
+    await revertAll.click();
+    await panes.last().press("ControlOrMeta+S");
+    await expect.poll(() => readFile(resumed, path)).toBe(expected);
+    const keep = overlap.getByRole("button", { name: "Keep current text" });
+    await expect(keep).toBeVisible();
+    await keep.click();
+    await expect(overlap).toContainText("Kept the current text.");
+    await expect(revertAll).toHaveCount(0);
+    expect(await readFile(resumed, path)).toBe(expected);
+  } finally {
+    await rebooted.close();
+  }
 });
