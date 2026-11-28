@@ -6,7 +6,7 @@ const report = "/notes/research/report.markdown";
 const files = {
   [report]: "\uFEFF# Research\r\n\r\n1. [ ] Check the draft\r\n   - [X] Verify citation  \r\n",
   "/notes/draft.md": "# Draft\n\n- [ ] Verify citation\n\n```md\n- [ ] Example only\n```\n",
-  "/notes/.ignore": "generated/\n",
+  "/notes/.gitignore": "generated/\n",
   "/notes/generated/archive.md": "- [ ] Ignored task",
   "/notes/metadata.md": "---\nexamples:\n  - [ ] Only metadata\n---\n",
   "/notes/archive.txt": "- [ ] Not Markdown",
