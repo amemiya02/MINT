@@ -10,6 +10,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -699,4 +700,70 @@ test("the native slide presentation returns to the draft and preserves its bytes
   await nativeShortcut("ctrl+comma");
   await clickPath(`${plugin}//button[normalize-space(.)='Uninstall']`);
   await click("Close");
+});
+
+test("only granted Zotero reads reach the local service and the chosen item is saved", async () => {
+  let requests = 0;
+  const server = createServer((req, res) => {
+    if (req.method !== "GET" || !req.url?.startsWith("/api/users/0/items/top?")) {
+      res.writeHead(404).end();
+      return;
+    }
+    requests++;
+    res.setHeader("Content-Type", "application/json");
+    res.end(
+      JSON.stringify([{ key: "TEST1234", data: { itemType: "book", title: "Fixture reference" } }]),
+    );
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(23119, "127.0.0.1", resolve);
+  });
+  try {
+    const path = join(dir, "zotero.md");
+    await writeFile(path, "Field notes.  ");
+    await restart([path]);
+    await until("the citation draft", () =>
+      command<boolean>("POST", `/session/${session}/execute/sync`, {
+        script:
+          "return document.activeElement?.matches('.cm-content') && document.activeElement.textContent.includes('Field notes.')",
+        args: [],
+      }).then((ok) => ok || null),
+    ).catch(explain);
+    await keyActions(chord(keys.control, keys.end));
+    const settingsButton = async (label: string) => {
+      const el = await until(label, () =>
+        command<Record<string, string>>("POST", `/session/${session}/element`, {
+          using: "xpath",
+          value: `//fieldset[@aria-label='Zotero']//button[normalize-space(.)='${label}']`,
+        }).then((el) => el[elementKey] ?? null),
+      ).catch(explain);
+      await command("POST", `/session/${session}/element/${el}/click`, {});
+    };
+    await nativeShortcut("ctrl+comma");
+    await settingsButton("Install");
+    await shows("Connect to the local Zotero library");
+    await click("Deny access");
+    await click("Close");
+    await click("Insert Zotero citation");
+    await shows("Zotero access was denied");
+    assert.equal(requests, 0);
+    await click("Close");
+    await nativeShortcut("ctrl+comma");
+    await settingsButton("Allow access");
+    await settingsButton("Allow access");
+    await click("Close");
+    await click("Insert Zotero citation");
+    await click("Fixture reference");
+    await nativeShortcut("ctrl+s");
+    await until("the citation on disk", async () =>
+      (await readFile(path, "utf8")) ===
+      "Field notes.  [Fixture reference](zotero://select/library/items/TEST1234)"
+        ? true
+        : null,
+    ).catch(explain);
+    assert.ok(requests > 0);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 });

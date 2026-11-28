@@ -2,6 +2,17 @@
 export const en = {
   "plugin.templates": "Writing templates",
   "plugin.installTemplates": "Install writing templates",
+  "zotero.permission": "Connect to the local Zotero library",
+  "zotero.insert": "Insert Zotero citation",
+  "zotero.denied":
+    "Zotero access was denied. Allow connection to Zotero and modification of the current document in plugin settings.",
+  "zotero.unavailable":
+    "Could not read the library. Open Zotero and enable its local API in Settings → Advanced.",
+  "zotero.loading": "Loading references…",
+  "zotero.empty": "No references on this page.",
+  "zotero.previous": "Previous references",
+  "zotero.more": "More references",
+  "zotero.noDraft": "Open a document to insert a citation.",
   "plugin.write": "Modify the current document at the selection",
   "plugin.writeDenied": "Permission to modify the current document was denied.",
   "plugin.templateEmpty": "Open a document to insert a template.",

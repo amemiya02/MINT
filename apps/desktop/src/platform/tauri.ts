@@ -42,6 +42,7 @@ const nativeItems = {
 export function createTauriPlatform(): Platform {
   return {
     locale: navigator.language,
+    listZoteroItems: (start) => invoke("list_zotero_items", { start }),
     savesPdfDirectly: /Windows/.test(navigator.userAgent),
     readTextFile: (path) => invoke<string>("read_text_file", { path }),
     writeBinaryFile: (path, bytes) =>
