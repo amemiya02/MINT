@@ -1,4 +1,4 @@
-import { parentPath } from "../paths.ts";
+import { baseName, parentPath } from "../paths.ts";
 import { createIgnoreRules } from "./gitignore.ts";
 import type {
   DirectoryEntry,
@@ -345,6 +345,10 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
         })
         .sort();
     },
+    async matchSearchLabels(query, labels) {
+      const regexp = searchRegExp(query);
+      return labels.flatMap((label, index) => (matchesLabel(label, regexp) ? [index] : []));
+    },
     async searchFolder(root, query, extensions, listener) {
       const regexp = searchRegExp(query);
       const paths = await this.listFolderFiles(root, extensions);
@@ -358,7 +362,8 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
           return;
         }
         const lines = searchText(files.get(path) ?? "", regexp);
-        if (lines.length > 0) listener.onFile({ path, lines });
+        const nameMatches = matchesLabel(baseName(path), regexp);
+        if (nameMatches || lines.length > 0) listener.onFile({ path, nameMatches, lines });
         setTimeout(() => next(index + 1));
       };
       setTimeout(() => next(0));
@@ -564,6 +569,11 @@ function searchRegExp(query: FolderSearchQuery): RegExp {
   if (query.wholeWord) source = `(?<![\\p{L}\\p{N}_])(?:${source})(?![\\p{L}\\p{N}_])`;
   // Throws a SyntaxError for an invalid pattern, as the backend rejects it.
   return new RegExp(source, query.caseSensitive ? "gu" : "giu");
+}
+
+function matchesLabel(label: string, regexp: RegExp): boolean {
+  for (const match of label.matchAll(regexp)) if (match[0].length > 0) return true;
+  return false;
 }
 
 function searchText(text: string, regexp: RegExp): LineMatch[] {

@@ -115,6 +115,9 @@ export const en = {
   "command.view.toggleVimMode": "Toggle Vim Mode",
   "search.label": "Search in Folder",
   "search.close": "Close Search",
+  "search.headings": "Current document headings",
+  "search.names": "File names",
+  "search.body": "Document text",
   "search.searching": "Searching…",
   "search.summary": "{matches} in {documents}",
   "search.matches.one": "1 result",
@@ -264,6 +267,8 @@ export const en = {
   "status.characters.other": "{count} characters",
   "status.readingTime": "{minutes} min read",
 
+  "error.staleSearchResult":
+    "The document changed. This search result can no longer be located in the open draft.",
   "error.missingHeading": "Heading not found: {fragment}",
   "error.ambiguousHeading": "Multiple headings match: {fragment}",
   "error.open": "Could not open {path}: {reason}",
