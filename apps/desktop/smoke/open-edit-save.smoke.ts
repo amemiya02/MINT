@@ -1271,6 +1271,68 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   assert.equal(sample.readable, initial);
   await assert.rejects(readFile(writeTarget), { code: "ENOENT" });
 
+  // Run the same installed connection from the manuscript, including a real follow-up process.
+  await click("Close");
+  await waitForView(
+    "the manuscript to regain focus",
+    "return document.activeElement?.matches('.cm-content');",
+  );
+  await keyActions([...chord(keys.control, keys.end), ...chord(keys.shift, keys.home)]);
+  await click("Ask AI");
+  await command("POST", `/session/${session}/execute/sync`, {
+    script: `const action = document.querySelector('section[aria-label="Ask AI"] select');
+      action.value = 'comment';
+      action.dispatchEvent(new Event('change', { bubbles: true }));`,
+    args: [],
+  });
+  await clickPath("//section[@aria-label='Ask AI']//input");
+  await keyActions([...typing("Is the selected line clear?"), ...typing(keys.enter)]);
+  await waitForView(
+    "the inline reply from the CLI",
+    `return document.querySelector('section[aria-label="Ask AI"]')?.innerText.includes('Fixture Agent reply.') &&
+      !document.querySelector('aside[aria-label="Writing Assistant"]');`,
+  );
+  await click("Continue in sidebar");
+  await command("POST", `/session/${session}/execute/sync`, {
+    script: `const scope = [...document.querySelectorAll('aside[aria-label="Writing Assistant"] select')]
+      .find((select) => select.querySelector('option[value="instruction"]'));
+      scope.value = 'instruction';
+      scope.dispatchEvent(new Event('change', { bubbles: true }));`,
+    args: [],
+  });
+  await clickPath("//aside[@aria-label='Writing Assistant']//input[not(@type='checkbox')]");
+  await keyActions([...typing("What would help?"), ...typing(keys.enter)]);
+  await waitForView(
+    "both CLI replies in the sidebar",
+    `return [...document.querySelectorAll('aside[aria-label="Writing Assistant"] article')]
+      .filter((article) => article.innerText.includes('Fixture Agent reply.')).length === 2;`,
+  );
+  await click("Go to original selection");
+  await waitForView(
+    "the selected line to be restored",
+    `return window.getSelection()?.toString() === "On-disk sentence.";`,
+  );
+  const selectedCalls = (await readFile(calls, "utf8"))
+    .trim()
+    .split("\n")
+    .slice(1)
+    .map((line) => JSON.parse(line));
+  assert.deepEqual(
+    selectedCalls.map((entry) => entry.prompt),
+    [
+      { instruction: "Is the selected line clear?", selectedText: "On-disk sentence." },
+      {
+        instruction: "What would help?",
+        history: [{ instruction: "Is the selected line clear?", reply: "Fixture Agent reply." }],
+      },
+    ],
+  );
+  assert.ok(selectedCalls.every((entry) => entry.entries.length === 0));
+  assert.equal(await readFile(draft, "utf8"), initial);
+  await clickPath("//aside[@aria-label='Writing Assistant']//button[normalize-space(.)='Close']");
+  await openSettings();
+  await click("External Agents");
+
   await command("POST", `/session/${session}/execute/sync`, {
     script: `const select = Array.from(document.querySelectorAll('dialog[open] select'))
       .find((control) => control.querySelector('option[value="configured"]'));
@@ -1285,7 +1347,7 @@ console.log(JSON.stringify({ type: "turn.completed" }));
     invokeNative("send_external_agent", { path, revision, access: "configured", request }),
     /agentAccessRequired/,
   );
-  assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, 1);
+  assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, 3);
   await assert.rejects(readFile(writeTarget), { code: "ENOENT" });
 
   await click("Try example");
@@ -1302,7 +1364,7 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   await shows(executable);
   await click("Try example");
   await shows("Fixture Agent reply.");
-  assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, 3);
+  assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, 5);
   await writeFile(
     executable,
     `${await readFile(executable, "utf8")}
@@ -1311,7 +1373,7 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   );
   await click("Try example");
   await shows("Agent access changed. Review its permissions before sending.");
-  assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, 3);
+  assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, 5);
   await click("Try example");
   await click("Decline");
   await shows("Agent access declined.");

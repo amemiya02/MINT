@@ -1,4 +1,11 @@
-import { defaultKeymap, history, historyKeymap, redo, undo } from "@codemirror/commands";
+import {
+  defaultKeymap,
+  history,
+  historyKeymap,
+  isolateHistory,
+  redo,
+  undo,
+} from "@codemirror/commands";
 import { syntaxTree } from "@codemirror/language";
 import { selectNextOccurrence } from "@codemirror/search";
 import {
@@ -6,6 +13,7 @@ import {
   EditorSelection,
   EditorState,
   type Extension,
+  Text,
   Transaction,
 } from "@codemirror/state";
 import {
@@ -201,6 +209,8 @@ export interface MintEditor {
    * disk. The selection stays next to the text around it; undo restores the old text.
    */
   replaceText(text: string): void;
+  /** Replace one range in its own undo step, preserving the surrounding file text. */
+  replaceRange(range: TextRange, text: string): void;
   /** The main selection range. */
   getSelection(): TextSelection;
   /** Capture the selected manuscript content for a new annotation. */
@@ -417,6 +427,21 @@ export function createEditor(options: EditorOptions): MintEditor {
     getText: () => fileText(view.state),
     replaceText(text) {
       view.dispatch(replaceFileText(view.state, text));
+    },
+    replaceRange(range, text) {
+      const state = view.state;
+      const from = fromFileOffset(state, range.from);
+      const to = fromFileOffset(state, range.to);
+      const insert = Text.of(text.split(/\r\n|\r|\n/));
+      const { main, ranges } = state.selection;
+      view.dispatch({
+        changes: { from, to, insert },
+        selection:
+          ranges.length === 1 && main.from === from && main.to === to
+            ? { anchor: from + insert.length }
+            : undefined,
+        annotations: isolateHistory.of("full"),
+      });
     },
     getSelection() {
       const { anchor, head } = view.state.selection.main;

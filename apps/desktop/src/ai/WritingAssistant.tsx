@@ -3,7 +3,8 @@ import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "rea
 import { useT } from "../i18n/index.ts";
 import type { Platform } from "../platform/platform.ts";
 import { type ExternalAgent, externalAgentSender } from "./external-agent.ts";
-import type { WritingTurn } from "./writing-sender.ts";
+import { type EditStatus, ProposedSelectionEdit } from "./ProposedSelectionEdit.tsx";
+import { replacementFromReply, type WritingTurn } from "./writing-sender.ts";
 
 const buttonClass =
   "rounded-md border border-(--mint-border) bg-(--mint-bg) px-2 py-1 hover:bg-(--mint-hover) focus-visible:outline-2 focus-visible:outline-(--mint-accent) disabled:opacity-50";
@@ -12,6 +13,8 @@ const fieldClass =
 
 const scopes = ["selection", "document", "instruction"] as const;
 type Scope = (typeof scopes)[number];
+const actions = ["comment", "preview", "direct"] as const;
+type Action = (typeof actions)[number];
 
 interface Origin {
   readonly id: number;
@@ -23,6 +26,7 @@ interface Origin {
 interface Turn extends WritingTurn {
   readonly material?: string;
   readonly recipient: string;
+  readonly edit?: EditStatus;
 }
 
 interface Props {
@@ -34,6 +38,7 @@ interface Props {
   readonly settingsOpen: boolean;
   readonly onAsk: () => void;
   readonly onSettings: () => void;
+  readonly canApply: () => boolean;
   readonly children: ReactNode;
 }
 
@@ -47,6 +52,7 @@ export function WritingAssistant({
   settingsOpen,
   onAsk,
   onSettings,
+  canApply,
   children,
 }: Props) {
   const t = useT();
@@ -116,6 +122,7 @@ export function WritingAssistant({
           platform={platform}
           settingsOpen={settingsOpen}
           onSettings={onSettings}
+          canApply={canApply}
         />
       )}
     </div>
@@ -130,7 +137,8 @@ function Composer({
   platform,
   settingsOpen,
   onSettings,
-}: Pick<Props, "name" | "platform" | "settingsOpen" | "onSettings"> & {
+  canApply,
+}: Pick<Props, "name" | "platform" | "settingsOpen" | "onSettings" | "canApply"> & {
   readonly origin: Origin;
   readonly placement: "inline" | "sidebar" | null;
   readonly setPlacement: (placement: "inline" | "sidebar" | null) => void;
@@ -138,6 +146,7 @@ function Composer({
   const t = useT();
   const [instruction, setInstruction] = useState("");
   const [scope, setScope] = useState<Scope>("selection");
+  const [actionOverride, setActionOverride] = useState<Action | null>(null);
   const [documentText, setDocumentText] = useState("");
   const [includeHistory, setIncludeHistory] = useState(true);
   const [agents, setAgents] = useState<readonly ExternalAgent[]>([]);
@@ -150,9 +159,31 @@ function Composer({
     null,
   );
   const input = useRef<HTMLInputElement>(null);
+  const mounted = useRef(true);
   const recipient = agents.find((agent) => agent.path === recipientPath);
   const material =
     scope === "selection" ? origin.text : scope === "document" ? documentText : undefined;
+  const explicitDirect = /(?:^|[,，]\s*)(?:apply directly|直接改)[.!。！]?\s*$/i.test(instruction);
+  const action =
+    scope !== "selection"
+      ? "comment"
+      : (actionOverride ?? (explicitDirect ? "direct" : turns.length ? "comment" : "preview"));
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (scope !== "document") return;
+    const refresh = () => setDocumentText(origin.editor.getText().replace(/^\uFEFF/, ""));
+    refresh();
+    return origin.editor.subscribe((event) => {
+      if (event.type === "change") refresh();
+    });
+  }, [scope, origin]);
 
   useEffect(() => {
     if (settingsOpen) return;
@@ -198,6 +229,18 @@ function Composer({
     origin.editor.focus();
   }
 
+  function apply(replacement: string): EditStatus {
+    const range = origin.range.current();
+    if (!canApply() || origin.editor.getText().slice(range.from, range.to) !== origin.text)
+      return "conflict";
+    if (replacement !== origin.text) origin.editor.replaceRange(range, replacement);
+    return "applied";
+  }
+
+  function updateEdit(index: number, edit: EditStatus) {
+    setTurns((previous) => previous.map((turn, i) => (i === index ? { ...turn, edit } : turn)));
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!instruction.trim() || !recipient || busy || loading) return;
@@ -216,19 +259,35 @@ function Composer({
         recipient,
         recipient.preferredAccess,
       );
-      const result = await send({ instruction: prompt, selectedText: material, history });
+      const result = await send({
+        instruction: prompt,
+        selectedText: material,
+        history,
+        responseFormat: action === "comment" ? undefined : "replacement",
+      });
+      if (!mounted.current) return;
+      const replacement = action === "comment" ? undefined : replacementFromReply(result);
+      const edit = replacement ? (action === "direct" ? apply(replacement) : "preview") : undefined;
       setTurns((previous) => [
         ...previous,
-        { instruction: prompt, reply: result.text, material, recipient: recipient.path },
+        {
+          instruction: prompt,
+          reply: replacement ?? result.text,
+          material,
+          recipient: recipient.path,
+          edit,
+        },
       ]);
       setInstruction("");
+      setActionOverride(null);
     } catch (problem) {
+      if (!mounted.current) return;
       const code = problem instanceof Error ? problem.message : problem;
       setError(
         code === "agentAccessRequired" || code === "agentChanged" ? "agentChanged" : "sendFailed",
       );
     } finally {
-      setBusy(false);
+      if (mounted.current) setBusy(false);
     }
   }
 
@@ -270,24 +329,41 @@ function Composer({
         </>
       )}
       <div aria-live="polite" className="space-y-2">
-        {messages.map((turn, index) => (
-          <article key={sidebar ? index : turns.length} className="space-y-1">
-            {sidebar && (
-              <details className="wrap-anywhere">
-                <summary>{turn.instruction}</summary>
-                <p>{turn.recipient}</p>
-                {turn.material !== undefined && (
-                  <pre className="max-h-24 overflow-auto whitespace-pre-wrap wrap-anywhere">
-                    {turn.material}
-                  </pre>
-                )}
-              </details>
-            )}
-            <pre className="whitespace-pre-wrap wrap-anywhere rounded bg-(--mint-hover) p-2">
-              {turn.reply}
-            </pre>
-          </article>
-        ))}
+        {messages.map((turn, position) => {
+          const index = sidebar ? position : turns.length - 1;
+          return (
+            <article key={index} className="space-y-1">
+              {sidebar && (
+                <details className="wrap-anywhere">
+                  <summary>{turn.instruction}</summary>
+                  <p>{turn.recipient}</p>
+                  {turn.material !== undefined && (
+                    <pre className="max-h-24 overflow-auto whitespace-pre-wrap wrap-anywhere">
+                      {turn.material}
+                    </pre>
+                  )}
+                </details>
+              )}
+              {turn.edit ? (
+                <ProposedSelectionEdit
+                  before={origin.text}
+                  after={turn.reply}
+                  status={turn.edit}
+                  onApply={() => {
+                    const edit = apply(turn.reply);
+                    updateEdit(index, edit);
+                    if (edit === "applied") origin.editor.focus();
+                  }}
+                  onDiscard={() => updateEdit(index, "discarded")}
+                />
+              ) : (
+                <pre className="whitespace-pre-wrap wrap-anywhere rounded bg-(--mint-hover) p-2">
+                  {turn.reply}
+                </pre>
+              )}
+            </article>
+          );
+        })}
         {busy && <p>{t("agent.working")}</p>}
       </div>
       {error && (
@@ -316,8 +392,20 @@ function Composer({
             <div className="flex flex-wrap items-end gap-2">
               <label className="grid gap-1">
                 {t("writing.action")}
-                <select className={fieldClass} defaultValue="comment">
-                  <option value="comment">{t("writing.comment")}</option>
+                <select
+                  className={fieldClass}
+                  value={action}
+                  onChange={(event) => setActionOverride(event.target.value as Action)}
+                >
+                  {actions.map((id) => (
+                    <option
+                      key={id}
+                      value={id}
+                      disabled={scope !== "selection" && id !== "comment"}
+                    >
+                      {t(`writing.${id}`)}
+                    </option>
+                  ))}
                 </select>
               </label>
               <label className="grid gap-1">
@@ -325,12 +413,7 @@ function Composer({
                 <select
                   className={fieldClass}
                   value={scope}
-                  onChange={(event) => {
-                    const next = event.target.value as Scope;
-                    if (next === "document")
-                      setDocumentText(origin.editor.getText().replace(/^\uFEFF/, ""));
-                    setScope(next);
-                  }}
+                  onChange={(event) => setScope(event.target.value as Scope)}
                 >
                   {scopes.map((id) => (
                     <option key={id} value={id}>

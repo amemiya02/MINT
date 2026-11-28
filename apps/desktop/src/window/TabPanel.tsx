@@ -152,6 +152,9 @@ export function TabPanel({
           settingsOpen={settingsOpen}
           onAsk={onAskWriting}
           onSettings={onOpenSettings}
+          canApply={() =>
+            store.getState().tabs.some((current) => current.id === id && !current.external)
+          }
         >
           <EditorPane
             codeBlockRenderers={codeBlockRenderers}

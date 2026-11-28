@@ -1,5 +1,17 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { launch, readFile, settingsPath } from "./memory-platform.ts";
+
+async function configureAgent(page: Page, executable: string) {
+  await page.keyboard.press("ControlOrMeta+,");
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  await settings.getByRole("button", { name: "External Agents" }).click();
+  await settings.getByRole("button", { name: "Discover Codex" }).click();
+  await settings.getByRole("button", { name: executable, exact: true }).click();
+  await settings.getByRole("button", { name: "Try example" }).click();
+  await settings.getByRole("button", { name: "Allow and send" }).click();
+  await expect(settings.getByText("Sample reply.")).toBeVisible();
+  await settings.getByRole("button", { name: "Close" }).click();
+}
 
 test("Ask AI comments inline and continues from the original selection", async ({ page }) => {
   const path = "/notes/draft.md";
@@ -30,15 +42,7 @@ test("Ask AI comments inline and continues from the original selection", async (
     externalAgent: { executables: [executable], endpoint: "/__test/ask-ai" },
   });
 
-  await page.keyboard.press("ControlOrMeta+,");
-  const settings = page.getByRole("dialog", { name: "Settings" });
-  await settings.getByRole("button", { name: "External Agents" }).click();
-  await settings.getByRole("button", { name: "Discover Codex" }).click();
-  await settings.getByRole("button", { name: executable, exact: true }).click();
-  await settings.getByRole("button", { name: "Try example" }).click();
-  await settings.getByRole("button", { name: "Allow and send" }).click();
-  await expect(settings.getByText("Sample reply.")).toBeVisible();
-  await settings.getByRole("button", { name: "Close" }).click();
+  await configureAgent(page, executable);
 
   const editor = page.locator(".cm-content");
   await editor.getByText("Original line.", { exact: true }).click();
@@ -92,4 +96,63 @@ test("Ask AI comments inline and continues from the original selection", async (
       request: { instruction: followUp, history: [{ instruction: first, reply }] },
     },
   ]);
+});
+
+test("selection rewrites preview first or apply with one undo step", async ({ page }) => {
+  const path = "/notes/rewrite.md";
+  const executable = "/fixtures/codex";
+  const selection = "We all met with the entire team.";
+  const source = "\uFEFFPrivate paragraph.  \r\n\nOriginal line.\r\n";
+  await page.route("**/__test/ask-ai-edit", (route) =>
+    route.fulfill({
+      json: {
+        text:
+          route.request().postDataJSON().request.selectedText === selection
+            ? "<replacement>The team met.</replacement>"
+            : "Sample reply.",
+      },
+    }),
+  );
+  await launch(page, {
+    locale: "en-US",
+    files: { [path]: source, [settingsPath]: '{"autosave":false}' },
+    openedPaths: [{ path, kind: "file" }],
+    externalAgent: { executables: [executable], endpoint: "/__test/ask-ai-edit" },
+  });
+  await configureAgent(page, executable);
+
+  const editor = page.locator(".cm-content");
+  await editor.getByText("Original line.", { exact: true }).click();
+  await page.keyboard.press("End");
+  await page.keyboard.insertText(` ${selection}`);
+  for (const _ of selection) await page.keyboard.press("Shift+ArrowLeft");
+
+  await page.keyboard.press("ControlOrMeta+Shift+P");
+  await page.getByRole("combobox").fill("Ask AI");
+  await page.keyboard.press("Enter");
+  const inline = page.getByRole("region", { name: "Ask AI" });
+  const instruction = inline.getByRole("textbox", { name: "Instruction" });
+  await expect(inline.getByLabel("Action")).toHaveValue("preview");
+  await instruction.fill("Shorten this sentence.");
+  await instruction.press("Enter");
+  await expect(inline.getByRole("button", { name: "Apply proposed edit" })).toBeVisible();
+  await expect(editor).toContainText(selection);
+
+  await inline.getByRole("button", { name: "Close" }).click();
+  await page.getByRole("button", { name: "Ask AI", exact: true }).click();
+  await instruction.fill("Shorten this sentence, apply directly");
+  await expect(inline.getByLabel("Action")).toHaveValue("direct");
+  await instruction.press("Enter");
+  await expect(editor).toContainText("Original line. The team met.");
+  await expect(editor).toBeFocused();
+  await page.keyboard.press("ControlOrMeta+S");
+  await expect
+    .poll(() => readFile(page, path))
+    .toBe(source.replace("Original line.", "Original line. The team met."));
+  await page.keyboard.press("ControlOrMeta+Z");
+  await expect(editor).toContainText(`Original line. ${selection}`);
+  await page.keyboard.press("ControlOrMeta+S");
+  await expect
+    .poll(() => readFile(page, path))
+    .toBe(source.replace("Original line.", `Original line. ${selection}`));
 });
