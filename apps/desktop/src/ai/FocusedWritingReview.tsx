@@ -1,8 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { useT } from "../i18n/index.ts";
+import { relativePath } from "../paths.ts";
 import { useModalDialog } from "../window/useModalDialog.ts";
 import { ProposedSelectionEdit } from "./ProposedSelectionEdit.tsx";
-import type { EditStatus, ReviewBlock } from "./writing-tasks.ts";
+import type { EditStatus, SavedReviewLink, WritingTasksPlatform } from "./writing-tasks.ts";
+
+interface ReviewBlock {
+  readonly kind: "table" | "formula";
+  readonly prefix: string;
+  readonly suffix: string;
+}
 
 export interface ReviewEntry {
   readonly key: string;
@@ -13,15 +20,13 @@ export interface ReviewEntry {
   readonly current: string;
   readonly status: EditStatus;
   readonly note?: string | undefined;
-  readonly block?: ReviewBlock | undefined;
   readonly blocked?: "disk" | "boundaries" | undefined;
   readonly section: { readonly id: string; readonly name: string };
 }
 
 const buttonClass =
   "rounded border border-(--mint-border) px-2 py-1 hover:bg-(--mint-hover) disabled:opacity-50";
-const selectClass =
-  "min-w-0 rounded border border-(--mint-border) bg-(--mint-bg) px-2 py-1";
+const selectClass = "min-w-0 rounded border border-(--mint-border) bg-(--mint-bg) px-2 py-1";
 
 const filters = ["pending", "dismissed", "commented", "all"] as const;
 type Filter = (typeof filters)[number];
@@ -32,6 +37,14 @@ function isPending(entry: ReviewEntry) {
 
 export function FocusedWritingReview({
   entries,
+  file,
+  path,
+  folder,
+  tasks,
+  onOpenFile,
+  initialSelection,
+  onSelection,
+  onCompare,
   source,
   busy,
   onSource,
@@ -43,6 +56,14 @@ export function FocusedWritingReview({
   onClose,
 }: {
   readonly entries: readonly ReviewEntry[];
+  readonly file: string;
+  readonly path: string | null;
+  readonly folder: string | null;
+  readonly tasks: WritingTasksPlatform;
+  readonly onOpenFile: (file: SavedReviewLink) => Promise<boolean>;
+  readonly initialSelection: string | undefined;
+  readonly onSelection: (key: string | undefined) => void;
+  readonly onCompare: (entry: ReviewEntry) => ReviewBlock | null;
   readonly source: boolean;
   readonly busy: boolean;
   readonly onSource: (source: boolean) => void;
@@ -56,7 +77,7 @@ export function FocusedWritingReview({
   const t = useT();
   const { props, close } = useModalDialog(onClose);
   const heading = useRef<HTMLHeadingElement>(null);
-  const [selected, setSelected] = useState<string>();
+  const [selected, setSelected] = useState(initialSelection);
   const [section, setSection] = useState("");
   const [filter, setFilter] = useState<Filter>("pending");
   const [batchCount, setBatchCount] = useState<number>();
@@ -65,6 +86,11 @@ export function FocusedWritingReview({
   const [comment, setComment] = useState<string | null>(null);
   const commentInput = useRef<HTMLInputElement>(null);
   const [deciding, setDeciding] = useState(false);
+  const [files, setFiles] = useState<readonly SavedReviewLink[]>([]);
+  const [selectedFile, setSelectedFile] = useState("");
+  const [switching, setSwitching] = useState(false);
+  const [fileError, setFileError] = useState<"filesUnavailable" | "fileOpenFailed">();
+  const disabled = busy || deciding || switching;
   const bySection = new Map<string, ReviewEntry[]>();
   for (const entry of entries) {
     const items = bySection.get(entry.section.id);
@@ -80,9 +106,12 @@ export function FocusedWritingReview({
           filter === "dismissed" ? entry.status === "discarded" : filter === "all" || entry.note,
         );
   const current = visible.find((entry) => entry.key === selected) ?? visible[0];
+  const block = useMemo(() => (current ? onCompare(current) : null), [current, onCompare]);
   const position = current ? visible.indexOf(current) : -1;
   const locatedSection = bySection.get(section)?.[0]?.section;
-  const canAcceptSection = pending.some((entry) => !entry.blocked && entry.current === entry.before);
+  const canAcceptSection = pending.some(
+    (entry) => !entry.blocked && entry.current === entry.before,
+  );
   const currentKey = current?.key;
   const changeType = current
     ? t(
@@ -93,13 +122,34 @@ export function FocusedWritingReview({
             : "writing.review.replacement",
       )
     : "";
-  const latestLocate = useRef(onLocate);
-  latestLocate.current = onLocate;
-  const latestEntry = useRef(current);
-  latestEntry.current = current;
+  const followSelection = useEffectEvent((key: string | undefined) => {
+    onSelection(key);
+    if (current) onLocate(current);
+  });
 
   useEffect(() => {
-    if (latestEntry.current) latestLocate.current(latestEntry.current);
+    if (!folder) return;
+    let active = true;
+    void tasks.listReviewsInFolder(folder).then(
+      (reviews) => {
+        if (active)
+          setFiles(
+            reviews
+              .filter((review) => review.path !== path)
+              .sort((a, b) => a.path.localeCompare(b.path) || a.title.localeCompare(b.title)),
+          );
+      },
+      () => {
+        if (active) setFileError("filesUnavailable");
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [folder, path, tasks]);
+
+  useEffect(() => {
+    followSelection(currentKey);
     if (focusHeading.current) {
       focusHeading.current = false;
       heading.current?.focus();
@@ -153,6 +203,20 @@ export function FocusedWritingReview({
     }
   }
 
+  async function openFile() {
+    const target = files.find((entry) => entry.id === selectedFile);
+    if (!target || disabled) return;
+    setSwitching(true);
+    setFileError(undefined);
+    try {
+      if (await onOpenFile(target)) return;
+    } catch {
+      // The selected document or its task may have disappeared since listing it.
+    }
+    setSwitching(false);
+    setFileError("fileOpenFailed");
+  }
+
   return (
     <dialog
       {...props}
@@ -161,19 +225,58 @@ export function FocusedWritingReview({
       onKeyDown={(event) => {
         if (event.key === "Escape" && !event.nativeEvent.isComposing) event.stopPropagation();
       }}
+      onCancel={(event) => {
+        if (switching) event.preventDefault();
+        else props.onCancel(event);
+      }}
     >
       <header className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h2 className="font-medium">{t("writing.review.title")}</h2>
-        <button type="button" className={buttonClass} onClick={close}>
+        <button type="button" className={buttonClass} onClick={close} disabled={switching}>
           {t("settings.close")}
         </button>
       </header>
       <div className="mb-3 flex flex-wrap items-end gap-2">
+        {files.length > 0 && folder ? (
+          <>
+            <label className="grid min-w-0 gap-1">
+              {t("writing.review.file")}
+              <select
+                className={selectClass}
+                disabled={disabled}
+                value={selectedFile}
+                onChange={(event) => setSelectedFile(event.target.value)}
+              >
+                <option value="">{path ? relativePath(folder, path) : file}</option>
+                {files.map((entry, index) => {
+                  const duplicate =
+                    entry.path === files[index - 1]?.path || entry.path === files[index + 1]?.path;
+                  const name = relativePath(folder, entry.path);
+                  return (
+                    <option key={entry.id} value={entry.id}>
+                      {duplicate ? `${name} · ${entry.title}` : name}
+                    </option>
+                  );
+                })}
+              </select>
+            </label>
+            <button
+              type="button"
+              className={buttonClass}
+              disabled={disabled || !selectedFile}
+              onClick={() => void openFile()}
+            >
+              {t("writing.review.openFile")}
+            </button>
+          </>
+        ) : (
+          <p className="w-full wrap-anywhere">{file}</p>
+        )}
         <label className="grid min-w-0 gap-1">
           {t("writing.review.section")}
           <select
             className={selectClass}
-            disabled={deciding}
+            disabled={deciding || switching}
             value={locatedSection ? section : ""}
             onChange={(event) => {
               setSection(event.target.value);
@@ -197,7 +300,7 @@ export function FocusedWritingReview({
           {t("writing.review.status")}
           <select
             className={selectClass}
-            disabled={deciding}
+            disabled={deciding || switching}
             value={filter}
             onChange={(event) => {
               setFilter(event.target.value as Filter);
@@ -216,13 +319,15 @@ export function FocusedWritingReview({
           <button
             type="button"
             className={buttonClass}
-            disabled={busy || deciding || !canAcceptSection}
+            disabled={disabled || !canAcceptSection}
             onClick={() => void acceptRemaining()}
           >
             {t("writing.review.acceptSection", { section: locatedSection.name })}
           </button>
         )}
       </div>
+      {switching && <p role="status">{t("writing.review.openingFile")}</p>}
+      {fileError && <p role="alert">{t(`writing.review.${fileError}`)}</p>}
       {batchCount !== undefined && (
         <p role="status" className="mb-2">
           {t("writing.review.accepted", { count: String(batchCount) })}
@@ -231,9 +336,9 @@ export function FocusedWritingReview({
       <h3 ref={heading} tabIndex={-1} className="mb-2 font-medium">
         {current
           ? t("writing.review.position", {
-              type: current.block
+              type: block
                 ? t("writing.review.blockType", {
-                    block: t(`writing.review.${current.block.kind}`),
+                    block: t(`writing.review.${block.kind}`),
                     type: changeType,
                   })
                 : changeType,
@@ -249,7 +354,7 @@ export function FocusedWritingReview({
               type="button"
               className={buttonClass}
               onClick={() => move(visible[position - 1])}
-              disabled={position <= 0 || deciding}
+              disabled={position <= 0 || deciding || switching}
             >
               {t("writing.review.previous")}
             </button>
@@ -257,7 +362,7 @@ export function FocusedWritingReview({
               type="button"
               className={buttonClass}
               onClick={() => move(visible[position + 1])}
-              disabled={position >= visible.length - 1 || deciding}
+              disabled={position >= visible.length - 1 || deciding || switching}
             >
               {t("writing.review.next")}
             </button>
@@ -278,12 +383,11 @@ export function FocusedWritingReview({
             before={current.before}
             after={current.after}
             review={{
-              before: current.block
-                ? current.block.prefix + current.before + current.block.suffix
-                : current.before,
-              after: current.block
-                ? current.block.prefix + current.after + current.block.suffix
-                : current.after,
+              before:
+                (block?.prefix ?? "") +
+                (current.status === "preview" ? current.current : current.before) +
+                (block?.suffix ?? ""),
+              after: (block?.prefix ?? "") + current.after + (block?.suffix ?? ""),
             }}
             status={current.status}
             current={
@@ -293,7 +397,7 @@ export function FocusedWritingReview({
             }
             blocked={current.status === "preview" ? current.blocked : undefined}
             source={source}
-            busy={busy || deciding}
+            busy={disabled}
             onApply={
               current.status === "preview" && !current.blocked ? () => void decide(true) : undefined
             }
@@ -304,7 +408,7 @@ export function FocusedWritingReview({
             <button
               type="button"
               className={`mt-2 ${buttonClass}`}
-              disabled={busy || deciding}
+              disabled={disabled}
               onClick={() => {
                 onRestore(current);
                 setFilter(current.note ? "commented" : "pending");
@@ -318,7 +422,7 @@ export function FocusedWritingReview({
             <button
               type="button"
               className={`mt-2 ${buttonClass}`}
-              disabled={busy || deciding}
+              disabled={disabled}
               onClick={() => setComment(current.note ?? "")}
             >
               {t("writing.review.comment")}

@@ -11,12 +11,6 @@ export interface ReviewRange {
   readonly located: boolean;
 }
 
-export interface ReviewBlock {
-  readonly kind: "table" | "formula";
-  readonly prefix: string;
-  readonly suffix: string;
-}
-
 export interface SavedSuggestion {
   readonly id: number;
   readonly before: string;
@@ -25,7 +19,6 @@ export interface SavedSuggestion {
   readonly appliedText?: string;
   readonly note?: string;
   readonly batchApplied?: boolean;
-  readonly block?: ReviewBlock;
   readonly comments?: readonly (WritingTurn & { readonly id: number })[];
   readonly range: ReviewRange;
 }
@@ -52,6 +45,7 @@ export interface SavedWritingTask {
   readonly origin: ReviewRange & { readonly text: string };
   readonly reading: { readonly anchor: number; readonly head: number; readonly top: number };
   readonly reviewScroll: number;
+  readonly reviewSelection?: string;
   readonly showSource: boolean;
   readonly turns: readonly SavedTurn[];
   readonly pending?: Omit<SavedTurn, "reply" | "suggestions" | "direct" | "status" | "partial">;
@@ -59,14 +53,36 @@ export interface SavedWritingTask {
 
 export interface WritingTasksPlatform {
   list(path: string | null): Promise<SavedWritingTask[]>;
+  listReviewsInFolder(folder: string): Promise<readonly SavedReviewLink[]>;
   create(task: SavedWritingTask): Promise<void>;
   update(task: SavedWritingTask, expectedUpdatedAt: number): Promise<void>;
   remove(id: string): Promise<void>;
 }
 
+export interface SavedReviewLink {
+  readonly id: string;
+  readonly path: string;
+  readonly title: string;
+}
+
+export interface WritingReviewRequest {
+  readonly task: SavedWritingTask;
+  readonly returnToTab: number;
+  readonly complete: (opened: boolean) => void;
+}
+
+export interface WritingTasksRequest {
+  readonly sequence: number;
+  readonly mode: "history" | "review";
+}
+
+export function hasProposedEdits(task: SavedWritingTask) {
+  return task.turns.some((turn) => !!turn.suggestions?.length);
+}
+
 interface OpenWritingReview {
   readonly busy: boolean;
-  focus(): void;
+  focus(returnToTab?: number): void;
   remove(remaining: number): void;
 }
 

@@ -116,7 +116,10 @@ export function ProposedSelectionEdit({
           {replyExcerpt && current === "" ? (
             <p className="text-(--mint-muted)">{t("writing.reply.emptySelection")}</p>
           ) : (
-            <Excerpt text={current ?? (!source && review ? review.before : before)} source={source} />
+            <Excerpt
+              text={!source && review ? review.before : (current ?? before)}
+              source={source}
+            />
           )}
         </section>
         <section

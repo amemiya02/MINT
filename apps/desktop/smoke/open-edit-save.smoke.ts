@@ -1612,10 +1612,12 @@ test("a native model receives only the sample or live selection and edits throug
 test("a saved writing review resumes after a native restart without contacting its model", async () => {
   const draft = join(dir, "resume-writing-review.md");
   const renamedDraft = join(dir, "renamed-writing-review.md");
-  const original = "First draft.\n\nSecond draft.\n\nThird draft.\n\nLast draft.";
-  const replacement = "First edit.\n\nSecond edit.\n\nThird edit.\n\nLast edit.";
+  const original =
+    "| Group | Finding |\n| --- | --- |\n| Coast | First draft. |\n\nSecond draft.\n\nThird draft.\n\nLast draft.";
+  const replacement = original.replaceAll("draft.", "edit.");
   const instruction = "Review all four passages.";
   const excerpt = "The Tuesday field notes support the first passage.";
+  const note = "Check this with the interviewer.";
   const requests: { messages: { content: string }[] }[] = [];
   let connectionId: string | undefined;
   await writeFile(draft, original);
@@ -1676,13 +1678,23 @@ test("a saved writing review resumes after a native restart without contacting i
       "//section[@aria-label='Ask AI']//label[normalize-space(.)='Instruction']/input",
     );
     await keyActions([...typing(instruction), ...typing(keys.enter)]);
+    await waitForView(
+      "the review proposal to arrive",
+      "return [...document.querySelectorAll('button')].some(button => button.textContent.trim() === 'Review proposed edits');",
+    );
+    await waitForView(
+      "the manuscript to be available before review",
+      "const editor = document.querySelector('.cm-content'); editor.focus(); return editor === document.activeElement;",
+    );
+    await keyActions(chord(keys.control, keys.end));
     await click("Review proposed edits");
-    const reviewRoot = 'document.querySelector(\'dialog[open][aria-label="Review proposed edits"]\')';
-    const focusedEdit = (number: number) =>
+    const reviewRoot =
+      "document.querySelector('dialog[open][aria-label=\"Review proposed edits\"]')";
+    const focusedEdit = (number: number, type = "Replacement") =>
       waitForView(
         `proposal ${number} to receive keyboard focus`,
         `return ${reviewRoot}?.querySelector('h3') === document.activeElement &&
-          document.activeElement.textContent.trim() === 'Replacement · Edit ${number} of 4';`,
+          document.activeElement.textContent.trim() === '${type} · Edit ${number} of 4';`,
       );
     const pressReviewButton = async (label: string) => {
       for (let index = 0; index < 20; index++) {
@@ -1699,11 +1711,24 @@ test("a saved writing review resumes after a native restart without contacting i
       }
       assert.fail(`could not reach ${label} by keyboard`);
     };
-    await focusedEdit(1);
+    await focusedEdit(1, "Table · Replacement");
+    await waitForView(
+      "both versions of the table to render in the native review",
+      `const review = ${reviewRoot};
+        return review?.querySelector('[aria-label="Removed text"] table')?.textContent.includes('First draft.') &&
+          review?.querySelector('[aria-label="Added text"] table')?.textContent.includes('First edit.');`,
+    );
     await pressReviewButton("Apply proposed edit");
     await focusedEdit(2);
     await pressReviewButton("Dismiss proposed edit");
     await focusedEdit(3);
+    await pressReviewButton("Leave comment");
+    await waitForView(
+      "the review comment to receive keyboard focus",
+      `return ${reviewRoot}?.querySelector('form input') === document.activeElement;`,
+    );
+    await keyActions([...typing(note), ...typing(keys.enter)]);
+    await focusedEdit(4);
     await keyActions(typing(keys.escape));
     assert.deepEqual(JSON.parse(requests[0]?.messages.at(-1)?.content ?? ""), {
       instruction,
@@ -1711,14 +1736,14 @@ test("a saved writing review resumes after a native restart without contacting i
       taskContext: { materials: [{ name: "Pasted text", text: excerpt }] },
     });
     await waitForView(
-      "the manuscript caret to regain focus",
+      "the manuscript to regain focus at the original reading position",
       `
       const editor = document.querySelector('.cm-content');
-      editor?.focus();
-      return editor === document.activeElement;
+      const node = window.getSelection()?.focusNode;
+      const line = (node instanceof Element ? node : node?.parentElement)?.closest('.cm-line');
+      return editor === document.activeElement && line?.textContent === 'Last draft.';
     `,
     );
-    await keyActions(chord(keys.control, keys.end));
     await nativeShortcut("ctrl+s");
     const accepted = original.replace("First draft.", "First edit.");
     await until(
@@ -1729,8 +1754,17 @@ test("a saved writing review resumes after a native restart without contacting i
       const versions = await invokeNative<number[]>("list_versions", { path: draft });
       return versions.length ? versions : null;
     }).catch(explain);
-    const [review] = await invokeNative<unknown[]>("list_writing_tasks", { path: draft });
+    const [review] = await invokeNative<{ id: string }[]>("list_writing_tasks", { path: draft });
     assert.ok(review);
+    const links = await invokeNative<{ id: string; path: string; title: string }[]>(
+      "list_writing_reviews_in_folder",
+      { folder: dirname(draft) },
+    );
+    assert.ok(
+      links.some(
+        (link) => link.id === review.id && link.path === draft && link.title === instruction,
+      ),
+    );
     await assert.rejects(
       invokeNative("update_writing_task", { task: review, expectedUpdatedAt: 0 }),
       /writing task changed/,
@@ -1750,7 +1784,8 @@ test("a saved writing review resumes after a native restart without contacting i
       const button = (index, label) => [...field(index)?.querySelectorAll('button') ?? []].some(el => el.textContent.trim() === label);
       return field(1)?.innerText.includes('Applied to the selected text.') &&
         field(2)?.innerText.includes('Proposed edit dismissed.') &&
-        field(3)?.innerText.includes('External third.') && button(3, 'Apply to compared text') &&
+        field(3)?.innerText.includes('External third.') &&
+        field(3)?.innerText.includes(${JSON.stringify(note)}) && button(3, 'Apply to compared text') &&
         button(4, 'Apply proposed edit');
     `,
     );
@@ -1758,8 +1793,10 @@ test("a saved writing review resumes after a native restart without contacting i
       "//aside[@aria-label='Writing Assistant']//summary[normalize-space(.)='Pasted text']",
     );
     await shows(excerpt);
+    await click("Review proposed edits");
+    await focusedEdit(4);
+    await keyActions(typing(keys.escape));
     assert.equal(requests.length, 1);
-    await clickPath("//aside[@aria-label='Writing Assistant']//button[normalize-space(.)='Close']");
     await waitForView(
       "the saved reading position",
       `

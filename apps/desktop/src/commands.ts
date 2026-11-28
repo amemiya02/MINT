@@ -112,6 +112,12 @@ export const commands = [
   },
   { id: "edit.writingTasks", title: "writing.tasks", menu: "edit", group: "writing" },
   {
+    id: "edit.reviewProposedEdits",
+    title: "command.edit.reviewProposedEdits",
+    menu: "edit",
+    group: "writing",
+  },
+  {
     id: "edit.askExternalAgent",
     title: "command.edit.askExternalAgent",
     menu: "edit",

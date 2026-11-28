@@ -2,15 +2,18 @@ import { useEffect, useState } from "react";
 import { useT } from "../i18n/index.ts";
 import { useModalDialog } from "../window/useModalDialog.ts";
 import {
+  hasProposedEdits,
   openWritingReviews,
   type SavedWritingTask,
   type WritingTasksPlatform,
+  type WritingTasksRequest,
   writingTaskWrites,
 } from "./writing-tasks.ts";
 
 export function WritingTasksDialog({
   tasks,
   path,
+  mode,
   busyTask,
   onClose,
   onOpen,
@@ -18,12 +21,15 @@ export function WritingTasksDialog({
 }: {
   readonly tasks: WritingTasksPlatform;
   readonly path: string | null;
+  readonly mode: WritingTasksRequest["mode"];
   readonly busyTask: string | null;
   readonly onClose: () => void;
   readonly onOpen: (task: SavedWritingTask) => boolean;
   readonly onDelete: (id: string, remaining: number) => void;
 }) {
   const t = useT();
+  const reviewing = mode === "review";
+  const heading = t(reviewing ? "writing.review.title" : "writing.tasks");
   const { props, close } = useModalDialog(onClose);
   const [entries, setEntries] = useState<readonly SavedWritingTask[] | null>(null);
   const [failed, setFailed] = useState(false);
@@ -37,7 +43,12 @@ export function WritingTasksDialog({
       .then(() => tasks.list(path))
       .then(
         (items) => {
-          if (current) setEntries(items.sort((a, b) => b.updatedAt - a.updatedAt));
+          if (current)
+            setEntries(
+              (reviewing ? items.filter(hasProposedEdits) : items).sort(
+                (a, b) => b.updatedAt - a.updatedAt,
+              ),
+            );
         },
         () => {
           if (current) setFailed(true);
@@ -46,7 +57,7 @@ export function WritingTasksDialog({
     return () => {
       current = false;
     };
-  }, [tasks, path]);
+  }, [tasks, path, reviewing]);
 
   async function remove(id: string) {
     if (!entries || deleting || id === busyTask) return;
@@ -78,11 +89,11 @@ export function WritingTasksDialog({
           if (!deleting) setConfirm(null);
         } else props.onCancel(event);
       }}
-      aria-label={t("writing.tasks")}
+      aria-label={heading}
       className="m-auto max-h-[80vh] w-[min(32rem,90vw)] overflow-auto rounded-lg border border-(--mint-border) bg-(--mint-bg) p-4 text-(--mint-fg) backdrop:bg-black/30"
     >
       <header className="mb-3 flex items-center justify-between gap-2">
-        <h2 className="font-medium">{t("writing.tasks")}</h2>
+        <h2 className="font-medium">{heading}</h2>
         <button
           type="button"
           disabled={deleting}
@@ -92,13 +103,17 @@ export function WritingTasksDialog({
           {t("settings.close")}
         </button>
       </header>
-      {openFailed && <p role="alert">{t("writing.tasks.openUntitled")}</p>}
+      {openFailed && (
+        <p role="alert">
+          {t(reviewing ? "writing.review.fileOpenFailed" : "writing.tasks.openUntitled")}
+        </p>
+      )}
       {failed ? (
         <p role="alert">{t("writing.tasks.loadFailed")}</p>
       ) : !entries ? (
         <p role="status">{t("writing.tasks.loading")}</p>
       ) : entries.length === 0 ? (
-        <p>{t("writing.tasks.empty")}</p>
+        <p>{t(reviewing ? "writing.review.noSaved" : "writing.tasks.empty")}</p>
       ) : (
         <ul className="space-y-2">
           {entries.map((task) => (
@@ -115,20 +130,24 @@ export function WritingTasksDialog({
                 >
                   {task.title}
                 </button>
-                <button
-                  type="button"
-                  className="rounded px-2 py-1 hover:bg-(--mint-hover) disabled:opacity-50"
-                  aria-label={t("writing.tasks.deleteNamed", { title: task.title })}
-                  disabled={
-                    deleting || busyTask === task.id || openWritingReviews(tasks).get(task.id)?.busy
-                  }
-                  onClick={() => {
-                    setConfirm(task.id);
-                    setDeleteFailed(false);
-                  }}
-                >
-                  {t("writing.tasks.delete")}
-                </button>
+                {!reviewing && (
+                  <button
+                    type="button"
+                    className="rounded px-2 py-1 hover:bg-(--mint-hover) disabled:opacity-50"
+                    aria-label={t("writing.tasks.deleteNamed", { title: task.title })}
+                    disabled={
+                      deleting ||
+                      busyTask === task.id ||
+                      openWritingReviews(tasks).get(task.id)?.busy
+                    }
+                    onClick={() => {
+                      setConfirm(task.id);
+                      setDeleteFailed(false);
+                    }}
+                  >
+                    {t("writing.tasks.delete")}
+                  </button>
+                )}
               </div>
               <time className="px-1 text-xs text-(--mint-muted)">
                 {new Date(task.updatedAt).toLocaleString()}

@@ -2,6 +2,11 @@ import type { CodeBlockRenderer, DocumentLink, LinkTarget, WordCount } from "@mi
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { Proofreading } from "../ai/Proofreading.tsx";
 import { WritingAssistant } from "../ai/WritingAssistant.tsx";
+import type {
+  SavedWritingTask,
+  WritingReviewRequest,
+  WritingTasksRequest,
+} from "../ai/writing-tasks.ts";
 import { createImageHost, type ImageSaveFailure } from "../assets/image-host.ts";
 import { EditorPane } from "../EditorPane.tsx";
 import { resolveDocumentLink } from "../folder/wikilinks.ts";
@@ -31,9 +36,11 @@ export function TabPanel({
   folder,
   askWriting,
   writingTasksRequest,
+  writingReviewRequest,
   settingsOpen,
   onAskWriting,
   onWritingTasks,
+  onOpenWritingReview,
   onOpenSettings,
   onModeChange,
   onEditorChange,
@@ -51,10 +58,12 @@ export function TabPanel({
   readonly platform: Platform;
   readonly folder: string | null;
   readonly askWriting: number | null;
-  readonly writingTasksRequest: number | null;
+  readonly writingTasksRequest: WritingTasksRequest | null;
+  readonly writingReviewRequest: WritingReviewRequest | null;
   readonly settingsOpen: boolean;
   readonly onAskWriting: () => void;
   readonly onWritingTasks: () => void;
+  readonly onOpenWritingReview: (task: SavedWritingTask, returnToTab: number) => Promise<boolean>;
   readonly onOpenSettings: () => void;
   readonly onModeChange: () => void;
   /** The tab's editor was created or destroyed. */
@@ -181,9 +190,11 @@ export function TabPanel({
           folder={folder}
           askRequest={askWriting}
           tasksRequest={writingTasksRequest}
+          reviewRequest={writingReviewRequest}
           settingsOpen={settingsOpen}
           onAsk={onAskWriting}
           onTasks={onWritingTasks}
+          onOpenReview={onOpenWritingReview}
           onActivate={activate}
           onSettings={onOpenSettings}
           externalChange={!!tab.external}

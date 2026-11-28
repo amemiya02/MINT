@@ -14,7 +14,13 @@ import { inlineCompletionSender } from "./ai/inline-completion.ts";
 import { ReplyExcerpt } from "./ai/ReplyExcerpt.tsx";
 import { type WritingTask, WritingTasks, WritingTasksContext } from "./ai/WritingTasks.tsx";
 import { captureWritingSelection, type WritingSelection } from "./ai/writing-selection.ts";
-import { checkpointOpenWritingTasks, writingTaskWrites } from "./ai/writing-tasks.ts";
+import {
+  checkpointOpenWritingTasks,
+  type SavedWritingTask,
+  type WritingReviewRequest,
+  type WritingTasksRequest,
+  writingTaskWrites,
+} from "./ai/writing-tasks.ts";
 import type { AnnotationReviewKind } from "./annotations/AnnotationReview.tsx";
 import { AnnotationDialog, AnnotationPanel } from "./annotations/Annotations.tsx";
 import { createAnnotationStorage } from "./annotations/annotation-storage.ts";
@@ -160,10 +166,44 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   const [writingRequest, setWritingRequest] = useState<{ tabId: number; sequence: number } | null>(
     null,
   );
-  const [writingTasksRequest, setWritingTasksRequest] = useState<{
+  const [writingTasksRequest, setWritingTasksRequest] = useState<
+    (WritingTasksRequest & { tabId: number }) | null
+  >(null);
+  function showWritingTasks(mode: WritingTasksRequest["mode"]) {
+    if (activeId === null) return;
+    setWritingTasksRequest((previous) => ({
+      tabId: activeId,
+      sequence: (previous?.sequence ?? 0) + 1,
+      mode,
+    }));
+  }
+  const [writingReview, setWritingReview] = useState<{
     tabId: number;
-    sequence: number;
+    request: WritingReviewRequest;
   } | null>(null);
+
+  async function openWritingReview(task: SavedWritingTask, returnToTab: number) {
+    if (!task.path) return false;
+    const from = store.getState().activeId;
+    await store.openDocument(task.path);
+    const { tabs, activeId } = store.getState();
+    if (activeId === null || !tabs.some((tab) => tab.id === activeId && tab.path === task.path))
+      return false;
+    return new Promise<boolean>((resolve) => {
+      setWritingReview({
+        tabId: activeId,
+        request: {
+          task,
+          returnToTab,
+          complete(opened) {
+            setWritingReview(null);
+            if (!opened && from !== null) store.activate(from);
+            resolve(opened);
+          },
+        },
+      });
+    });
+  }
   const [agentSelection, setAgentSelection] = useState<{
     tabId: number;
     origin: WritingSelection;
@@ -483,13 +523,8 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
         sequence: (previous?.sequence ?? 0) + 1,
       }));
     },
-    "edit.writingTasks": () => {
-      if (activeId === null) return;
-      setWritingTasksRequest((previous) => ({
-        tabId: activeId,
-        sequence: (previous?.sequence ?? 0) + 1,
-      }));
-    },
+    "edit.writingTasks": () => showWritingTasks("history"),
+    "edit.reviewProposedEdits": () => showWritingTasks("review"),
     "edit.addAnnotation": addAnnotation,
     "edit.reviewDocument": () => {
       if (active) openAnnotationReview(active.documentId, "document");
@@ -783,11 +818,15 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
                   folder={folder}
                   askWriting={writingRequest?.tabId === tab.id ? writingRequest.sequence : null}
                   writingTasksRequest={
-                    writingTasksRequest?.tabId === tab.id ? writingTasksRequest.sequence : null
+                    writingTasksRequest?.tabId === tab.id ? writingTasksRequest : null
+                  }
+                  writingReviewRequest={
+                    writingReview?.tabId === tab.id ? writingReview.request : null
                   }
                   settingsOpen={settingsOpen}
                   onAskWriting={() => run.current("edit.askAI")}
                   onWritingTasks={() => run.current("edit.writingTasks")}
+                  onOpenWritingReview={openWritingReview}
                   onOpenSettings={() => run.current("app.settings")}
                   onModeChange={modeChanged}
                   onEditorChange={editorsChanged}

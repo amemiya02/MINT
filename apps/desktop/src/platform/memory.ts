@@ -5,7 +5,8 @@ import {
   modelEndpoint,
   type SavedModelConnection,
 } from "../ai/model.ts";
-import { baseName, parentPath } from "../paths.ts";
+import { hasProposedEdits, type SavedWritingTask } from "../ai/writing-tasks.ts";
+import { baseName, isWithin, parentPath } from "../paths.ts";
 import { createIgnoreRules } from "./gitignore.ts";
 import { type MemoryExternalAgentOptions, memoryExternalAgent } from "./memory-external-agent.ts";
 import { pickBrowserFile } from "./pick-file.ts";
@@ -363,6 +364,15 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
           if (!key.startsWith(taskRoot) || !key.endsWith("/review.json")) return [];
           const task = JSON.parse(json);
           return task.path === path ? [task] : [];
+        });
+      },
+      async listReviewsInFolder(folder) {
+        return [...appData.entries()].flatMap(([key, json]) => {
+          if (!key.startsWith(taskRoot) || !key.endsWith("/review.json")) return [];
+          const task: SavedWritingTask = JSON.parse(json);
+          return task.path && isWithin(task.path, folder) && hasProposedEdits(task)
+            ? [{ id: task.id, path: task.path, title: task.title }]
+            : [];
         });
       },
       async create(task) {

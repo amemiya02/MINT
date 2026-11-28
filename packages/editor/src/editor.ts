@@ -26,8 +26,8 @@ import {
   keymap,
   rectangularSelection,
 } from "@codemirror/view";
-import { defaultDialect, renderHtml } from "@mint/markdown";
 import type { SyntaxNode } from "@lezer/common";
+import { defaultDialect, renderHtml } from "@mint/markdown";
 import {
   type Annotation,
   type AnnotationTarget,
@@ -568,7 +568,11 @@ export function createEditor(options: EditorOptions): MintEditor {
       const to = fromFileOffset(state, range.to);
       const tree = ensureSyntaxTree(state, to, 50) ?? syntaxTree(state);
       for (const side of [1, -1] as const) {
-        for (let node: SyntaxNode | null = tree.resolveInner(from, side); node; node = node.parent) {
+        for (
+          let node: SyntaxNode | null = tree.resolveInner(from, side);
+          node;
+          node = node.parent
+        ) {
           const kind =
             node.name === "Table"
               ? "table"

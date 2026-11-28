@@ -1,10 +1,13 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
+import type { SavedWritingTask } from "../src/ai/writing-tasks.ts";
+import type { MemoryPlatformOptions } from "../src/platform/memory.ts";
 import { launch, readFile, settingsPath } from "./memory-platform.ts";
 
 const path = "/notes/manuscript.md";
 const endpoint = "https://review.example.test/v1/chat/completions";
 
 async function tabTo(page: Page, control: Locator) {
+  await expect(control).toBeVisible();
   for (let index = 0; index < 40; index++) {
     if (await control.evaluate((element) => element === document.activeElement)) return;
     await page.keyboard.press("Tab");
@@ -12,19 +15,30 @@ async function tabTo(page: Page, control: Locator) {
   await expect(control).toBeFocused();
 }
 
-async function openProposals(page: Page, source: string, replacement: string) {
-  await page.route(endpoint, (route) =>
-    route.fulfill({
+async function openProposals(
+  page: Page,
+  source: string,
+  replacement: string,
+  fixtures?: Pick<MemoryPlatformOptions, "appData" | "files">,
+) {
+  let requests = 0;
+  await page.route(endpoint, (route) => {
+    requests++;
+    return route.fulfill({
       json: {
         choices: [
-          { message: { content: `<replacement>${replacement}</replacement>` }, finish_reason: "stop" },
+          {
+            message: { content: `<replacement>${replacement}</replacement>` },
+            finish_reason: "stop",
+          },
         ],
       },
-    }),
-  );
+    });
+  });
   await launch(page, {
     locale: "en-US",
-    files: { [path]: source, [settingsPath]: '{"autosave":false}' },
+    files: { ...fixtures?.files, [path]: source, [settingsPath]: '{"autosave":false}' },
+    appData: fixtures?.appData,
     openedPaths: [{ path, kind: "file" }],
   });
   await page.keyboard.press("ControlOrMeta+,");
@@ -47,7 +61,7 @@ async function openProposals(page: Page, source: string, replacement: string) {
   await page.keyboard.type("Revise the manuscript.");
   await page.keyboard.press("Enter");
   await expect(assistant.getByRole("button", { name: "Review proposed edits" })).toBeVisible();
-  return { assistant, editor };
+  return { assistant, editor, sentRequests: () => requests };
 }
 
 test("keyboard decisions advance through the manuscript and Escape restores the reading position", async ({
@@ -61,7 +75,9 @@ test("keyboard decisions advance through the manuscript and Escape restores the 
     .replace("Old result.", "New result.");
   const { assistant, editor } = await openProposals(page, source, replacement);
   await editor.press("ControlOrMeta+End");
-  await expect.poll(() => page.evaluate(() => getSelection()?.focusNode?.textContent)).toBe("Reading anchor.");
+  await expect
+    .poll(() => page.evaluate(() => getSelection()?.focusNode?.textContent))
+    .toBe("Reading anchor.");
   const top = await page.locator(".cm-scroller").evaluate((element) => element.scrollTop);
   expect(top).toBeGreaterThan(0);
   await tabTo(page, assistant.getByRole("button", { name: "Review proposed edits" }));
@@ -86,8 +102,12 @@ test("keyboard decisions advance through the manuscript and Escape restores the 
   await page.keyboard.press("Escape");
   await expect(review).toHaveCount(0);
   await expect(editor).toBeFocused();
-  await expect.poll(() => page.evaluate(() => getSelection()?.focusNode?.textContent)).toBe("Reading anchor.");
-  await expect.poll(() => page.locator(".cm-scroller").evaluate((element) => element.scrollTop)).toBeCloseTo(top, 0);
+  await expect
+    .poll(() => page.evaluate(() => getSelection()?.focusNode?.textContent))
+    .toBe("Reading anchor.");
+  await expect
+    .poll(() => page.locator(".cm-scroller").evaluate((element) => element.scrollTop))
+    .toBeCloseTo(top, 0);
   await page.keyboard.press("ControlOrMeta+S");
   await expect.poll(() => readFile(page, path)).toBe(source.replace("Old result.", "New result."));
 });
@@ -96,14 +116,23 @@ test("table and formula edits keep their formatting in a stacked comparison with
   page,
 }) => {
   await page.setViewportSize({ width: 620, height: 760 });
-  const source = "# Results\n\n| Group | Count |\n| --- | --- |\n| Coast | 12 |\n\nTotals follow.\n\n$$\nx = 12\n$$";
-  const replacement = source.replace("| Coast | 12 |", "| Coast | 17 |").replace("x = 12", "x = 17");
-  const { assistant } = await openProposals(page, source, replacement);
-  await tabTo(page, assistant.getByRole("button", { name: "Review proposed edits" }));
+  const source =
+    "# Results\n\n| Group | Count |\n| --- | --- |\n| Coast | 12 |\n\nTotals follow.\n\n$$\nx = 12\n$$";
+  const replacement = source
+    .replace("| Coast | 12 |", "| Coast | 17 |")
+    .replace("x = 12", "x = 17");
+  await openProposals(page, source, replacement);
+  await page.keyboard.press("ControlOrMeta+Shift+P");
+  await page.getByRole("combobox", { name: "Command Palette" }).fill("Review proposed edits");
+  await expect(page.getByRole("option", { name: "Review Proposed Edits…" })).toBeVisible();
+  await page.keyboard.press("Enter");
+  await tabTo(page, page.getByRole("button", { name: "Revise the manuscript.", exact: true }));
   await page.keyboard.press("Enter");
 
   const review = page.getByRole("dialog", { name: "Review proposed edits" });
-  await expect(review.getByRole("heading", { name: "Table · Replacement · Edit 1 of 2" })).toBeFocused();
+  await expect(
+    review.getByRole("heading", { name: "Table · Replacement · Edit 1 of 2" }),
+  ).toBeFocused();
   const removed = review.getByRole("region", { name: "Removed text" });
   const added = review.getByRole("region", { name: "Added text" });
   await expect(removed.getByRole("cell", { name: "12", exact: true })).toBeVisible();
@@ -122,7 +151,9 @@ test("table and formula edits keep their formatting in a stacked comparison with
 
   await tabTo(page, review.getByRole("button", { name: "Next edit" }));
   await page.keyboard.press("Enter");
-  await expect(review.getByRole("heading", { name: "Formula · Replacement · Edit 2 of 2" })).toBeFocused();
+  await expect(
+    review.getByRole("heading", { name: "Formula · Replacement · Edit 2 of 2" }),
+  ).toBeFocused();
   await expect(removed.locator(".katex")).toBeVisible();
   await expect(added.locator(".katex")).toBeVisible();
   await tabTo(page, sourceToggle);
@@ -133,7 +164,8 @@ test("table and formula edits keep their formatting in a stacked comparison with
 test("section acceptance preserves prior decisions and can be undone in one editor command", async ({
   page,
 }) => {
-  const source = "# Methods\n\nOld opening.\n\nOld detail.\n\nOld sample.\n\nOld measure.\n\n# Results\n\nOld result.";
+  const source =
+    "# Methods\n\nOld opening.\n\nOld detail.\n\nOld sample.\n\nOld measure.\n\n# Results\n\nOld result.";
   const replacement = source.replaceAll("Old ", "New ");
   const { assistant, editor } = await openProposals(page, source, replacement);
   await tabTo(page, assistant.getByRole("button", { name: "Review proposed edits" }));
@@ -148,10 +180,10 @@ test("section acceptance preserves prior decisions and can be undone in one edit
   await page.keyboard.press("Enter");
 
   const section = review.getByRole("combobox", { name: "Section" });
-  await expect(section.getByRole("option", { name: "Methods · 2 pending of 4 edits" })).toHaveCount(1);
-  await tabTo(page, section);
-  await page.keyboard.press("ArrowDown");
-  await page.keyboard.press("Enter");
+  await expect(section.getByRole("option", { name: "Methods · 2 pending of 4 edits" })).toHaveCount(
+    1,
+  );
+  await section.selectOption({ label: "Methods · 2 pending of 4 edits" });
   const accept = review.getByRole("button", { name: "Accept remaining edits in Methods" });
   await tabTo(page, accept);
   await page.keyboard.press("Enter");
@@ -159,19 +191,18 @@ test("section acceptance preserves prior decisions and can be undone in one edit
   await expect(review.getByRole("status")).toHaveText("Accepted 2 edits.");
 
   const status = review.getByRole("combobox", { name: "Review status" });
-  await tabTo(page, status);
-  await page.keyboard.press("ArrowDown");
-  await page.keyboard.press("Enter");
+  await status.selectOption({ label: "Dismissed" });
   await expect(review.getByText("Proposed edit dismissed.")).toBeVisible();
   await expect(review.getByText("Old opening.", { exact: true })).toBeVisible();
-  await page.keyboard.press("ArrowDown");
-  await page.keyboard.press("Enter");
+  await status.selectOption({ label: "With comments" });
   await expect(review.getByText("Confirm this detail.", { exact: true })).toBeVisible();
 
   await page.keyboard.press("Escape");
   await expect(editor).toBeFocused();
   await page.keyboard.press("ControlOrMeta+S");
-  const accepted = source.replace("Old sample.", "New sample.").replace("Old measure.", "New measure.");
+  const accepted = source
+    .replace("Old sample.", "New sample.")
+    .replace("Old measure.", "New measure.");
   await expect.poll(() => readFile(page, path)).toBe(accepted);
   await page.keyboard.press("ControlOrMeta+Z");
   await page.keyboard.press("ControlOrMeta+S");
@@ -182,4 +213,93 @@ test("section acceptance preserves prior decisions and can be undone in one edit
   await tabTo(page, assistant.getByRole("button", { name: "Review proposed edits" }));
   await page.keyboard.press("Enter");
   await expect(review.getByRole("heading", { name: "Replacement · Edit 3 of 5" })).toBeFocused();
+});
+
+test("saved proposals can be opened by file and closing returns to the original manuscript", async ({
+  page,
+}) => {
+  const other = "/notes/appendix.md";
+  const original = "Old appendix.\n\nOld appendix detail.";
+  const first = { from: 0, to: "Old appendix.".length, located: true };
+  const second = {
+    from: original.indexOf("Old appendix detail."),
+    to: original.length,
+    located: true,
+  };
+  const saved: SavedWritingTask = {
+    version: 1,
+    id: "a437fb3f-12cc-4491-9fe0-f4802ab78622",
+    title: "Review the appendix",
+    path: other,
+    updatedAt: 1,
+    baseline: original,
+    origin: { from: 0, to: original.length, located: true, text: original },
+    reading: { anchor: 0, head: 0, top: 0 },
+    reviewScroll: 0,
+    reviewSelection: `0:${second.from}`,
+    showSource: false,
+    turns: [
+      {
+        instruction: "Review the appendix",
+        reply: "",
+        recipient: "Original model",
+        recipientId: "model:original",
+        direct: false,
+        suggestions: [
+          {
+            id: 0,
+            before: "Old appendix.",
+            after: "New appendix.",
+            status: "preview",
+            range: first,
+          },
+          {
+            id: second.from,
+            before: "Old appendix detail.",
+            after: "New appendix detail.",
+            status: "preview",
+            range: second,
+          },
+        ],
+      },
+    ],
+  };
+  const paragraphs = Array.from({ length: 45 }, () => "Background from the field notes.");
+  const manuscript = ["Old body.", ...paragraphs, "Original reading position."].join("\n\n");
+  const { assistant, editor, sentRequests } = await openProposals(
+    page,
+    manuscript,
+    manuscript.replace("Old body.", "New body."),
+    {
+      files: { [other]: original },
+      appData: { [`ai/tasks/${saved.id}/review.json`]: JSON.stringify(saved) },
+    },
+  );
+  await editor.press("ControlOrMeta+End");
+  const readingLine = () => page.evaluate(() => getSelection()?.focusNode?.textContent);
+  await expect.poll(readingLine).toBe("Original reading position.");
+  const scrollTop = () => page.locator(".cm-scroller:visible").evaluate((node) => node.scrollTop);
+  const top = await scrollTop();
+  expect(top).toBeGreaterThan(0);
+  await tabTo(page, assistant.getByRole("button", { name: "Review proposed edits" }));
+  await page.keyboard.press("Enter");
+
+  const review = page.getByRole("dialog", { name: "Review proposed edits" });
+  await review
+    .getByRole("combobox", { name: "File", exact: true })
+    .selectOption({ label: "appendix.md" });
+  await tabTo(page, review.getByRole("button", { name: "Open file review" }));
+  await page.keyboard.press("Enter");
+  await expect(review.getByText("New appendix detail.", { exact: true })).toBeVisible();
+  await expect(review.getByRole("heading", { name: "Replacement · Edit 2 of 2" })).toBeFocused();
+  expect(sentRequests()).toBe(1);
+  expect(await readFile(page, other)).toBe(original);
+
+  await page.keyboard.press("Escape");
+  await expect(review).toHaveCount(0);
+  await expect(
+    page.getByRole("tabpanel", { name: "manuscript.md" }).getByRole("textbox"),
+  ).toBeFocused();
+  await expect.poll(readingLine).toBe("Original reading position.");
+  await expect.poll(scrollTop).toBeCloseTo(top, 0);
 });
