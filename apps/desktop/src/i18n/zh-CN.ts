@@ -29,6 +29,7 @@ export const zhCN: Messages = {
   "plugin.timingEmpty": "时序图为空。请添加信号，例如 CLK: 0101。",
   "export.plugin.saveTitle": "导出为 {format}",
   "export.plugin.unavailable": "格式不可用",
+  "plugin.latex": "LaTeX 导出",
   "plugin.epub": "EPUB 导出",
   "plugin.timing": "数字时序图",
   "plugin.properties": "属性表",
@@ -282,8 +283,7 @@ export const zhCN: Messages = {
   "export.pdf.font": "字号（磅）",
   "export.pdf.preview": "分页预览",
   "export.pdf.pages": "共 {count} 页",
-  "export.pdf.hint":
-    "在打印对话框中选择“存储为 PDF”（macOS）或“打印到文件”（Linux）。",
+  "export.pdf.hint": "在打印对话框中选择“存储为 PDF”（macOS）或“打印到文件”（Linux）。",
 
   "theme.issue.missing": "在 {path} 中找不到主题“{name}”，正在使用内置主题。",
   "theme.issue.unreadable": "无法读取主题“{name}”（{reason}），正在使用内置主题。",

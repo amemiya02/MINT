@@ -31,6 +31,7 @@ export const en = {
   "plugin.timingEmpty": "Invalid timing diagram. Add a signal, e.g. CLK: 0101.",
   "export.plugin.saveTitle": "Export as {format}",
   "export.plugin.unavailable": "Format unavailable",
+  "plugin.latex": "LaTeX export",
   "plugin.epub": "EPUB export",
   "plugin.timing": "Digital timing diagrams",
   "plugin.properties": "Property table",

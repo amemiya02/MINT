@@ -128,3 +128,7 @@ Packages can contribute this view with `"sidebar": "kanban"` and `"permissions":
 Enable the local API in Zotero's advanced settings, then install **Zotero** in MINT. Grant access to the local library and permission to modify the current selection. Place the caret in a draft, choose **Insert Zotero citation**, and select a title. MINT inserts a Markdown link to that library item. Escape dismisses the picker. The service receives only paginated library reads.
 
 A package can declare this picker with `"citation": "zotero"` and `"permissions": ["zotero.read", "document.write"]`.
+
+## LaTeX export
+
+Install **LaTeX export** in Settings → Plugins and grant access to the current document. Choose **File → Import / Export… → LaTeX** to save the current draft as a standalone UTF-8 `.tex` document. Headings become section commands, lists become LaTeX lists, and inline and display equations preserve their TeX notation. Packages can register this format with `"exportFormat": "latex"` and the `document.read` permission.
