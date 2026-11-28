@@ -231,6 +231,11 @@ export const zhCN: Messages = {
   "export.html.failed": "导出失败：{reason}",
   "export.pdf.title": "导出为 PDF",
   "export.pdf.print": "打印…",
+  "export.pdf.paper": "纸张",
+  "export.pdf.margins": "页边距（毫米）",
+  "export.pdf.font": "字号（磅）",
+  "export.pdf.preview": "分页预览",
+  "export.pdf.pages": "共 {count} 页",
   "export.pdf.hint":
     "在打印对话框中选择“存储为 PDF”（macOS）、“Microsoft Print to PDF”（Windows）或“打印到文件”（Linux）。",
 
