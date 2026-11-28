@@ -460,9 +460,10 @@ export function createEditor(options: EditorOptions): MintEditor {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    // Focus already inside the editor (say, in a table cell) stays where it is.
+    // Restore the native text selection after a dialog, while leaving a focused widget alone.
     focus: () => {
-      if (!view.dom.contains(view.root.activeElement)) view.focus();
+      const active = view.root.activeElement;
+      if (active === view.contentDOM || !view.dom.contains(active)) view.focus();
     },
     destroy: () => {
       options.document?.detach(view);
