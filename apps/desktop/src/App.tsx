@@ -25,6 +25,7 @@ import {
   checkpointOpenWritingTasks,
   openWritingReviews,
   type SavedWritingTask,
+  type WritingTaskOpenRequest,
   writingTaskWrites,
 } from "./ai/writing-tasks.ts";
 import type { AnnotationReviewKind } from "./annotations/AnnotationReview.tsx";
@@ -183,13 +184,14 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   const [writingRequest, setWritingRequest] = useState<{ tabId: number; folder?: string } | null>(
     null,
   );
-  const [taskDialog, setTaskDialog] = useState<"current" | "all" | null>(null);
-  const [taskRestore, setTaskRestore] = useState<{ tabId: number; task: SavedWritingTask } | null>(
-    null,
-  );
+  const [taskDialog, setTaskDialog] = useState<"current" | "all" | "review" | null>(null);
+  const [taskRestore, setTaskRestore] = useState<
+    (WritingTaskOpenRequest & { tabId: number }) | null
+  >(null);
   const [taskListRevision, setTaskListRevision] = useState(0);
 
-  async function openWritingTask(task: SavedWritingTask | WritingTask) {
+  async function openWritingTask(task: SavedWritingTask | WritingTask, returnToTab?: number) {
+    const from = store.getState().activeId;
     if (task.folder && task.folder !== folder) {
       await openFolder(task.folder);
       if (openFolderState.current.tree?.root !== task.folder) return false;
@@ -201,7 +203,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     const reviews = openWritingReviews(platform.writingTasks);
     const live = reviews.get(task.id);
     if (live) {
-      live.focus();
+      live.focus(returnToTab);
       return true;
     }
     let tabId: number;
@@ -219,8 +221,18 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     } else {
       tabId = store.restoreDocument(null, task.baseline);
     }
-    setTaskRestore({ tabId, task });
-    return true;
+    return new Promise<boolean>((resolve) => {
+      function complete(opened: boolean) {
+        unsubscribe();
+        setTaskRestore(null);
+        if (!opened && from !== null) store.activate(from);
+        resolve(opened);
+      }
+      const unsubscribe = store.subscribe(() => {
+        if (!store.getState().tabs.some(({ id }) => id === tabId)) complete(false);
+      });
+      setTaskRestore({ tabId, task, returnToTab, complete });
+    });
   }
   const [agentSelection, setAgentSelection] = useState<{
     tabId: number;
@@ -548,6 +560,9 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     },
     "edit.writingTasks": () => setTaskDialog(activeId === null ? "all" : "current"),
     "edit.allWritingTasks": () => setTaskDialog("all"),
+    "edit.reviewProposedEdits": () => {
+      if (activeId !== null) setTaskDialog("review");
+    },
     "edit.addAnnotation": addAnnotation,
     "edit.reviewDocument": () => {
       if (active) openAnnotationReview(active.documentId, "document");
@@ -855,6 +870,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
                   settingsOpen={settingsOpen}
                   onAskWriting={() => run.current("edit.askAI")}
                   onWritingTasks={() => run.current("edit.writingTasks")}
+                  onOpenWritingReview={openWritingTask}
                   onOpenSettings={() => run.current("app.settings")}
                   onModeChange={modeChanged}
                   onEditorChange={editorsChanged}
@@ -1014,10 +1030,12 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
           currentTabIds={
             new Set(tabs.filter((tab) => tab.documentId === active?.documentId).map(({ id }) => id))
           }
-          all={taskDialog === "all"}
+          mode={taskDialog}
           onScopeChange={(all) => setTaskDialog(all ? "all" : "current")}
           onClose={() => setTaskDialog(null)}
-          onOpen={openWritingTask}
+          onOpen={(task) =>
+            openWritingTask(task, taskDialog === "review" ? (activeId ?? undefined) : undefined)
+          }
           onDelete={(id) => {
             stopTrackingWritingResult(platform.writingTasks, id);
             openWritingReviews(platform.writingTasks).get(id)?.remove();
