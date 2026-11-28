@@ -10,6 +10,7 @@ mod folder;
 mod fs;
 mod grants;
 mod history;
+mod model;
 mod opened;
 mod printing;
 mod recovery;
@@ -657,8 +658,7 @@ const GRANTS_FILE: [&str; 2] = ["access", "granted-roots.json"];
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // The updater enables reqwest's rustls-no-provider feature. Zotero can build
-    // the first HTTP client before the updater has installed its ring provider.
+    // Install the crypto provider before any native command builds an HTTP client.
     let _ = rustls::crypto::ring::default_provider().install_default();
     let mut builder = tauri::Builder::default();
     #[cfg(desktop)]
@@ -724,6 +724,7 @@ pub fn run() {
             external_agent::approve_external_agent,
             external_agent::forget_external_agent,
             external_agent::send_external_agent,
+            model::send_model_request,
             zotero::list_zotero_items,
             printing::print_pages,
             read_text_file,

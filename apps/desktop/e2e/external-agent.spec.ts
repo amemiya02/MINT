@@ -15,7 +15,7 @@ test("settings tries a discovered Agent only after the author allows its access"
   });
 
   await page.keyboard.press("ControlOrMeta+,");
-  await page.getByText("External Agents", { exact: true }).click();
+  await page.getByRole("button", { name: "External Agents", exact: true }).click();
   await page.getByRole("button", { name: "Discover Codex" }).click();
   await page.getByRole("button", { name: "/usr/local/bin/codex", exact: true }).click();
   await page.getByRole("button", { name: "Try example" }).click();

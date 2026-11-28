@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
-import { createServer } from "node:http";
+import { createServer, type ServerResponse } from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -991,6 +991,111 @@ test("only granted Zotero reads reach the local service and the chosen item is s
   }
 });
 
+test("a model trial sends only the visible sample and shows native streaming replies", async () => {
+  const requests: { url?: string; method?: string; authorization?: string; body: unknown }[] = [];
+  let pendingReply: ServerResponse | undefined;
+  const endpoint = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(chunk);
+    const body = Buffer.concat(chunks).toString("utf8");
+    requests.push({
+      url: request.url,
+      method: request.method,
+      authorization: request.headers.authorization,
+      body: body && JSON.parse(body),
+    });
+    if (request.method !== "POST" || request.url !== "/fixture/v1/chat/completions") {
+      response.writeHead(404).end();
+      return;
+    }
+    pendingReply = response;
+    response.writeHead(200, { "Content-Type": "text/event-stream" });
+    response.write('data: {"choices":[{"delta":{"content":"<replacement>Café notes"}}]}\r\n\r\n');
+  });
+  await new Promise<void>((resolve, reject) => {
+    endpoint.once("error", reject);
+    endpoint.listen(0, "127.0.0.1", resolve);
+  });
+  const address = endpoint.address();
+  const secret = "one-use-native-fixture-key";
+
+  async function fill(label: string, text: string) {
+    const found = await command<Record<string, string>>("POST", `/session/${session}/element`, {
+      using: "xpath",
+      value: `//dialog[@open]//label[normalize-space(.)='${label}']/input`,
+    });
+    assert.ok(found[elementKey], `input for ${label}`);
+    await command("POST", `/session/${session}/element/${found[elementKey]}/value`, { text });
+  }
+
+  try {
+    assert.ok(address && typeof address !== "string");
+    await openSettings();
+    await click("Model connections");
+    await fill("API address", `http://127.0.0.1:${address.port}/fixture/v1/chat/completions`);
+    await fill("Model name", "native-fixture");
+    await fill("API key (this trial only)", secret);
+    const form = await command<{ sample: string; settingsPath: string }>(
+      "POST",
+      `/session/${session}/execute/sync`,
+      {
+        script: `const dialog = document.querySelector('dialog[open]');
+          return {
+            sample: dialog.querySelector('textarea[readonly]').value,
+            settingsPath: dialog.querySelector('span[title$="settings.json"]').title,
+          };`,
+        args: [],
+      },
+    );
+    assert.match(form.sample, /The research team met again to discuss the results\./);
+    await click("Run sample");
+    await shows("Café notes");
+    await shows("Conversation: Unverified");
+    assert.ok(pendingReply, "the first delta reached Settings before the endpoint ended");
+    pendingReply.end(
+      'data: {"choices":[{"delta":{"content":" were reviewed.</replacement>"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
+    );
+    await shows("Café notes were reviewed.");
+    await shows("Conversation: Verified");
+    await shows("Streaming: Verified");
+    await shows("Proposed edit: Verified");
+    await shows("Multi-file editing: Unavailable");
+    assert.deepEqual(requests, [
+      {
+        url: "/fixture/v1/chat/completions",
+        method: "POST",
+        authorization: `Bearer ${secret}`,
+        body: {
+          model: "native-fixture",
+          stream: true,
+          messages: [{ role: "user", content: form.sample }],
+        },
+      },
+    ]);
+    const settings = await readFile(form.settingsPath, "utf8").catch(
+      (error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return "";
+        throw error;
+      },
+    );
+    assert.ok(!settings.includes(secret), "the trial key was never saved to settings");
+    await click("Close");
+    await openSettings();
+    await click("Model connections");
+    assert.equal(
+      await command<string>("POST", `/session/${session}/execute/sync`, {
+        script: "return document.querySelector('dialog[open] input[type=password]')?.value",
+        args: [],
+      }),
+      "",
+    );
+    await click("Close");
+  } finally {
+    endpoint.closeAllConnections();
+    await new Promise<void>((resolve) => endpoint.close(() => resolve()));
+  }
+});
+
 test("the daily journal creates one ordinary Markdown file only after permission is granted", async () => {
   const folder = await mkdtemp(join(dir, "journal-"));
   const draft = join(folder, "draft.md");
@@ -1075,7 +1180,7 @@ console.log(JSON.stringify({ type: "turn.completed" }));
 
   await restart([draft]);
   await openSettings();
-  await clickPath("//summary[normalize-space(.)='External Agents']");
+  await click("External Agents");
   await clickPath("//label[normalize-space(.)='Codex executable']/input");
   await keyActions(typing(executable));
   await click("Inspect Agent");
@@ -1144,7 +1249,7 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   await click("Close");
   await restart([draft]);
   await openSettings();
-  await clickPath("//summary[normalize-space(.)='External Agents']");
+  await click("External Agents");
   await shows(executable);
   await click("Try example");
   await shows("Fixture Agent reply.");

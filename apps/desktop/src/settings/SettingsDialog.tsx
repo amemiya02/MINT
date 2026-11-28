@@ -1,5 +1,6 @@
 import { useEffect, useId, useState } from "react";
 import { ExternalAgentSettings } from "../ai/ExternalAgentPanel.tsx";
+import { ModelConnections } from "../ai/ModelConnections.tsx";
 import { useT } from "../i18n/index.ts";
 import type { Platform } from "../platform/platform.ts";
 import { PluginSettings } from "../plugins/Plugins.tsx";
@@ -58,6 +59,7 @@ export function SettingsDialog({
         </button>
       </div>
       <div className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto px-5 py-4">
+        <ModelConnections platform={platform} />
         <ExternalAgentSettings platform={platform.externalAgent} />
         <PluginSettings platform={platform} />
         {(Object.keys(settingsSchema) as SettingKey[]).map((key) =>

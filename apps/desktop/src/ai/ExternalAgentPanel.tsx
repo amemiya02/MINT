@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { type MessageKey, useT } from "../i18n/index.ts";
 import { useModalDialog } from "../window/useModalDialog.ts";
+import { ConnectionSection } from "./ConnectionSection.tsx";
 import {
   type AgentAccess,
   type ExternalAgent,
@@ -22,14 +23,11 @@ interface Props {
 export function ExternalAgentSettings({ platform }: { readonly platform: ExternalAgentPlatform }) {
   const t = useT();
   return (
-    <details className="rounded-md border border-(--mint-border)">
-      <summary className="cursor-pointer rounded-md px-3 py-2 text-sm font-medium hover:bg-(--mint-hover)">
-        {t("agent.title")}
-      </summary>
+    <ConnectionSection title={t("agent.title")}>
       <div className="px-3 pb-3">
         <ExternalAgentPanel platform={platform} />
       </div>
-    </details>
+    </ConnectionSection>
   );
 }
 

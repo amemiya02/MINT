@@ -9,4 +9,6 @@ export interface WritingReply {
 }
 
 /** A configured writing connection ready to handle the same request from setup or the editor. */
-export type WritingSender = (request: WritingRequest) => Promise<WritingReply>;
+export type WritingSender<Reply extends WritingReply = WritingReply> = (
+  request: WritingRequest,
+) => Promise<Reply>;
