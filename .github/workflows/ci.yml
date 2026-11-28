@@ -177,7 +177,7 @@ jobs:
       - name: Install Tauri system dependencies, WebKitWebDriver and Xvfb
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf webkit2gtk-driver xvfb xdotool
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf webkit2gtk-driver xvfb xdotool python3-pyatspi at-spi2-core dbus-x11
       - name: Install tauri-driver
         run: cargo install tauri-driver --locked
       - run: pnpm install --frozen-lockfile
@@ -190,6 +190,11 @@ jobs:
           DISPLAY: ":99"
         run: |
           Xvfb :99 -screen 0 1280x1024x24 &
-          tauri-driver &
-          sleep 3
-          node --test --test-reporter=tap smoke/open-edit-save.smoke.ts
+          dbus-run-session -- bash -euc '
+            export NO_AT_BRIDGE=0
+            gdbus call --session --dest org.a11y.Bus --object-path /org/a11y/bus --method org.a11y.Bus.GetAddress
+            gdbus call --session --dest org.a11y.Bus --object-path /org/a11y/bus --method org.freedesktop.DBus.Properties.Set org.a11y.Status IsEnabled "<true>"
+            tauri-driver &
+            sleep 3
+            node --test --test-reporter=tap smoke/open-edit-save.smoke.ts
+          '
