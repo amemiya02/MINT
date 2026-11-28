@@ -232,6 +232,11 @@ export const en = {
   "export.html.failed": "Could not export: {reason}",
   "export.pdf.title": "Export as PDF",
   "export.pdf.print": "Print…",
+  "export.pdf.paper": "Paper size",
+  "export.pdf.margins": "Margins (mm)",
+  "export.pdf.font": "Font size (pt)",
+  "export.pdf.preview": "Page preview",
+  "export.pdf.pages": "{count} pages",
   "export.pdf.hint":
     "In the print dialog, choose “Save as PDF” (macOS), “Microsoft Print to PDF” (Windows) or “Print to File” (Linux).",
 
