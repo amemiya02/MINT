@@ -5,14 +5,13 @@ import type { FolderTree } from "../folder/file-tree.ts";
 import { useT } from "../i18n/index.ts";
 import { relativePath } from "../paths.ts";
 import type { DocumentLocation } from "../tabs/tab-store.ts";
-import type { FolderViewProps } from "./folder-properties.ts";
+import type { FolderViewProps } from "./folder-documents.ts";
 import { canReadFolder } from "./host.ts";
 import { pluginName } from "./Plugins.tsx";
 
 interface GraphProps extends FolderViewProps {
   tree: FolderTree | null;
   wikilinks: boolean;
-  onOpen: (path: string, location?: DocumentLocation) => void;
 }
 
 /** One row per document, with directed arcs in the gutter. The list below retains each citation. */

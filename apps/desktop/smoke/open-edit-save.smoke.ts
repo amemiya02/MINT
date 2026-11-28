@@ -9,7 +9,7 @@
 // so no native dialog is involved.
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -594,6 +594,78 @@ test("declining a plugin update keeps its native read grant and withholds its wr
   await click("Close");
 });
 
+const waitForView = (message: string, script: string) =>
+  until(
+    message,
+    async () =>
+      (await command<boolean>("POST", `/session/${session}/execute/sync`, {
+        script,
+        args: [],
+      })) || null,
+  ).catch(explain);
+
+test("the task summary reads only granted folder documents and preserves their bytes", async () => {
+  const folder = await mkdtemp(join(dir, "tasks-"));
+  const draft = join(folder, "draft.md");
+  const other = join(folder, "finished.markdown");
+  const outside = join(dir, "outside-tasks.md");
+  const source = Buffer.from("\uFEFF# Draft\r\n\r\n- [ ] Review evidence  \r\n");
+  const finished = Buffer.from("- [x] Finish notes\n");
+  const privateTask = Buffer.from("- [ ] Outside this folder\n");
+  await writeFile(draft, source);
+  await writeFile(other, finished);
+  await writeFile(outside, privateTask);
+  await symlink(outside, join(folder, "outside-link.md"));
+  await restart([folder]);
+  await waitForView(
+    "the task folder",
+    `return !!document.querySelector('[role=treeitem][aria-label="draft.md"]')`,
+  );
+  const plugin = "//fieldset[@aria-label='Task summary']";
+  await nativeShortcut("ctrl+comma");
+  await clickPath(`${plugin}//button[normalize-space(.)='Install']`);
+  await shows("Read Markdown documents in the current folder");
+  await click("Deny access");
+  await click("Close");
+  await click("Task summary", "aria-label");
+  const view = `document.querySelector('aside[aria-label="Task summary"]')`;
+  await waitForView(
+    "the denied task view",
+    `return ${view}?.querySelector('[role=alert]')?.textContent.includes('denied') && !${view}.querySelector('button')`,
+  );
+  await nativeShortcut("ctrl+comma");
+  await clickPath(`${plugin}//button[normalize-space(.)='Allow access']`);
+  await click("Close");
+  await waitForView(
+    "only the two in-folder Markdown tasks",
+    `const tasks = ${view}; return tasks?.querySelectorAll('button').length === 2 &&
+      tasks.textContent.includes('Review evidence') && tasks.textContent.includes('Finish notes')`,
+  );
+  assert.deepEqual(await readFile(other), finished);
+  await clickPath("//aside[@aria-label='Task summary']//button[contains(.,'Review evidence')]");
+  await waitForView(
+    "the selected task",
+    "return document.getSelection()?.toString() === 'Review evidence'",
+  );
+  const updated = Buffer.from("- [ ] Recheck notes\n");
+  await writeFile(other, updated);
+  await waitForView(
+    "an external edit in the task view",
+    `return ${view}?.textContent.includes('Recheck notes')`,
+  );
+  assert.deepEqual(await readFile(draft), source);
+  assert.deepEqual(await readFile(other), updated);
+  assert.deepEqual(await readFile(outside), privateTask);
+  assert.deepEqual((await readdir(folder)).sort(), [
+    "draft.md",
+    "finished.markdown",
+    "outside-link.md",
+  ]);
+  await nativeShortcut("ctrl+comma");
+  await clickPath(`${plugin}//button[normalize-space(.)='Uninstall']`);
+  await click("Close");
+});
+
 test("the installed relationship graph respects folder access and preserves the linked files", async () => {
   const folder = await mkdtemp(join(dir, "graph-"));
   const source = join(folder, "source.md");
@@ -606,16 +678,7 @@ test("the installed relationship graph respects folder access and preserves the 
   await writeFile(source, sourceBytes);
   await writeFile(target, targetBytes);
   await restart([folder, source]);
-  const waitFor = (message: string, script: string) =>
-    until(
-      message,
-      async () =>
-        (await command<boolean>("POST", `/session/${session}/execute/sync`, {
-          script,
-          args: [],
-        })) || null,
-    ).catch(explain);
-  await waitFor(
+  await waitForView(
     "the graph fixture to open",
     `return !!document.querySelector('[role=treeitem][aria-label="target.md"]')`,
   );
@@ -626,7 +689,7 @@ test("the installed relationship graph respects folder access and preserves the 
   await click("Deny access");
   await click("Close");
   await click("Relationship graph", "aria-label");
-  await waitFor(
+  await waitForView(
     "the denied graph to hide its files",
     `const graph = document.querySelector('aside[aria-label="Relationship graph"]');
     return graph?.querySelector('[role=alert]')?.textContent.includes('denied') && !graph.querySelector('button');`,
@@ -635,24 +698,24 @@ test("the installed relationship graph respects folder access and preserves the 
   await clickPath(`${plugin}//button[normalize-space(.)='Allow access']`);
   await click("Close");
   const edges = "//aside[@aria-label='Relationship graph']//ul[@aria-label='References']";
-  await waitFor(
+  await waitForView(
     "only the in-folder reference",
     `return document.querySelectorAll('aside[aria-label="Relationship graph"] li').length === 1`,
   );
   await clickPath(`${edges}//button[contains(.,'target.md')]`);
-  await waitFor(
+  await waitForView(
     "the referenced heading",
     `return document.getSelection()?.anchorNode?.parentElement?.closest('.cm-line')?.textContent.includes('Findings')`,
   );
   await clickPath(`${edges}//button[contains(.,'source.md')]`);
-  await waitFor(
+  await waitForView(
     "the original citation",
     `return document.getSelection()?.toString() === '${citation}'`,
   );
   await nativeShortcut("ctrl+comma");
   await clickPath(`${plugin}//button[normalize-space(.)='Disable']`);
   await click("Close");
-  await waitFor(
+  await waitForView(
     "the disabled graph to close",
     `return !document.querySelector('aside[aria-label="Relationship graph"], nav button[aria-label="Relationship graph"]')`,
   );

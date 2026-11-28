@@ -2,12 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { useT } from "../i18n/index.ts";
 import { relativePath } from "../paths.ts";
 import { useTabStore } from "../tabs/context.ts";
-import {
-  type FolderDocument,
-  type FolderViewProps,
-  propertiesOf,
-  useFolderProperties,
-} from "./folder-properties.ts";
+import type { FolderViewProps } from "./folder-documents.ts";
+import { type FolderDocument, propertiesOf, useFolderProperties } from "./folder-properties.ts";
 import { canMoveCard, canReadFolder } from "./host.ts";
 import { withStatus } from "./kanban-status.ts";
 import { pluginName } from "./Plugins.tsx";

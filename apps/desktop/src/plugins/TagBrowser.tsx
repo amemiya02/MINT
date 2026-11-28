@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { useT } from "../i18n/index.ts";
 import { relativePath } from "../paths.ts";
-import { type FolderViewProps, useFolderProperties } from "./folder-properties.ts";
+import type { FolderViewProps } from "./folder-documents.ts";
+import { useFolderProperties } from "./folder-properties.ts";
 import { canReadFolder } from "./host.ts";
 import { pluginName } from "./Plugins.tsx";
 
