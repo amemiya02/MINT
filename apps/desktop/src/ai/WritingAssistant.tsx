@@ -3,6 +3,7 @@ import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "rea
 import { useT } from "../i18n/index.ts";
 import type { Platform } from "../platform/platform.ts";
 import { type EditStatus, ProposedSelectionEdit } from "./ProposedSelectionEdit.tsx";
+import { ReplyExcerpt } from "./ReplyExcerpt.tsx";
 import { loadWritingRecipients, type WritingRecipient } from "./writing-recipients.ts";
 import { replacementFromReply, type WritingTurn } from "./writing-sender.ts";
 
@@ -32,6 +33,7 @@ interface Turn extends WritingTurn {
 interface Props {
   readonly editor: MintEditor | null;
   readonly name: string;
+  readonly path: string | null;
   readonly active: boolean;
   readonly platform: Platform;
   readonly askRequest: number | null;
@@ -46,6 +48,7 @@ interface Props {
 export function WritingAssistant({
   editor,
   name,
+  path,
   active,
   platform,
   askRequest,
@@ -117,6 +120,7 @@ export function WritingAssistant({
           key={origin.id}
           origin={origin}
           name={name}
+          path={path}
           placement={placement}
           setPlacement={setPlacement}
           platform={platform}
@@ -132,13 +136,14 @@ export function WritingAssistant({
 function Composer({
   origin,
   name,
+  path,
   placement,
   setPlacement,
   platform,
   settingsOpen,
   onSettings,
   canApply,
-}: Pick<Props, "name" | "platform" | "settingsOpen" | "onSettings" | "canApply"> & {
+}: Pick<Props, "name" | "path" | "platform" | "settingsOpen" | "onSettings" | "canApply"> & {
   readonly origin: Origin;
   readonly placement: "inline" | "sidebar" | null;
   readonly setPlacement: (placement: "inline" | "sidebar" | null) => void;
@@ -225,12 +230,19 @@ function Composer({
     origin.editor.focus();
   }
 
-  function apply(replacement: string): EditStatus {
+  function apply(replacement: string) {
     const range = origin.range.current();
-    if (!canApply() || origin.editor.getText().slice(range.from, range.to) !== origin.text)
-      return "conflict";
+    const current = origin.editor.getText().slice(range.from, range.to);
+    if (!canApply() || current !== origin.text) return { status: "conflict", current } as const;
     if (replacement !== origin.text) origin.editor.replaceRange(range, replacement);
-    return "applied";
+    return { status: "applied" } as const;
+  }
+
+  function replaceWithExcerpt(excerpt: string) {
+    const result = apply(excerpt);
+    if (result.status === "conflict") return result.current;
+    origin.editor.focus();
+    return null;
   }
 
   function updateEdit(index: number, edit: EditStatus) {
@@ -258,7 +270,11 @@ function Composer({
       });
       if (!mounted.current) return;
       const replacement = action === "comment" ? undefined : replacementFromReply(result);
-      const edit = replacement ? (action === "direct" ? apply(replacement) : "preview") : undefined;
+      const edit = replacement
+        ? action === "direct"
+          ? apply(replacement).status
+          : "preview"
+        : undefined;
       setTurns((previous) => [
         ...previous,
         {
@@ -322,6 +338,15 @@ function Composer({
       <div aria-live="polite" className="space-y-2">
         {messages.map((turn, position) => {
           const index = sidebar ? position : turns.length - 1;
+          const excerpt = (
+            <ReplyExcerpt
+              reply={turn.reply}
+              originName={name}
+              originPath={path}
+              originalText={origin.text}
+              onReplace={replaceWithExcerpt}
+            />
+          );
           return (
             <article key={index} className="space-y-1">
               {sidebar && (
@@ -335,23 +360,30 @@ function Composer({
                   )}
                 </details>
               )}
-              {turn.edit ? (
+              {turn.edit && (
                 <ProposedSelectionEdit
                   before={origin.text}
                   after={turn.reply}
                   status={turn.edit}
                   onApply={() => {
-                    const edit = apply(turn.reply);
+                    const { status: edit } = apply(turn.reply);
                     updateEdit(index, edit);
                     if (edit === "applied") origin.editor.focus();
                   }}
                   onDiscard={() => updateEdit(index, "discarded")}
                 />
-              ) : (
-                <pre className="whitespace-pre-wrap wrap-anywhere rounded bg-(--mint-hover) p-2">
-                  {turn.reply}
-                </pre>
               )}
+              {/* Selecting and using a reply preserves the current pane as the cursor target. */}
+              <fieldset className="min-w-0" onFocus={(event) => event.stopPropagation()}>
+                {turn.edit ? (
+                  <details className="space-y-2">
+                    <summary className="cursor-pointer">{t("writing.reply.useExcerpt")}</summary>
+                    {excerpt}
+                  </details>
+                ) : (
+                  excerpt
+                )}
+              </fieldset>
             </article>
           );
         })}

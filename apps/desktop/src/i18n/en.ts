@@ -32,6 +32,18 @@ export const en = {
   "writing.resume": "Resume conversation",
   "writing.manage": "Connection settings",
   "writing.locate": "Go to original selection",
+  "writing.reply": "AI reply",
+  "writing.reply.useExcerpt": "Use part of the reply",
+  "writing.reply.insert": "Insert at cursor in {name}",
+  "writing.reply.replace": "Replace original selection in {name}",
+  "writing.reply.newDraft": "Create new untitled draft",
+  "writing.reply.conflict":
+    "The original selection changed or needs review. Compare it with the selected reply.",
+  "writing.reply.current": "Current editor text",
+  "writing.reply.selected": "Selected reply excerpt",
+  "writing.reply.original": "Original selection",
+  "writing.reply.emptySelection": "The original selection has no current text.",
+  "writing.reply.dismissComparison": "Dismiss comparison",
   "writing.missingSelection": "The original selection is no longer in the document.",
   "writing.includeHistory": "Send earlier instructions and replies with this message",
   "writing.sendFailed":

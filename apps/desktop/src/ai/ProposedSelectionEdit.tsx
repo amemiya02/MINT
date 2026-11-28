@@ -8,14 +8,16 @@ export type EditStatus = "preview" | "applied" | "discarded" | "conflict";
 export function ProposedSelectionEdit({
   before,
   after,
+  current,
   status,
   onApply,
   onDiscard,
 }: {
   readonly before: string;
   readonly after: string;
+  readonly current?: string;
   readonly status: EditStatus;
-  readonly onApply: () => void;
+  readonly onApply?: () => void;
   readonly onDiscard: () => void;
 }) {
   const t = useT();
@@ -31,17 +33,35 @@ export function ProposedSelectionEdit({
 
   return (
     <div className="space-y-2 rounded border border-(--mint-border) p-2">
-      {status === "conflict" && <p role="alert">{t("writing.edit.conflict")}</p>}
+      {status === "conflict" && (
+        <p role="alert">
+          {t(current === undefined ? "writing.edit.conflict" : "writing.reply.conflict")}
+        </p>
+      )}
       <div className="grid gap-2 sm:grid-cols-2">
         <div className="min-w-0">
-          <p className="text-xs font-medium">{t("writing.edit.before")}</p>
-          <Excerpt text={before} source={source} />
+          <p className="text-xs font-medium">
+            {t(current === undefined ? "writing.edit.before" : "writing.reply.current")}
+          </p>
+          {current === "" ? (
+            <p className="text-(--mint-muted)">{t("writing.reply.emptySelection")}</p>
+          ) : (
+            <Excerpt text={current ?? before} source={source} />
+          )}
         </div>
         <div className="min-w-0">
-          <p className="text-xs font-medium">{t("writing.edit.after")}</p>
+          <p className="text-xs font-medium">
+            {t(current === undefined ? "writing.edit.after" : "writing.reply.selected")}
+          </p>
           <Excerpt text={after} source={source} />
         </div>
       </div>
+      {current !== undefined && (
+        <details>
+          <summary className="text-xs">{t("writing.reply.original")}</summary>
+          <Excerpt text={before} source={source} />
+        </details>
+      )}
       <div className="flex flex-wrap gap-2">
         <label className="flex items-center gap-1">
           <input
@@ -65,7 +85,7 @@ export function ProposedSelectionEdit({
           className="rounded border border-(--mint-border) px-2 py-1"
           onClick={onDiscard}
         >
-          {t("writing.edit.discard")}
+          {t(current === undefined ? "writing.edit.discard" : "writing.reply.dismissComparison")}
         </button>
       </div>
     </div>
