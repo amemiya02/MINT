@@ -80,8 +80,9 @@ test("one Enter edits the live selection, keeps both panes usable, and saves and
 
   await page.getByRole("button", { name: "View changes", exact: true }).click();
   const review = page.getByRole("complementary", { name: "Writing Assistant" });
-  await expect(review.getByText(live, { exact: true }).first()).toBeVisible();
-  await expect(review.getByText(shortened, { exact: true })).toBeVisible();
+  const comparison = review.getByRole("group", { name: "Proposed edit 1 of 1" });
+  await expect(comparison.getByText(live, { exact: true })).toBeVisible();
+  await expect(comparison.getByText(shortened, { exact: true })).toBeVisible();
   await review.getByRole("button", { name: "Close", exact: true }).click();
   await expect(left).toBeFocused();
   await left.press("ControlOrMeta+S");
