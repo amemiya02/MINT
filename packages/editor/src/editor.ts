@@ -269,6 +269,8 @@ export interface MintEditor {
    * the editor to the end of the last one visible at the bottom, in `getText()` offsets.
    */
   getVisibleRange(): { readonly from: number; readonly to: number };
+  /** Scroll a file offset to the top of the editor, preserving the selection. */
+  scrollTo(offset: number): void;
   /** Capture the current scroll anchor and pixel offset for restoration after a modal view. */
   captureScrollPosition(): () => void;
   /** Matches of the find query set with the `setFindQuery` command. */
@@ -603,6 +605,14 @@ export function createEditor(options: EditorOptions): MintEditor {
         from: toFileOffset(view.state, first.from),
         to: toFileOffset(view.state, Math.max(first.to, last.to)),
       };
+    },
+    scrollTo(offset) {
+      view.dispatch({
+        effects: EditorView.scrollIntoView(fromFileOffset(view.state, offset), {
+          y: "start",
+          yMargin: 0,
+        }),
+      });
     },
     getFindStatus: () => findStatus(view.state),
     setInlineCompletion(request) {

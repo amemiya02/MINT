@@ -145,6 +145,10 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   const [writingRequest, setWritingRequest] = useState<{ tabId: number; sequence: number } | null>(
     null,
   );
+  const [writingTasksRequest, setWritingTasksRequest] = useState<{
+    tabId: number;
+    sequence: number;
+  } | null>(null);
   const [agentSelection, setAgentSelection] = useState<{
     tabId: number;
     origin: WritingSelection;
@@ -450,6 +454,13 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
         sequence: (previous?.sequence ?? 0) + 1,
       }));
     },
+    "edit.writingTasks": () => {
+      if (activeId === null) return;
+      setWritingTasksRequest((previous) => ({
+        tabId: activeId,
+        sequence: (previous?.sequence ?? 0) + 1,
+      }));
+    },
     "edit.addAnnotation": addAnnotation,
     "view.annotations": () => {
       if (active) setAnnotationsOpen((open) => !open);
@@ -713,8 +724,12 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
                   platform={platform}
                   folder={folder}
                   askWriting={writingRequest?.tabId === tab.id ? writingRequest.sequence : null}
+                  writingTasksRequest={
+                    writingTasksRequest?.tabId === tab.id ? writingTasksRequest.sequence : null
+                  }
                   settingsOpen={settingsOpen}
                   onAskWriting={() => run.current("edit.askAI")}
+                  onWritingTasks={() => run.current("edit.writingTasks")}
                   onOpenSettings={() => run.current("app.settings")}
                   onModeChange={modeChanged}
                   onEditorChange={editorsChanged}

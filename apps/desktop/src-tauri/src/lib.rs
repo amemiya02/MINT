@@ -20,6 +20,7 @@ mod settings;
 mod themes;
 mod updates;
 mod walk;
+mod writing_tasks;
 mod zotero;
 
 use std::collections::HashMap;
@@ -747,6 +748,10 @@ pub fn run() {
             external_agent::approve_external_agent,
             external_agent::forget_external_agent,
             external_agent::send_external_agent,
+            writing_tasks::list_writing_tasks,
+            writing_tasks::create_writing_task,
+            writing_tasks::update_writing_task,
+            writing_tasks::delete_writing_task,
             model::send_model_request,
             model::send_connected_model_request,
             model_connections::list_model_connections,

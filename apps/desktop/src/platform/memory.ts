@@ -136,6 +136,8 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     ...(options.directories ?? []),
   ]);
   const appData = new Map(Object.entries(options.appData ?? {}));
+  const taskRoot = "ai/tasks/";
+  const taskRecord = (id: string) => `${taskRoot}${id}/review.json`;
   const trash: string[] = [];
   const dialogResults = [...(options.openDialogResults ?? [])];
   const saveDialogResults = [...(options.saveDialogResults ?? [])];
@@ -347,6 +349,29 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       };
     },
     externalAgent: memoryExternalAgent(options.externalAgent),
+    writingTasks: {
+      async list(path) {
+        return [...appData.entries()].flatMap(([key, json]) => {
+          if (!key.startsWith(taskRoot) || !key.endsWith("/review.json")) return [];
+          const task = JSON.parse(json);
+          return task.path === path ? [task] : [];
+        });
+      },
+      async create(task) {
+        const key = taskRecord(task.id);
+        if (appData.has(key)) throw new Error("Writing task already exists");
+        appData.set(key, JSON.stringify(task));
+      },
+      async update(task) {
+        const key = taskRecord(task.id);
+        if (!appData.has(key)) throw new Error("Writing task no longer exists");
+        appData.set(key, JSON.stringify(task));
+      },
+      async remove(id) {
+        const prefix = `${taskRoot}${id}/`;
+        for (const key of appData.keys()) if (key.startsWith(prefix)) appData.delete(key);
+      },
+    },
     locale: options.locale ?? navigator.language,
     files,
     binaryFiles,

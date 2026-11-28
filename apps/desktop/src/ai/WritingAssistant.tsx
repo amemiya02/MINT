@@ -1,19 +1,35 @@
 import type { MintEditor } from "@mint/editor";
-import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import {
+  type FormEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+} from "react";
 import { useT } from "../i18n/index.ts";
 import type { Platform } from "../platform/platform.ts";
 import { MaterialRequestNotice, useMaterialRequests } from "./MaterialRequest.tsx";
-import { type EditStatus, ProposedSelectionEdit } from "./ProposedSelectionEdit.tsx";
+import { ProposedSelectionEdit } from "./ProposedSelectionEdit.tsx";
 import { ReplyExcerpt } from "./ReplyExcerpt.tsx";
-import { type SelectionEdit, selectionEdits } from "./selection-edits.ts";
+import { selectionEdits } from "./selection-edits.ts";
 import { TaskContextChecklist, useNamedMaterials } from "./TaskContext.tsx";
+import { WritingTasksDialog } from "./WritingTasksDialog.tsx";
 import { loadWritingRecipients, type WritingRecipient } from "./writing-recipients.ts";
 import {
   applyWritingSelection,
   captureWritingSelection,
   type WritingSelection,
 } from "./writing-selection.ts";
-import { replacementFromReply, type WritingTurn } from "./writing-sender.ts";
+import { replacementFromReply, type TaskContext } from "./writing-sender.ts";
+import {
+  mapReviewRanges,
+  type ReviewRange,
+  type SavedSuggestion,
+  type SavedTurn,
+  type SavedWritingTask,
+} from "./writing-tasks.ts";
 
 const buttonClass =
   "rounded-md border border-(--mint-border) bg-(--mint-bg) px-2 py-1 hover:bg-(--mint-hover) focus-visible:outline-2 focus-visible:outline-(--mint-accent) disabled:opacity-50";
@@ -26,35 +42,45 @@ const actions = ["comment", "preview", "direct"] as const;
 type Action = (typeof actions)[number];
 
 interface Origin extends WritingSelection {
-  readonly id: number;
+  readonly id: string;
 }
 
-interface Turn extends WritingTurn {
-  readonly material?: string;
-  readonly recipient: string;
-  readonly recipientId: string;
-  readonly appliedDirectly?: boolean;
+interface Turn extends Omit<SavedTurn, "suggestions"> {
   readonly suggestions?: readonly Suggestion[];
 }
 
 type TrackedRange = ReturnType<Origin["range"]["trackSubrange"]>;
-type Suggestion = Pick<SelectionEdit, "before" | "after"> & {
-  readonly id: number;
+type Suggestion = Omit<SavedSuggestion, "range"> & {
   readonly range: TrackedRange;
-  readonly status: EditStatus;
-  readonly comments?: readonly (WritingTurn & { readonly id: number })[];
 };
+
+interface RestoredReview {
+  readonly task: SavedWritingTask;
+  readonly mapper: ReturnType<typeof mapReviewRanges>;
+}
+
+function savedRange(range: TrackedRange): ReviewRange {
+  return { ...range.current(), located: range.hasBoundaries() };
+}
+
+function restoreRange(editor: MintEditor, range: ReviewRange): Origin["range"] {
+  const tracked = editor.trackRange(range);
+  return { ...tracked, hasBoundaries: () => range.located && tracked.hasBoundaries() };
+}
 
 interface Props {
   readonly editor: MintEditor | null;
   readonly tabId: number;
+  readonly path: string | null;
   readonly name: string;
   readonly active: boolean;
   readonly platform: Platform;
   readonly folder: string | null;
   readonly askRequest: number | null;
+  readonly tasksRequest: number | null;
   readonly settingsOpen: boolean;
   readonly onAsk: () => void;
+  readonly onTasks: () => void;
   readonly onSettings: () => void;
   readonly externalChange: boolean;
   readonly refreshDisk: () => Promise<boolean>;
@@ -65,13 +91,16 @@ interface Props {
 export function WritingAssistant({
   editor,
   tabId,
+  path,
   name,
   active,
   platform,
   folder,
   askRequest,
+  tasksRequest,
   settingsOpen,
   onAsk,
+  onTasks,
   onSettings,
   externalChange,
   refreshDisk,
@@ -80,7 +109,32 @@ export function WritingAssistant({
   const t = useT();
   const [hasSelection, setHasSelection] = useState(false);
   const [origin, setOrigin] = useState<Origin | null>(null);
+  const [restored, setRestored] = useState<RestoredReview | null>(null);
   const [placement, setPlacement] = useState<"inline" | "sidebar" | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [hasSavedTasks, setHasSavedTasks] = useState(false);
+  const [busyTask, setBusyTask] = useState<string | null>(null);
+  const lastAsk = useRef<number | null>(null);
+  const lastHistory = useRef<number | null>(null);
+
+  useEffect(() => {
+    let current = true;
+    void platform.writingTasks.list(path).then(
+      (tasks) => {
+        if (current) setHasSavedTasks(tasks.length > 0);
+      },
+      () => {},
+    );
+    return () => {
+      current = false;
+    };
+  }, [platform, path]);
+
+  useEffect(() => {
+    if (tasksRequest === null || tasksRequest === lastHistory.current) return;
+    lastHistory.current = tasksRequest;
+    setHistoryOpen(true);
+  }, [tasksRequest]);
 
   useEffect(() => {
     if (!editor) return;
@@ -95,14 +149,31 @@ export function WritingAssistant({
   }, [editor]);
 
   useEffect(() => {
-    if (!askRequest || !editor) return;
+    if (!askRequest || askRequest === lastAsk.current || !editor) return;
+    lastAsk.current = askRequest;
     const selection = captureWritingSelection(editor);
     if (!selection) return;
-    setOrigin({ id: askRequest, ...selection });
+    setOrigin({ id: crypto.randomUUID(), ...selection });
+    setRestored(null);
     setPlacement("inline");
   }, [askRequest, editor]);
 
   useEffect(() => () => origin?.range.release(), [origin]);
+
+  function openTask(task: SavedWritingTask) {
+    if (!editor) return;
+    if (task.id !== origin?.id) {
+      const mapper = mapReviewRanges(task.baseline, editor.getText());
+      setOrigin({
+        id: task.id,
+        editor,
+        text: task.origin.text,
+        range: restoreRange(editor, mapper.range(task.origin)),
+      });
+      setRestored({ task, mapper });
+    }
+    setPlacement("sidebar");
+  }
 
   return (
     <div
@@ -113,8 +184,13 @@ export function WritingAssistant({
       }`}
     >
       <div className="min-h-0 min-w-0">{children}</div>
-      {!placement && active && (hasSelection || origin) && (
+      {!placement && active && (hasSelection || origin || hasSavedTasks) && (
         <div className="absolute right-4 bottom-4 z-10 flex gap-2">
+          {hasSavedTasks && (
+            <button type="button" className={buttonClass} onClick={onTasks}>
+              {t("writing.tasks")}
+            </button>
+          )}
           {origin && (
             <button type="button" className={buttonClass} onClick={() => setPlacement("inline")}>
               {t("writing.resume")}
@@ -127,11 +203,28 @@ export function WritingAssistant({
           )}
         </div>
       )}
+      {historyOpen && (
+        <WritingTasksDialog
+          tasks={platform.writingTasks}
+          path={path}
+          busyTask={busyTask}
+          onClose={() => setHistoryOpen(false)}
+          onOpen={openTask}
+          onDelete={(id, remaining) => {
+            setHasSavedTasks(remaining > 0);
+            if (id !== origin?.id) return;
+            setPlacement(null);
+            setOrigin(null);
+            setRestored(null);
+          }}
+        />
+      )}
       {origin && origin.editor === editor && (
         <Composer
           key={origin.id}
           origin={origin}
           tabId={tabId}
+          path={path}
           name={name}
           placement={placement}
           setPlacement={setPlacement}
@@ -142,6 +235,10 @@ export function WritingAssistant({
           onSettings={onSettings}
           externalChange={externalChange}
           refreshDisk={refreshDisk}
+          restored={restored}
+          onSaved={() => setHasSavedTasks(true)}
+          onTasks={onTasks}
+          onBusyChange={setBusyTask}
         />
       )}
     </div>
@@ -151,6 +248,7 @@ export function WritingAssistant({
 function Composer({
   origin,
   tabId,
+  path,
   name,
   placement,
   setPlacement,
@@ -161,19 +259,28 @@ function Composer({
   onSettings,
   externalChange,
   refreshDisk,
+  restored,
+  onSaved,
+  onTasks,
+  onBusyChange,
 }: Pick<
   Props,
   | "tabId"
+  | "path"
   | "name"
   | "active"
   | "platform"
   | "folder"
   | "settingsOpen"
   | "onSettings"
+  | "onTasks"
   | "externalChange"
   | "refreshDisk"
 > & {
   readonly origin: Origin;
+  readonly restored: RestoredReview | null;
+  readonly onSaved: () => void;
+  readonly onBusyChange: (id: string | null) => void;
   readonly placement: "inline" | "sidebar" | null;
   readonly setPlacement: (placement: "inline" | "sidebar" | null) => void;
 }) {
@@ -192,17 +299,25 @@ function Composer({
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
   const [turns, setTurns] = useState<readonly Turn[]>([]);
+  const [title, setTitle] = useState(restored?.task.title ?? "");
+  const [ready, setReady] = useState(!restored);
+  const [saveFailed, setSaveFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<"sendFailed" | "agentChanged" | "missingSelection" | null>(
     null,
   );
   const input = useRef<HTMLInputElement>(null);
+  const review = useRef<HTMLElement>(null);
+  const reviewScroll = useRef(restored?.task.reviewScroll ?? 0);
+  const saves = useRef(Promise.resolve());
+  const readingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pending = useRef(restored?.task.pending);
   const mounted = useRef(true);
   const isActive = useRef(active);
   isActive.current = active;
   const checkingDisk = useRef(false);
   const trackedSuggestions = useRef(new Set<TrackedRange>());
-  const [showSource, setShowSource] = useState(false);
+  const [showSource, setShowSource] = useState(restored?.task.showSource ?? false);
   const [draft, setDraft] = useState(() => origin.editor.getText());
   const recipient = recipients.find((candidate) => candidate.id === recipientId);
   const labelFor = (candidate: WritingRecipient) =>
@@ -218,15 +333,112 @@ function Composer({
       ? "comment"
       : (actionOverride ?? (explicitDirect ? "direct" : turns.length ? "comment" : "preview"));
 
+  const snapshot = useCallback(
+    (taskTitle: string): SavedWritingTask => {
+      const editor = origin.editor;
+      return {
+        version: 1,
+        id: origin.id,
+        path,
+        title: taskTitle,
+        updatedAt: Date.now(),
+        baseline: editor.getText(),
+        origin: { ...savedRange(origin.range), text: origin.text },
+        reading: { ...editor.getSelection(), top: editor.getVisibleRange().from },
+        reviewScroll: reviewScroll.current,
+        showSource,
+        pending: pending.current,
+        turns: turns.map((turn) => ({
+          ...turn,
+          suggestions: turn.suggestions?.map((item) => ({
+            ...item,
+            range: savedRange(item.range),
+          })),
+        })),
+      };
+    },
+    [origin, path, showSource, turns],
+  );
+
+  const persist = useCallback(
+    (taskTitle = title) => {
+      if (!taskTitle || !ready) return;
+      const task = snapshot(taskTitle);
+      saves.current = saves.current.then(async () => {
+        try {
+          await platform.writingTasks.update(task);
+          if (mounted.current) setSaveFailed(false);
+        } catch {
+          if (mounted.current) setSaveFailed(true);
+        }
+      });
+    },
+    [platform, ready, snapshot, title],
+  );
+
+  const saveCheckpoint = useEffectEvent(persist);
+  const saveReadingSoon = useEffectEvent(() => queueReadingSave());
+
+  function queueReadingSave() {
+    if (!title || !ready) return;
+    if (readingTimer.current !== null) clearTimeout(readingTimer.current);
+    readingTimer.current = setTimeout(() => {
+      readingTimer.current = null;
+      saveCheckpoint();
+    }, 150);
+  }
+
   useEffect(() => {
     mounted.current = true;
     const tracked = trackedSuggestions.current;
+    if (restored) {
+      const { task, mapper } = restored;
+      setTurns(
+        task.turns.map((turn) => ({
+          ...turn,
+          suggestions: turn.suggestions?.map((item) => {
+            const range = restoreRange(origin.editor, mapper.range(item.range));
+            tracked.add(range);
+            return { ...item, range };
+          }),
+        })),
+      );
+      origin.editor.setSelection({
+        anchor: mapper.point(task.reading.anchor),
+        head: mapper.point(task.reading.head),
+      });
+      origin.editor.scrollTo(mapper.point(task.reading.top));
+      if (review.current) review.current.scrollTop = reviewScroll.current;
+      setReady(true);
+    }
     return () => {
       mounted.current = false;
+      if (readingTimer.current !== null) clearTimeout(readingTimer.current);
       for (const range of tracked) range.release();
       tracked.clear();
     };
-  }, []);
+  }, [origin, restored]);
+
+  useEffect(() => {
+    persist();
+  }, [persist]);
+
+  useEffect(() => {
+    onBusyChange(busy ? origin.id : null);
+    return () => onBusyChange(null);
+  }, [busy, onBusyChange, origin.id]);
+
+  useEffect(() => {
+    if (!active || !placement) return;
+    return origin.editor.subscribe(({ type }) => {
+      if (type === "selection") saveCheckpoint();
+      if (type === "scroll") saveReadingSoon();
+    });
+  }, [active, origin, placement]);
+
+  useEffect(() => {
+    if (ready && placement && review.current) review.current.scrollTop = reviewScroll.current;
+  }, [ready, placement]);
 
   useEffect(() => {
     const refresh = () => setDraft(origin.editor.getText());
@@ -254,10 +466,13 @@ function Composer({
   }, [platform, settingsOpen]);
 
   useEffect(() => {
-    if (placement && !settingsOpen) input.current?.focus();
-  }, [placement, settingsOpen]);
+    if (!placement || settingsOpen) return;
+    if (restored) review.current?.focus({ preventScroll: true });
+    else input.current?.focus();
+  }, [placement, restored, settingsOpen]);
 
   function close() {
+    persist();
     setPlacement(null);
     origin.editor.focus();
   }
@@ -352,12 +567,15 @@ function Composer({
     setBusy(true);
     setError(null);
     try {
-      const result = await connection.send({
-        instruction: prompt,
-        selectedText: current,
-        history: [{ instruction: turn.instruction, reply: suggestion.after }],
-        responseFormat: "replacement",
-      });
+      const result = await connection.send(
+        {
+          instruction: prompt,
+          selectedText: current,
+          history: [{ instruction: turn.instruction, reply: suggestion.after }],
+          responseFormat: "replacement",
+        },
+        { taskId: origin.id },
+      );
       if (!mounted.current) return false;
       const replacement = replacementFromReply(result);
       const comments = suggestion.comments ?? [];
@@ -393,6 +611,16 @@ function Composer({
       checkingDisk.current
     )
       return;
+    if (restored && action !== "comment") {
+      const { from, to } = origin.range.current();
+      if (
+        !origin.range.hasBoundaries() ||
+        origin.editor.getText().slice(from, to) !== origin.text
+      ) {
+        setError("missingSelection");
+        return;
+      }
+    }
     const prompt = instruction.trim();
     const history =
       includeHistory && turns.length
@@ -412,21 +640,49 @@ function Composer({
       const draftSnapshot = sendDraft
         ? { name, text: origin.editor.getText().replace(/^\uFEFF/, "") }
         : undefined;
+      const context: TaskContext | undefined =
+        draftSnapshot || named.materials.length || searchFolder
+          ? {
+              currentDraft: draftSnapshot,
+              materials: named.materials.length ? named.materials : undefined,
+              folderSearch: searchFolder ? true : undefined,
+            }
+          : undefined;
+      const submitted = {
+        instruction: prompt,
+        material: selectedText ?? draftSnapshot?.text,
+        context,
+        recipient: labelFor(recipient),
+        recipientId: recipient.id,
+      };
+      pending.current = submitted;
+      if (title) persist();
+      else {
+        try {
+          await platform.writingTasks.create(snapshot(prompt));
+        } catch {
+          if (mounted.current) setSaveFailed(true);
+          return;
+        }
+        if (!mounted.current) return;
+        setTitle(prompt);
+        setSaveFailed(false);
+        onSaved();
+      }
+      let sentContext = context;
       const result = await materialRequests.send(
-        recipient.send,
+        (outbound) => {
+          sentContext = outbound.taskContext;
+          pending.current = { ...submitted, context: sentContext };
+          persist(title || prompt);
+          return recipient.send(outbound, { taskId: origin.id });
+        },
         {
           instruction: prompt,
           selectedText,
           history,
           responseFormat: action === "comment" ? undefined : "replacement",
-          taskContext:
-            draftSnapshot || named.materials.length || searchFolder
-              ? {
-                  currentDraft: draftSnapshot,
-                  materials: named.materials.length ? named.materials : undefined,
-                  folderSearch: searchFolder ? true : undefined,
-                }
-              : undefined,
+          taskContext: context,
         },
         labelFor(recipient),
         searchFolder,
@@ -438,14 +694,13 @@ function Composer({
       if (!mounted.current) return;
       const suggestions =
         replacement !== undefined && !appliedDirectly ? preview(replacement) : undefined;
+      pending.current = undefined;
       setTurns((previous) => [
         ...previous,
         {
-          instruction: prompt,
+          ...submitted,
+          context: sentContext,
           reply: replacement ?? result.text,
-          material: selectedText ?? draftSnapshot?.text,
-          recipient: labelFor(recipient),
-          recipientId: recipient.id,
           appliedDirectly,
           suggestions,
         },
@@ -482,8 +737,39 @@ function Composer({
     );
   }
 
+  function renderSentContext(context: TaskContext | undefined) {
+    if (!context) return null;
+    const materials = [
+      ...(context.currentDraft ? [context.currentDraft] : []),
+      ...(context.materials ?? []),
+      ...(context.materialDecisions ?? []).flatMap((decision) =>
+        decision.outcome === "allowed" ? [decision.material] : [],
+      ),
+    ];
+    return (
+      <fieldset className="space-y-1 rounded border border-(--mint-border) p-2 text-xs">
+        <legend className="px-1">{t("writing.tasks.sentContext")}</legend>
+        {context.folderSearch && <p>{t("materials.allowSearch")}</p>}
+        {materials.map(({ name, text }, index) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: A turn keeps its original material order, including duplicates.
+          <details key={`${index}:${name}`} className="wrap-anywhere">
+            <summary>{name}</summary>
+            <pre className="max-h-24 overflow-auto whitespace-pre-wrap">{text}</pre>
+          </details>
+        ))}
+        {context.materialDecisions?.map((decision) =>
+          decision.outcome === "skipped" ? (
+            <p key={decision.name}>{t("writing.tasks.skippedMaterial", { name: decision.name })}</p>
+          ) : null,
+        )}
+      </fieldset>
+    );
+  }
+
   return (
     <Container
+      ref={review}
+      tabIndex={-1}
       aria-label={t(sidebar ? "writing.title" : "writing.ask")}
       className={`z-10 flex flex-col gap-3 overflow-auto border border-(--mint-border) bg-(--mint-bg) p-3 text-sm ${
         sidebar
@@ -496,12 +782,24 @@ function Composer({
           close();
         }
       }}
+      onScroll={(event) => {
+        if (event.target !== event.currentTarget) return;
+        reviewScroll.current = event.currentTarget.scrollTop;
+        queueReadingSave();
+      }}
     >
       <header className="flex flex-wrap items-center justify-between gap-2">
         <span className="font-medium">{t(sidebar ? "writing.title" : "writing.ask")}</span>
-        <button type="button" className={buttonClass} onClick={close}>
-          {t("settings.close")}
-        </button>
+        <div className="flex gap-2">
+          {title && (
+            <button type="button" className={buttonClass} disabled={busy} onClick={onTasks}>
+              {t("writing.tasks")}
+            </button>
+          )}
+          <button type="button" className={buttonClass} onClick={close}>
+            {t("settings.close")}
+          </button>
+        </div>
       </header>
       {sidebar && (
         <>
@@ -542,6 +840,7 @@ function Composer({
                   )}
                 </details>
               )}
+              {sidebar && renderSentContext(turn.context)}
               {suggestions?.length ? (
                 suggestions.map((suggestion, position) => {
                   const { from, to } = suggestion.range.current();
@@ -597,11 +896,19 @@ function Composer({
             </article>
           );
         })}
+        {sidebar && restored && !turns.length && pending.current && !busy && (
+          <article className="space-y-1">
+            <p>{pending.current.instruction}</p>
+            <p>{pending.current.recipient}</p>
+            {renderSentContext(pending.current.context)}
+          </article>
+        )}
         {busy && !materialRequests.pending && <p>{t("agent.working")}</p>}
       </div>
       {error && (
         <p role="alert">{t(error === "agentChanged" ? "agent.reviewAgain" : `writing.${error}`)}</p>
       )}
+      {saveFailed && <p role="alert">{t("writing.tasks.saveFailed")}</p>}
       {!sidebar && turns.length > 0 ? (
         <button
           type="button"

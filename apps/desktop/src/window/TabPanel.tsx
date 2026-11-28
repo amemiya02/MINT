@@ -30,8 +30,10 @@ export function TabPanel({
   platform,
   folder,
   askWriting,
+  writingTasksRequest,
   settingsOpen,
   onAskWriting,
+  onWritingTasks,
   onOpenSettings,
   onModeChange,
   onEditorChange,
@@ -49,8 +51,10 @@ export function TabPanel({
   readonly platform: Platform;
   readonly folder: string | null;
   readonly askWriting: number | null;
+  readonly writingTasksRequest: number | null;
   readonly settingsOpen: boolean;
   readonly onAskWriting: () => void;
+  readonly onWritingTasks: () => void;
   readonly onOpenSettings: () => void;
   readonly onModeChange: () => void;
   /** The tab's editor was created or destroyed. */
@@ -170,12 +174,15 @@ export function TabPanel({
           editor={editor}
           name={tabName(t, tab)}
           tabId={id}
+          path={path}
           active={active}
           platform={platform}
           folder={folder}
           askRequest={askWriting}
+          tasksRequest={writingTasksRequest}
           settingsOpen={settingsOpen}
           onAsk={onAskWriting}
+          onTasks={onWritingTasks}
           onSettings={onOpenSettings}
           externalChange={!!tab.external}
           refreshDisk={() => store.refreshDisk(id)}
