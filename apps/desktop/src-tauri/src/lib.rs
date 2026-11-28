@@ -616,6 +616,9 @@ const GRANTS_FILE: [&str; 2] = ["access", "granted-roots.json"];
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // The updater enables reqwest's rustls-no-provider feature. Zotero can build
+    // the first HTTP client before the updater has installed its ring provider.
+    let _ = rustls::crypto::ring::default_provider().install_default();
     let mut builder = tauri::Builder::default();
     #[cfg(desktop)]
     {
