@@ -2,8 +2,7 @@ import { renderHtml } from "@mint/markdown";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useT } from "../i18n/index.ts";
 import { useDialect } from "../settings/useDialect.ts";
-
-export type EditStatus = "preview" | "applied" | "discarded" | "reverted";
+import type { EditStatus } from "./writing-tasks.ts";
 
 export function ProposedSelectionEdit({
   before,

@@ -54,4 +54,5 @@ export function replacementFromReply({ text, finishReason }: WritingReply): stri
 /** A configured writing connection ready to handle the same request from setup or the editor. */
 export type WritingSender<Reply extends WritingReply = WritingReply> = (
   request: WritingRequest,
+  local?: { readonly taskId: string },
 ) => Promise<Reply>;

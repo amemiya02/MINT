@@ -20,6 +20,7 @@ mod settings;
 mod themes;
 mod updates;
 mod walk;
+mod writing_tasks;
 mod zotero;
 
 use std::collections::HashMap;
@@ -452,7 +453,11 @@ fn relocate_entry(
     let new = grants::resolve(to.parent().ok_or("missing parent")?)
         .map_err(|e| e.to_string())?
         .join(to.file_name().ok_or("missing file name")?);
-    history::relocate(&app_data_dir(app)?, &old, &new, commit).map_err(|e| e.to_string())
+    let data = app_data_dir(app)?;
+    writing_tasks::relocate(app, from, to, || {
+        history::relocate(&data, &old, &new, commit)
+    })
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -747,6 +752,10 @@ pub fn run() {
             external_agent::approve_external_agent,
             external_agent::forget_external_agent,
             external_agent::send_external_agent,
+            writing_tasks::list_writing_tasks,
+            writing_tasks::create_writing_task,
+            writing_tasks::update_writing_task,
+            writing_tasks::delete_writing_task,
             model::send_model_request,
             model::send_connected_model_request,
             model_connections::list_model_connections,

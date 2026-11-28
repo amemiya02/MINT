@@ -110,6 +110,7 @@ export const commands = [
     menu: "edit",
     group: "writing",
   },
+  { id: "edit.writingTasks", title: "writing.tasks", menu: "edit", group: "writing" },
   {
     id: "edit.askExternalAgent",
     title: "command.edit.askExternalAgent",

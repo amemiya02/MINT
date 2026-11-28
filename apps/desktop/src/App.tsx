@@ -13,6 +13,7 @@ import { ExternalAgentDialog } from "./ai/ExternalAgentPanel.tsx";
 import { inlineCompletionSender } from "./ai/inline-completion.ts";
 import { ReplyExcerpt } from "./ai/ReplyExcerpt.tsx";
 import { captureWritingSelection, type WritingSelection } from "./ai/writing-selection.ts";
+import { checkpointOpenWritingTasks, writingTaskWrites } from "./ai/writing-tasks.ts";
 import { AnnotationDialog, AnnotationPanel } from "./annotations/Annotations.tsx";
 import { createAnnotationStorage } from "./annotations/annotation-storage.ts";
 import { createAutosave } from "./autosave/autosave.ts";
@@ -145,6 +146,10 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   const [writingRequest, setWritingRequest] = useState<{ tabId: number; sequence: number } | null>(
     null,
   );
+  const [writingTasksRequest, setWritingTasksRequest] = useState<{
+    tabId: number;
+    sequence: number;
+  } | null>(null);
   const [agentSelection, setAgentSelection] = useState<{
     tabId: number;
     origin: WritingSelection;
@@ -450,6 +455,13 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
         sequence: (previous?.sequence ?? 0) + 1,
       }));
     },
+    "edit.writingTasks": () => {
+      if (activeId === null) return;
+      setWritingTasksRequest((previous) => ({
+        tabId: activeId,
+        sequence: (previous?.sequence ?? 0) + 1,
+      }));
+    },
     "edit.addAnnotation": addAnnotation,
     "view.annotations": () => {
       if (active) setAnnotationsOpen((open) => !open);
@@ -535,9 +547,14 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   useEffect(
     () =>
       platform.onCloseRequested(async () => {
+        await checkpointOpenWritingTasks(platform.writingTasks);
         if (!(await store.closeAll())) return false;
         // Closed tabs need no recovery: let their snapshots be removed before the window goes.
-        await Promise.all([recovery.settled(), annotationStorage.settled()]);
+        await Promise.all([
+          recovery.settled(),
+          annotationStorage.settled(),
+          writingTaskWrites(platform.writingTasks),
+        ]);
         return true;
       }),
     [platform, store, recovery, annotationStorage],
@@ -713,8 +730,12 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
                   platform={platform}
                   folder={folder}
                   askWriting={writingRequest?.tabId === tab.id ? writingRequest.sequence : null}
+                  writingTasksRequest={
+                    writingTasksRequest?.tabId === tab.id ? writingTasksRequest.sequence : null
+                  }
                   settingsOpen={settingsOpen}
                   onAskWriting={() => run.current("edit.askAI")}
+                  onWritingTasks={() => run.current("edit.writingTasks")}
                   onOpenSettings={() => run.current("app.settings")}
                   onModeChange={modeChanged}
                   onEditorChange={editorsChanged}

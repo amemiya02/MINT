@@ -200,7 +200,7 @@ export type EditorCommand = keyof EditorCommands;
 
 export type EditorEvent =
   | { readonly type: "change"; readonly remote?: boolean; readonly fromHistory?: boolean }
-  | { readonly type: "selection" }
+  | { readonly type: "selection"; readonly restored?: true }
   /** An input method finished composing, even if its final text was already visible. */
   | { readonly type: "compositionEnd" }
   | { readonly type: "mode" }
@@ -278,6 +278,8 @@ export interface MintEditor {
    * the editor to the end of the last one visible at the bottom, in `getText()` offsets.
    */
   getVisibleRange(): { readonly from: number; readonly to: number };
+  /** Restore the caret, selection and top line from saved file offsets. */
+  restoreReadingPosition(position: { anchor: number; head: number; top: number }): void;
   /** Capture the current scroll anchor and pixel offset for restoration after a modal view. */
   captureScrollPosition(): () => void;
   /** Matches of the find query set with the `setFindQuery` command. */
@@ -399,7 +401,13 @@ export function createEditor(options: EditorOptions): MintEditor {
                     ),
                   },
             );
-          if (update.selectionSet) emit({ type: "selection" });
+          if (update.selectionSet) {
+            emit(
+              update.transactions.some((tr) => tr.isUserEvent("select.restoreReading"))
+                ? { type: "selection", restored: true }
+                : { type: "selection" },
+            );
+          }
           if (update.docChanged || syntaxTree(update.state) !== syntaxTree(update.startState)) {
             const next = outline(update.state, false);
             if (!sameOutline(next, lastOutline)) {
@@ -643,6 +651,17 @@ export function createEditor(options: EditorOptions): MintEditor {
         from: toFileOffset(view.state, first.from),
         to: toFileOffset(view.state, Math.max(first.to, last.to)),
       };
+    },
+    restoreReadingPosition({ anchor, head, top }) {
+      const state = view.state;
+      view.dispatch({
+        selection: { anchor: fromFileOffset(state, anchor), head: fromFileOffset(state, head) },
+        effects: EditorView.scrollIntoView(fromFileOffset(state, top), {
+          y: "start",
+          yMargin: 0,
+        }),
+        userEvent: "select.restoreReading",
+      });
     },
     getFindStatus: () => findStatus(view.state),
     setInlineCompletion(request) {
