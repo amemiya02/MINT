@@ -138,6 +138,9 @@ export interface Platform {
   /** Install a move or link edit only if the source still matches the preview. */
   applyDocumentEdit(edit: DocumentEdit): Promise<void>;
 
+  /** Apply a checked task-copy change inside its working folder. An absent baseline creates a file. */
+  applyFolderDocumentEdit(root: string, edit: FolderDocumentEdit): Promise<void>;
+
   /** Move a file or directory to the system trash (never a permanent delete). */
   moveToTrash(path: string): Promise<void>;
 
@@ -382,3 +385,5 @@ export interface DocumentEdit {
   before: string;
   after: string;
 }
+
+export type FolderDocumentEdit = Omit<DocumentEdit, "before"> & { before?: string | undefined };

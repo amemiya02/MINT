@@ -652,7 +652,7 @@ function ExternalAgentPanel({
               )}
             </p>
             <p className="text-(--mint-muted)">
-              {t(access === "taskCopy" ? "agent.taskCopySingle" : "agent.unsupported")}
+              {t(access === "taskCopy" ? "agent.taskCopyFolder" : "agent.unsupported")}
             </p>
           </form>
         )}

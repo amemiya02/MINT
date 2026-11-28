@@ -47,6 +47,7 @@ export function externalAgentSender(
 ): WritingSender {
   // The native boundary rechecks access and executable identity for every operation.
   return async ({ responseFormat, sourcePassages, ...request }, options) => {
+    if (request.folderDocuments && access !== "taskCopy") throw "invalidRequest";
     if (hasTaskImages(request.taskContext)) throw "invalidRequest";
     const instruction = [request.instruction];
     const taskCopy =

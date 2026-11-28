@@ -11,12 +11,15 @@ import {
   useState,
 } from "react";
 import { useT } from "../i18n/index.ts";
-import { isWithin, parentPath } from "../paths.ts";
+import { documentExtensions, isWithin, parentPath, relativePath } from "../paths.ts";
 import type { Platform } from "../platform/platform.ts";
+import { useDialect } from "../settings/useDialect.ts";
 import { useSettings } from "../settings/useSettings.ts";
 import { useTabStore } from "../tabs/context.ts";
 import { useModalDialog } from "../window/useModalDialog.ts";
 import { FocusedWritingReview, type ReviewEntry } from "./FocusedWritingReview.tsx";
+import { FolderWritingReview } from "./FolderWritingReview.tsx";
+import { isFolderDocumentPath, planFolderChanges } from "./folder-changes.ts";
 import {
   type MaterialPlan,
   MaterialPlanPreview,
@@ -100,6 +103,10 @@ const actions = ["comment", "preview", "direct"] as const;
 type Action = (typeof actions)[number];
 const proposedEditTracking = { followReplacedEdges: true };
 
+function isTaskCopyRecipient(recipient?: WritingRecipient) {
+  return recipient?.kind === "agent" && recipient.access === "taskCopy";
+}
+
 function editKey({ from, to, before, after }: SelectionEdit) {
   return JSON.stringify([from, to, before, after]);
 }
@@ -111,6 +118,7 @@ interface Origin extends WritingSelection {
 
 interface Task {
   readonly request: WritingRequest;
+  readonly folderPaths?: readonly string[];
   readonly documentBaseline?: string;
   readonly plan?: MaterialPlan;
   readonly action: Action;
@@ -131,6 +139,7 @@ interface Attempt {
   readonly partial: string;
   readonly approved: readonly NamedMaterial[];
   readonly newDecisions?: number;
+  readonly folderChangeCount?: number;
   readonly capacityRejected?: boolean;
   readonly localOffline?: boolean;
 }
@@ -480,10 +489,18 @@ function Composer({
     origin.folder ? "folder" : origin.text ? "selection" : "document",
   );
   const [actionOverride, setActionOverride] = useState<Action | null>(null);
+  const [folderPaths, setFolderPaths] = useState<readonly string[]>();
+  const [folderListingFailed, setFolderListingFailed] = useState(false);
+  const [folderSelection, setFolderSelection] = useState<{
+    recipientId: string;
+    paths: ReadonlySet<string>;
+  }>();
+  const dialect = useDialect(!!origin.folder && settings.wikilinkFolders.includes(origin.folder));
   const [includeDraft, setIncludeDraft] = useState(false);
-  const [allowedFolder, setAllowedFolder] = useState<string | null>(null);
-  const searchFolder =
-    allowedFolder === folder && (!origin.folder || origin.folder === folder) ? folder : null;
+  const [allowedFolder, setAllowedFolder] = useState<{
+    path: string;
+    recipientId: string;
+  } | null>(null);
   const named = useNamedMaterials();
   const materialRequests = useMaterialRequests(platform.sendMcpRequest);
   const toolPicker = useWritingToolPicker(platform.sendMcpRequest);
@@ -520,6 +537,7 @@ function Composer({
     | "agentTaskCopyUnavailable"
     | "missingSelection"
     | "visionRequired"
+    | "folderRead"
     | null
   >(null);
   const input = useRef<HTMLInputElement>(null);
@@ -547,6 +565,17 @@ function Composer({
     ? (recipients.find(({ id }) => id === recipientId) ??
       effectiveWritingRecipient(recipients, recipientId))
     : effectiveWritingRecipient(recipients, connectionChoice);
+  const folderTargets =
+    folderSelection && folderSelection.recipientId === recipient?.id
+      ? folderSelection.paths
+      : undefined;
+  const searchFolder =
+    allowedFolder &&
+    allowedFolder.path === folder &&
+    allowedFolder.recipientId === recipient?.id &&
+    (!origin.folder || origin.folder === folder)
+      ? folder
+      : null;
   const checkVision = useModelVision(platform.sendModelMessage);
   const visionFor = (candidate?: WritingRecipient) =>
     checkVision(
@@ -558,13 +587,19 @@ function Composer({
   const labelFor = (candidate: WritingRecipient) => writingRecipientLabel(t, candidate);
   const selectedText = scope === "selection" ? origin.text : undefined;
   const sendDraft = scope === "document" || (scope === "selection" && includeDraft);
-  const canEditDocument =
-    scope === "document" && recipient?.kind === "agent" && recipient.access === "taskCopy";
-  const canEdit = (scope === "selection" && !!origin.text) || canEditDocument;
+  const canEditDocument = scope === "document" && isTaskCopyRecipient(recipient);
+  const canEditFolder = scope === "folder" && isTaskCopyRecipient(recipient);
+  const canEdit = (scope === "selection" && !!origin.text) || canEditDocument || canEditFolder;
   const explicitDirect = /(?:^|[,，]\s*)(?:apply directly|直接改)[.!。！]?\s*$/i.test(instruction);
   const action = !canEdit
     ? "comment"
-    : (actionOverride ?? (explicitDirect ? "direct" : turns.length ? "comment" : "preview"));
+    : (actionOverride ??
+      (explicitDirect && !canEditFolder
+        ? "direct"
+        : turns.length && !canEditFolder
+          ? "comment"
+          : "preview"));
+  const folderCopy = canEditFolder && action === "preview" ? origin.folder : undefined;
 
   const currentDraft = sendDraft
     ? { name, text: canEditDocument && action !== "comment" ? draft : draft.replace(/^\uFEFF/, "") }
@@ -585,8 +620,25 @@ function Composer({
     entries: named.entries,
     folderSearch: !!searchFolder,
     editing: action !== "comment",
-    wholeDraftEdit: canEditDocument && action !== "comment",
+    wholeDraftEdit: (canEditDocument && action !== "comment") || !!folderCopy,
   });
+
+  useEffect(() => {
+    if (!origin.folder) return;
+    const root = origin.folder;
+    let current = true;
+    void platform.listFolderFiles(root, documentExtensions).then(
+      (paths) => {
+        if (current) setFolderPaths(paths);
+      },
+      () => {
+        if (current) setFolderListingFailed(true);
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [origin.folder, platform]);
 
   const snapshot = useCallback(
     (taskTitle: string): SavedWritingTask => {
@@ -1216,10 +1268,31 @@ function Composer({
       named.loading ||
       named.unconfirmed ||
       (named.hasImages && !vision?.verified) ||
-      (scope === "folder" && !searchFolder) ||
+      (scope === "folder" && (folderCopy ? !folderPaths : !searchFolder)) ||
       checkingDisk.current
     )
       return;
+    let folderDocuments: WritingRequest["folderDocuments"];
+    if (folderCopy && folderPaths) {
+      checkingDisk.current = true;
+      try {
+        folderDocuments = await Promise.all(
+          folderPaths
+            .filter((path) => folderTargets?.has(path))
+            .map(async (path) => {
+              const tab = store.getState().tabs.find((tab) => tab.path === path);
+              const text = (tab && store.getText(tab.id)) ?? (await platform.readTextFile(path));
+              return { path: relativePath(folderCopy, path), text };
+            }),
+        );
+      } catch {
+        setError("folderRead");
+        return;
+      } finally {
+        checkingDisk.current = false;
+      }
+      if (!mounted.current) return;
+    }
     if (restored && action !== "comment" && scope === "selection") {
       const { from, to } = origin.range.current();
       if (
@@ -1243,13 +1316,15 @@ function Composer({
       : [];
     const task: Task = {
       plan: capacity.plan,
+      folderPaths: folderDocuments && folderPaths,
       documentBaseline: canEditDocument && action !== "comment" ? draft : undefined,
       request: {
         instruction: instruction.trim(),
         selectedText: capacity.plan.selectedText,
         taskContext: capacity.plan.contexts[0],
         history: history.length ? history : undefined,
-        responseFormat: action === "comment" ? undefined : "replacement",
+        responseFormat: action === "comment" || folderDocuments ? undefined : "replacement",
+        folderDocuments,
       },
       action,
       scope,
@@ -1276,6 +1351,7 @@ function Composer({
     tool?: WritingToolPlan,
   ) {
     if (controller.current || checkingDisk.current) return false;
+    if (task.request.folderDocuments && !isTaskCopyRecipient(connection)) return false;
     if (
       hasTaskImages(
         ...(task.fixedRequests?.map(({ taskContext }) => taskContext) ??
@@ -1314,6 +1390,7 @@ function Composer({
       ) ?? [];
     let status: AttemptStatus;
     let finalReplacement: string | undefined;
+    let folderChanges: Turn["folderChanges"];
     let ignoredChanges: boolean | undefined;
     let capacityRejected = false;
     const dispatched: WritingRequest[] = [];
@@ -1404,7 +1481,22 @@ function Composer({
       text = result.text;
       ignoredChanges = result.ignoredChanges;
       status = signal.aborted ? "stopped" : replyStatus(result);
-      if (editing && status === "complete") finalReplacement = replacementFromReply(result);
+      if (
+        status === "complete" &&
+        origin.folder &&
+        task.request.folderDocuments &&
+        task.folderPaths
+      ) {
+        folderChanges = planFolderChanges(
+          origin.folder,
+          task.request.folderDocuments,
+          result.fileChanges ?? [],
+          task.folderPaths,
+          dialect,
+        );
+      }
+      if (editing && status === "complete" && !task.request.folderDocuments)
+        finalReplacement = replacementFromReply(result);
     } catch (problem) {
       status = failureStatus(problem, signal);
       capacityRejected = !signal.aborted && !!task.plan && isMaterialCapacityError(problem);
@@ -1499,6 +1591,7 @@ function Composer({
           reply: rewrite ? "" : status === "complete" ? (replacement ?? text) : (replacement ?? ""),
           direct: task.action === "direct",
           ignoredChanges,
+          folderChanges,
           suggestions,
           status,
           partial,
@@ -1516,7 +1609,9 @@ function Composer({
       approved,
       status,
       partial: "",
-      newDecisions: suggestions?.filter(({ status }) => status === "preview").length,
+      newDecisions: (suggestions ?? folderChanges)?.filter(({ status }) => status === "preview")
+        .length,
+      folderChangeCount: folderChanges?.filter(({ status }) => status !== "outside").length,
       capacityRejected,
       localOffline,
     });
@@ -1548,14 +1643,16 @@ function Composer({
     [task, replacement, origin.text],
   );
   const distinct = task ? new Set([...task.seen, ...currentEdits.map(editKey)]).size : 0;
-  const count = task?.rewrite ? Number(distinct > 0) : distinct;
+  const count = attempt?.folderChangeCount ?? (task?.rewrite ? Number(distinct > 0) : distinct);
   const stop = () => controller.current?.abort();
   const status = attempt?.status;
   const sendingTo = attempt?.recipient;
   const pendingApproval = materialRequests.pending ?? toolApproval.pending;
   const decisions = turns.reduce(
     (total, turn) =>
-      total + (turn.suggestions?.filter(({ status }) => status === "preview").length ?? 0),
+      total +
+      ((turn.suggestions ?? turn.folderChanges)?.filter(({ status }) => status === "preview")
+        .length ?? 0),
     Number(!!pendingApproval),
   );
   const materials = task
@@ -1634,7 +1731,11 @@ function Composer({
   const sameConnection = canRetry && recipients.find(({ id }) => id === attempt.recipientId);
   const otherRecipients =
     canRetry && !attempt.task.alternativeTo
-      ? recipients.filter(({ id }) => id !== attempt.recipientId)
+      ? recipients.filter(
+          (candidate) =>
+            candidate.id !== attempt.recipientId &&
+            (!attempt.task.request.folderDocuments || isTaskCopyRecipient(candidate)),
+        )
       : [];
   const otherConnection = otherRecipients.find(({ id }) => id === retryId);
   const retryHasImages =
@@ -1833,13 +1934,20 @@ function Composer({
     );
   }
 
-  function renderSentContext(context: TaskContext | undefined, searchFolder?: string) {
-    if (!context) return null;
-    const materials = contextMaterials(context);
+  function renderSentContext(
+    context: TaskContext | undefined,
+    searchFolder?: string,
+    documents?: WritingRequest["folderDocuments"],
+  ) {
+    if (!context && !documents?.length) return null;
+    const materials = [
+      ...(documents?.map(({ path, text }) => ({ name: path, text })) ?? []),
+      ...contextMaterials(context),
+    ];
     return (
       <fieldset className="space-y-1 rounded border border-(--mint-border) p-2 text-xs">
         <legend className="px-1">{t("writing.tasks.sentContext")}</legend>
-        {context.folderSearch && (
+        {context?.folderSearch && (
           <p className="wrap-anywhere">
             {t("writing.tasks.searchedFolder", { folder: searchFolder ?? "" })}
           </p>
@@ -1851,7 +1959,7 @@ function Composer({
             <MaterialPreview material={material} />
           </details>
         ))}
-        {context.materialDecisions?.map((decision) =>
+        {context?.materialDecisions?.map((decision) =>
           decision.outcome === "skipped" ? (
             <p key={decision.name}>{t("writing.tasks.skippedMaterial", { name: decision.name })}</p>
           ) : null,
@@ -1866,6 +1974,29 @@ function Composer({
     return (
       <>
         <WritingToolOutcome outcome={turn.toolOutcome} />
+        {turn.folderChanges && origin.folder && (
+          <FolderWritingReview
+            root={origin.folder}
+            changes={turn.folderChanges}
+            platform={platform}
+            source={showSource}
+            busy={busy}
+            decide={(position, status) =>
+              setTurns((previous) =>
+                previous.map((item, turnIndex) =>
+                  turnIndex === index
+                    ? {
+                        ...item,
+                        folderChanges: item.folderChanges?.map((change, fileIndex) =>
+                          fileIndex === position ? { ...change, status } : change,
+                        ),
+                      }
+                    : item,
+                ),
+              )
+            }
+          />
+        )}
         {suggestions?.length ? (
           suggestions.map((suggestion, position) => {
             const status = reviewStatus(suggestion, draft);
@@ -1957,7 +2088,12 @@ function Composer({
           />
         )}
         {turn.ignoredChanges && <p role="status">{t("agent.taskCopyIgnored")}</p>}
-        {!!turn.reply && renderReplyExcerpt(turn.reply, suggestions !== undefined)}
+        {!!turn.reply &&
+          (turn.folderChanges ? (
+            <p className="whitespace-pre-wrap wrap-anywhere">{turn.reply}</p>
+          ) : (
+            renderReplyExcerpt(turn.reply, suggestions !== undefined)
+          ))}
       </>
     );
   }
@@ -1969,16 +2105,16 @@ function Composer({
   }
 
   function renderBaselineRetry(turn: Turn) {
-    if (
-      !turn.id ||
-      !turn.baseline ||
-      turn.alternativeTo ||
-      !recipients.some(({ id }) => id !== turn.recipientId)
-    )
-      return null;
+    if (!turn.id || !turn.baseline || turn.alternativeTo) return null;
     const { id, baseline } = turn;
-    const connection = recipients.find(({ id }) => id === retryId && id !== turn.recipientId);
     const first = baseline.requests[0];
+    const folderCopy = first?.folderDocuments !== undefined;
+    const alternatives = recipients.filter(
+      (candidate) =>
+        candidate.id !== turn.recipientId && (!folderCopy || isTaskCopyRecipient(candidate)),
+    );
+    if (!alternatives.length) return null;
+    const connection = alternatives.find(({ id }) => id === retryId);
     const hasImages = hasTaskImages(...baseline.requests.map(({ taskContext }) => taskContext));
     const check = visionFor(connection);
     return (
@@ -2004,13 +2140,11 @@ function Composer({
                 onChange={(event) => setRetryId(event.target.value)}
               >
                 <option value="">{t("writing.chooseRecipient")}</option>
-                {recipients
-                  .filter((candidate) => candidate.id !== turn.recipientId)
-                  .map((candidate) => (
-                    <option key={candidate.id} value={candidate.id}>
-                      {labelFor(candidate)}
-                    </option>
-                  ))}
+                {alternatives.map((candidate) => (
+                  <option key={candidate.id} value={candidate.id}>
+                    {labelFor(candidate)}
+                  </option>
+                ))}
               </select>
             </label>
             {connection && (
@@ -2019,7 +2153,9 @@ function Composer({
                 {renderAgentAccess(connection)}
                 <p className="text-xs">
                   {t(
-                    first.responseFormat === "replacement" ? "writing.preview" : "writing.comment",
+                    first.responseFormat === "replacement" || folderCopy
+                      ? "writing.preview"
+                      : "writing.comment",
                   )}
                   {" · "}
                   {t(`writing.scope.${baseline.scope}`)}
@@ -2032,55 +2168,66 @@ function Composer({
                     </pre>
                   </details>
                 )}
-                {baseline.requests.map(({ taskContext, instruction, history }, index) => (
-                  // biome-ignore lint/suspicious/noArrayIndexKey: The saved requests are in fixed send order.
-                  <div key={index} className="space-y-1">
-                    {baseline.requests.length > 1 && (
-                      <p className="text-xs">
-                        {t("materials.capacity.batchNumber", {
-                          number: String(index + 1),
-                          count: String(baseline.requests.length),
-                        })}
-                      </p>
-                    )}
-                    {renderSentContext(taskContext, turn.searchFolder)}
-                    {instruction !== turn.instruction && (
-                      <details className="text-xs">
-                        <summary>{t("writing.compare.instructions")}</summary>
-                        <pre className="max-h-32 overflow-auto whitespace-pre-wrap wrap-anywhere">
-                          {instruction}
-                        </pre>
-                      </details>
-                    )}
-                    {!!history?.length && (
-                      <details className="text-xs">
-                        <summary>{t("writing.compare.history")}</summary>
-                        {history.map(({ instruction, reply }, position) => (
-                          // biome-ignore lint/suspicious/noArrayIndexKey: The saved messages are in fixed send order.
-                          <div key={position} className="whitespace-pre-wrap wrap-anywhere">
-                            <p className="font-medium">{instruction}</p>
-                            <p>{reply}</p>
-                          </div>
-                        ))}
-                      </details>
-                    )}
-                  </div>
-                ))}
+                {baseline.requests.map(
+                  ({ taskContext, instruction, history, folderDocuments }, index) => (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: The saved requests are in fixed send order.
+                    <div key={index} className="space-y-1">
+                      {baseline.requests.length > 1 && (
+                        <p className="text-xs">
+                          {t("materials.capacity.batchNumber", {
+                            number: String(index + 1),
+                            count: String(baseline.requests.length),
+                          })}
+                        </p>
+                      )}
+                      {renderSentContext(taskContext, turn.searchFolder, folderDocuments)}
+                      {instruction !== turn.instruction && (
+                        <details className="text-xs">
+                          <summary>{t("writing.compare.instructions")}</summary>
+                          <pre className="max-h-32 overflow-auto whitespace-pre-wrap wrap-anywhere">
+                            {instruction}
+                          </pre>
+                        </details>
+                      )}
+                      {!!history?.length && (
+                        <details className="text-xs">
+                          <summary>{t("writing.compare.history")}</summary>
+                          {history.map(({ instruction, reply }, position) => (
+                            // biome-ignore lint/suspicious/noArrayIndexKey: The saved messages are in fixed send order.
+                            <div key={position} className="whitespace-pre-wrap wrap-anywhere">
+                              <p className="font-medium">{instruction}</p>
+                              <p>{reply}</p>
+                            </div>
+                          ))}
+                        </details>
+                      )}
+                    </div>
+                  ),
+                )}
                 {hasImages && check && <VisionControl check={check} />}
                 {hasImages && !check && <p role="alert">{t("materials.visionRequired")}</p>}
                 <button
                   type="button"
                   className={buttonClass}
-                  disabled={busy || loading || (hasImages && !check?.verified)}
+                  disabled={
+                    busy ||
+                    loading ||
+                    (hasImages && !check?.verified) ||
+                    (folderCopy && !folderPaths)
+                  }
                   onClick={() =>
                     void runTask(
                       {
                         request: first,
+                        folderPaths: folderCopy ? folderPaths : undefined,
                         documentBaseline:
                           baseline.scope === "document" && first.responseFormat === "replacement"
                             ? first.taskContext?.currentDraft?.text
                             : undefined,
-                        action: first.responseFormat === "replacement" ? "preview" : "comment",
+                        action:
+                          first.responseFormat === "replacement" || folderCopy
+                            ? "preview"
+                            : "comment",
                         scope: baseline.scope,
                         searchFolder: turn.searchFolder ?? null,
                         seen: new Set(),
@@ -2188,11 +2335,13 @@ function Composer({
           folder={attempt.task.searchFolder}
         />
       )}
-      {messages.some((turn) => turn.suggestions?.length) && (
+      {messages.some((turn) => turn.suggestions?.length || turn.folderChanges?.length) && (
         <div className="flex flex-wrap items-center gap-2">
-          <button type="button" className={buttonClass} onClick={() => openFocusedReview()}>
-            {t("writing.review.title")}
-          </button>
+          {messages.some((turn) => turn.suggestions?.length) && (
+            <button type="button" className={buttonClass} onClick={() => openFocusedReview()}>
+              {t("writing.review.title")}
+            </button>
+          )}
           <label className="flex items-center gap-1">
             <input
               type="checkbox"
@@ -2398,7 +2547,13 @@ function Composer({
                   onChange={(event) => setActionOverride(event.target.value as Action)}
                 >
                   {actions.map((id) => (
-                    <option key={id} value={id} disabled={!canEdit && id !== "comment"}>
+                    <option
+                      key={id}
+                      value={id}
+                      disabled={
+                        (!canEdit && id !== "comment") || (canEditFolder && id === "direct")
+                      }
+                    >
                       {t(`writing.${id}`)}
                     </option>
                   ))}
@@ -2441,6 +2596,10 @@ function Composer({
                   title={recipient && labelFor(recipient)}
                   onChange={(event) => {
                     setRecipientId(event.target.value);
+                    if (origin.folder) {
+                      setActionOverride(null);
+                      setFolderSelection(undefined);
+                    }
                     setAllowedFolder(null);
                     setIncludeHistory(false);
                     toolPicker.clear();
@@ -2467,6 +2626,32 @@ function Composer({
             </div>
             {recipient && renderAgentAccess(recipient)}
             {loadFailed && <p role="alert">{t("writing.connectionsFailed")}</p>}
+            {folderCopy && recipient && (
+              <fieldset className="space-y-1">
+                <legend>{t("writing.folder.include")}</legend>
+                <p className="text-xs text-(--mint-muted)">{t("writing.folder.copyDetails")}</p>
+                <div className="max-h-40 overflow-auto">
+                  {folderPaths
+                    ?.filter((path) => isFolderDocumentPath(relativePath(folderCopy, path)))
+                    .map((path) => (
+                      <label key={path} className="flex items-start gap-2 wrap-anywhere">
+                        <input
+                          type="checkbox"
+                          checked={folderTargets?.has(path) ?? false}
+                          onChange={(event) => {
+                            const targets = new Set(folderTargets);
+                            if (event.target.checked) targets.add(path);
+                            else targets.delete(path);
+                            setFolderSelection({ recipientId: recipient.id, paths: targets });
+                          }}
+                        />
+                        {relativePath(folderCopy, path)}
+                      </label>
+                    ))}
+                </div>
+                {folderListingFailed && <p role="alert">{t("writing.folderRead")}</p>}
+              </fieldset>
+            )}
             {!title && (
               <label className="flex items-center gap-2 text-xs">
                 <input
@@ -2488,7 +2673,13 @@ function Composer({
               handlingFull={capacity.method === "full"}
               folder={origin.folder && origin.folder !== folder ? null : folder}
               searchEnabled={!!searchFolder}
-              onSearchChange={(checked) => setAllowedFolder(checked ? folder : null)}
+              onSearchChange={(checked) =>
+                setAllowedFolder(
+                  checked && folder && recipient
+                    ? { path: folder, recipientId: recipient.id }
+                    : null,
+                )
+              }
             />
             {capacity.controls}
             <WritingToolPicker picker={toolPicker} />
@@ -2515,7 +2706,7 @@ function Composer({
                   named.loading ||
                   named.unconfirmed ||
                   (named.hasImages && !vision?.verified) ||
-                  (scope === "folder" && !searchFolder)
+                  (scope === "folder" && (folderCopy ? !folderPaths : !searchFolder))
                 }
               >
                 {toolPicker.plan?.exact

@@ -628,6 +628,29 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       files.set(to, after);
       notify(from, to);
     },
+    async applyFolderDocumentEdit(root, { from, to, before, after }) {
+      if (from === root || to === root || !isWithin(from, root) || !isWithin(to, root))
+        throw new Error("Outside the working folder");
+      if (from !== to && exists(to)) throw new Error(`${to} already exists`);
+      if (before === undefined) {
+        if (from !== to || exists(to)) throw new Error(`${to} already exists`);
+      } else if (files.get(from) !== before) {
+        throw new Error(`${from}: file changed`);
+      }
+      const parents = [];
+      for (let parent = parentPath(to); parent !== root; parent = parentPath(parent)) {
+        if (isFile(parent)) throw new Error(`Not a directory: ${parent}`);
+        if (isDirectory(parent)) break;
+        parents.push(parent);
+      }
+      for (const parent of parents) directories.add(parent);
+      if (before !== undefined) {
+        await this.applyDocumentEdit({ from, to, before, after });
+      } else {
+        files.set(to, after);
+        notify(to);
+      }
+    },
     async rename(from, to) {
       if (!exists(from)) throw new Error(`No such file or directory: ${from}`);
       if (exists(to)) throw new Error(`${to} already exists`);

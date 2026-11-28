@@ -95,6 +95,16 @@ export interface WritingRequest {
   readonly history?: readonly WritingTurn[];
   readonly responseFormat?: "replacement" | "draft";
   readonly sourcePassages?: true;
+  readonly folderDocuments?: readonly TaskCopyDocument[];
+}
+
+export interface TaskCopyDocument {
+  readonly path: string;
+  readonly text: string;
+}
+
+export interface TaskCopyChange extends TaskCopyDocument {
+  readonly from?: string;
 }
 
 export interface WritingAnnotation {
@@ -109,6 +119,7 @@ export interface WritingReply {
   readonly text: string;
   readonly taskCopy?: string | null;
   readonly ignoredChanges?: boolean;
+  readonly fileChanges?: readonly TaskCopyChange[];
   readonly finishReason?: string | null;
 }
 

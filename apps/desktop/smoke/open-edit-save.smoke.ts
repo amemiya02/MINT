@@ -3983,12 +3983,14 @@ if (prompt.instruction === ${JSON.stringify(cancelInstruction)}) {
   await clickSettingsButton("Close");
 });
 
-test("a Codex task copy exposes approved files and applies only its manuscript diff", async () => {
+test("Codex provides manuscript and folder reviews from approved task copies", async () => {
   const codex = process.env.MINT_SMOKE_CODEX;
   assert.ok(codex, "the hosted smoke job provisions the Codex CLI sandbox");
   const fixture = await mkdtemp(join(dir, "agent-task-copy-"));
   const draft = join(fixture, "manuscript.md");
   const sibling = join(fixture, "unapproved.md");
+  const index = join(fixture, "index.md");
+  const old = join(fixture, "old.md");
   const executable = join(fixture, "fixture-codex");
   const initial = "First paragraph.  \r\n\r\nOriginal.\r\n";
   const unsaved = initial.replace("Original.", "Original. Unsaved note.");
@@ -3996,6 +3998,8 @@ test("a Codex task copy exposes approved files and applies only its manuscript d
   const approved = "Only the approved passage.";
   await writeFile(draft, initial);
   await writeFile(sibling, "Private text.");
+  await writeFile(index, "[Old](old.md#section)\n");
+  await writeFile(old, "## Section\n");
   await writeFile(
     executable,
     `#!/usr/bin/env node
@@ -4010,7 +4014,25 @@ const prompt = JSON.parse(fs.readFileSync(0, "utf8"));
 const config = args.flatMap((arg, i) =>
   arg === "-c" && args[i + 1].startsWith("permissions.") ? ["-c", args[i + 1]] : []);
 const sample = prompt.instruction.startsWith("Suggest one concise rewrite");
-const shell = sample ? ${JSON.stringify(`set -eu
+const folder = prompt.folderDocuments !== undefined;
+if (folder && JSON.stringify(prompt.folderDocuments) !== JSON.stringify([
+  "documents/index.md", "documents/manuscript.md", "documents/old.md",
+])) process.exit(11);
+const shell = folder ? ${JSON.stringify(`set -eu
+test "$(ls -a)" = "$(printf '.\n..\ndocuments')"
+test "$(ls documents)" = "$(printf 'index.md\nmanuscript.md\nold.md')"
+printf '%s' "$6" > expected.txt
+cmp documents/manuscript.md expected.txt
+rm expected.txt
+if cat "$1" >/dev/null 2>&1 || cat "$2" >/dev/null 2>&1; then exit 9; fi
+if (printf 'outside write' > "$1") 2>/dev/null || (printf 'outside write' > "$2") 2>/dev/null; then exit 10; fi
+mkdir documents/chapter
+mv documents/old.md documents/chapter/renamed.md
+printf '%s' '[{"from":"old.md","to":"chapter/renamed.md"}]' > moves.json
+printf '%s\n' '# Notes' > documents/notes.md
+printf '%s\n' '[Old](chapter/renamed.md#section) · [Notes](notes.md)' > documents/index.md
+printf '%s' "$7" > documents/manuscript.md
+`)} : sample ? ${JSON.stringify(`set -eu
 test "$(cat draft.md)" = "We are currently in the process of reviewing the draft."
 printf '%s' "We are reviewing the draft." > draft.md
 `)} : ${JSON.stringify(`set -eu
@@ -4030,6 +4052,8 @@ const result = spawnSync(codex, [
   "--cd", process.cwd(), "--", "/bin/sh", "-c", shell, "fixture",
   ${JSON.stringify(draft)}, ${JSON.stringify(sibling)}, ${JSON.stringify(approved)},
   ${JSON.stringify(unsaved)}, ${JSON.stringify(changed)},
+  ${JSON.stringify(changed.replace("Unsaved note.", "Unsaved note. New note."))},
+  ${JSON.stringify(changed.replace("Revised.", "Folder revision.").replace("Unsaved note.", "Unsaved note. New note."))},
 ], { stdio: "inherit" });
 if (result.status !== 0) process.exit(result.status ?? 1);
 console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "Edited task copy." } }));
@@ -4038,7 +4062,7 @@ console.log(JSON.stringify({ type: "turn.completed" }));
     { mode: 0o700 },
   );
 
-  await restart([draft]);
+  await restart([fixture, draft]);
   await openSettings();
   const autosave = await command<boolean>("POST", `/session/${session}/execute/sync`, {
     script: `return Boolean([...document.querySelectorAll('dialog[open] label')]
@@ -4229,9 +4253,82 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   );
   assert.deepEqual((await readdir(fixture)).sort(), [
     "fixture-codex",
+    "index.md",
     "manuscript.md",
+    "old.md",
     "unapproved.md",
   ]);
+  assert.equal(await readFile(sibling, "utf8"), "Private text.");
+
+  await clickPath(
+    "//div[contains(@class,'cm-line') and normalize-space(.)='Revised. Unsaved note.']",
+  );
+  await keyActions([...typing(keys.end), ...typing(" New note.")]);
+  await nativeShortcut("ctrl+shift+p");
+  await waitForView(
+    "the folder command to receive focus",
+    `return document.activeElement?.matches('dialog[aria-label="Command Palette"] input');`,
+  );
+  await keyActions(typing("Ask AI about working folder"));
+  await shows("Ask AI about working folder");
+  await keyActions(typing(keys.enter));
+  const assistant = "//aside[@aria-label='Writing Assistant']";
+  await waitForView(
+    "the working-folder Codex recipient to load",
+    `return [...document.querySelectorAll('aside[aria-label="Writing Assistant"] option')]
+      .some(option => option.textContent === ${JSON.stringify(`Codex · ${executable}`)});`,
+  );
+  await select("Recipient", `Codex · ${executable}`);
+  await waitForView(
+    "the folder task-copy document checklist",
+    `return [...document.querySelectorAll('aside[aria-label="Writing Assistant"] label')]
+      .some(label => label.textContent.trim() === "manuscript.md");`,
+  );
+  for (const path of ["manuscript.md", "index.md", "old.md"]) {
+    await clickPath(`${assistant}//label[normalize-space(.)='${path}']/input[@type='checkbox']`);
+  }
+  await clickPath(`${assistant}//label[normalize-space(.)='Instruction']/input`);
+  await keyActions([...typing("Organize these documents."), ...typing(keys.enter)]);
+  await shows("Requires chapter/renamed.md, notes.md");
+  await shows("Folder revision. Unsaved note. New note.");
+  assert.equal(await readFile(draft, "utf8"), changed);
+  assert.equal(await readFile(index, "utf8"), "[Old](old.md#section)\n");
+  assert.equal(await readFile(old, "utf8"), "## Section\n");
+  assert.deepEqual((await readdir(fixture)).sort(), [
+    "fixture-codex",
+    "index.md",
+    "manuscript.md",
+    "old.md",
+    "unapproved.md",
+  ]);
+  const apply = (label: string) =>
+    `${assistant}//fieldset[@aria-label='${label}']//button[normalize-space(.)='Apply proposed edit']`;
+  await clickPath(apply("Create notes.md"));
+  await until(
+    "the new notes to be written",
+    async () => (await readFile(join(fixture, "notes.md"), "utf8")) === "# Notes\n" || null,
+  );
+  assert.equal(await readFile(index, "utf8"), "[Old](old.md#section)\n");
+  await clickPath(apply("Move and rename old.md → chapter/renamed.md"));
+  const newPath = join(fixture, "chapter", "renamed.md");
+  await until(
+    "the chapter to be moved",
+    async () => (await readFile(newPath, "utf8")) === "## Section\n" || null,
+  );
+  await assert.rejects(readFile(old), { code: "ENOENT" });
+  await waitForView(
+    "the backlink to become available after its dependencies",
+    `return [...document.querySelectorAll('fieldset[aria-label="Modify index.md"] button')]
+      .some(button => button.textContent.trim() === "Apply proposed edit" && !button.disabled);`,
+  );
+  await clickPath(apply("Modify index.md"));
+  await until(
+    "the backlink to be written",
+    async () =>
+      (await readFile(index, "utf8")) ===
+        "[Old](chapter/renamed.md#section) · [Notes](notes.md)\n" || null,
+  );
+  assert.equal(await readFile(draft, "utf8"), changed);
   assert.equal(await readFile(sibling, "utf8"), "Private text.");
   await invokeNative("forget_external_agent", { path: executable });
 });
