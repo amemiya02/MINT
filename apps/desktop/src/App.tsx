@@ -720,9 +720,8 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
                 onClose={() => setFind(null)}
               />
             )}
-            <WritingTasks tasks={writingTasks} activeId={activeId} />
             <main
-              className={`grid min-h-0 flex-1 grid-rows-1 ${selected.reference === null ? "grid-cols-1" : "grid-cols-2"}`}
+              className={`relative grid min-h-0 flex-1 grid-rows-1 ${selected.reference === null ? "grid-cols-1" : "grid-cols-2"}`}
             >
               {tabs.map((tab) => (
                 <TabPanel
@@ -796,6 +795,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
                   onOpenFolder={(path) => void openFolder(path)}
                 />
               )}
+              <WritingTasks tasks={writingTasks} activeId={activeId} />
             </main>
             {active && (
               <StatusBar

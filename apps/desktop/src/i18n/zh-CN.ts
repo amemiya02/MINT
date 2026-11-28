@@ -2,6 +2,7 @@ import type { Messages } from "./index.ts";
 
 export const zhCN: Messages = {
   "writing.tasks": "写作任务",
+  "writing.task.materials": "任务材料",
   "writing.task.open": "打开 {name} 的任务",
   "writing.task.working": "正在生成",
   "writing.task.approval": "等待授权",

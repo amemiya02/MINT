@@ -278,7 +278,7 @@ function ExternalAgentPanel({
           setAgent(connection);
           setSaved((list) => [connection, ...list.filter((item) => item.path !== connection.path)]);
         }
-        signal?.throwIfAborted();
+        if (signal?.aborted) throw "stopped";
         const result = await externalAgentSender(
           platform,
           connection,

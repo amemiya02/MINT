@@ -7,14 +7,14 @@ import { type ExternalAgent, externalAgentSender } from "./external-agent.ts";
 import { MaterialRequestNotice, useMaterialRequests } from "./MaterialRequest.tsx";
 import { modelEndpoint, modelWritingSender, type SavedModelConnection } from "./model.ts";
 import { TaskContextChecklist, useNamedMaterials } from "./TaskContext.tsx";
-import { useWritingTask } from "./WritingTasks.tsx";
+import { useWritingTask, WritingTaskMaterials } from "./WritingTasks.tsx";
 import {
   type AttemptStatus,
   failureStatus,
   replyStatus,
   writingMaterialNames,
 } from "./writing-attempt.ts";
-import type { WritingRequest, WritingSender } from "./writing-sender.ts";
+import type { NamedMaterial, WritingRequest, WritingSender } from "./writing-sender.ts";
 
 const field =
   "w-full rounded-md border border-(--mint-border) bg-(--mint-bg) px-2 py-1 focus-visible:outline-2 focus-visible:outline-(--mint-accent)";
@@ -37,7 +37,7 @@ interface DraftAttempt {
   readonly connection: DraftConnection;
   readonly status: AttemptStatus;
   readonly partial: string;
-  readonly approved: readonly string[];
+  readonly approved: readonly NamedMaterial[];
 }
 
 export function DraftComposer({
@@ -205,7 +205,7 @@ export function DraftComposer({
     controller.current = running;
     const entry = { task, connection };
     let partial = "";
-    let approved: string[] = [];
+    let approved: NamedMaterial[] = [];
     let status: AttemptStatus;
     setError(null);
     setRetryId("");
@@ -228,7 +228,7 @@ export function DraftComposer({
             setAttempt({ ...entry, approved, partial, status: "approval" });
           },
           onResume(decision) {
-            if (decision?.outcome === "allowed") approved = [...approved, decision.material.name];
+            if (decision?.outcome === "allowed") approved = [...approved, decision.material];
             if (!signal.aborted) setAttempt({ ...entry, approved, partial, status: "working" });
           },
         },
@@ -279,7 +279,7 @@ export function DraftComposer({
         material: [
           t("writing.scope.untitled"),
           ...writingMaterialNames(attempt.task.request),
-          ...attempt.approved,
+          ...attempt.approved.map(({ name }) => name),
           ...(pending ? [pending.name] : []),
         ].join(" · "),
         status: attempt.status,
@@ -451,6 +451,13 @@ export function DraftComposer({
         />
       ) : (
         busy && <p role="status">{t("draft.generating")}</p>
+      )}
+      {attempt && (
+        <WritingTaskMaterials
+          request={attempt.task.request}
+          approved={attempt.approved}
+          folder={attempt.task.folder}
+        />
       )}
       {busy && (
         <button type="button" className={button} onClick={() => controller.current?.abort()}>

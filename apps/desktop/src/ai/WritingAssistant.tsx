@@ -8,7 +8,7 @@ import { type EditStatus, ProposedSelectionEdit } from "./ProposedSelectionEdit.
 import { ReplyExcerpt } from "./ReplyExcerpt.tsx";
 import { type SelectionEdit, selectionEdits } from "./selection-edits.ts";
 import { TaskContextChecklist, useNamedMaterials } from "./TaskContext.tsx";
-import { useWritingTask } from "./WritingTasks.tsx";
+import { useWritingTask, WritingTaskMaterials } from "./WritingTasks.tsx";
 import {
   type AttemptStatus,
   failureStatus,
@@ -18,6 +18,7 @@ import {
 import { loadWritingRecipients, type WritingRecipient } from "./writing-recipients.ts";
 import { captureWritingSelection, type WritingSelection } from "./writing-selection.ts";
 import {
+  type NamedMaterial,
   replacementFromReply,
   splitWritingProgress,
   type WritingRequest,
@@ -57,7 +58,7 @@ interface Attempt {
   readonly recipient: string;
   readonly status: AttemptStatus;
   readonly partial: string;
-  readonly approved: readonly string[];
+  readonly approved: readonly NamedMaterial[];
 }
 
 interface Turn extends WritingTurn {
@@ -602,7 +603,7 @@ function Composer({
     const entry = { task, recipientId: connection.id, recipient };
     const editing = task.action !== "comment";
     let text = "";
-    let approved: string[] = [];
+    let approved: NamedMaterial[] = [];
     let status: AttemptStatus;
     let finalReplacement: string | undefined;
     setRetryId("");
@@ -623,7 +624,7 @@ function Composer({
           },
           onResume: (decision) => {
             text = "";
-            if (decision?.outcome === "allowed") approved = [...approved, decision.material.name];
+            if (decision?.outcome === "allowed") approved = [...approved, decision.material];
             if (!signal.aborted) setAttempt({ ...entry, approved, status: "working", partial: "" });
           },
           onDelta: (delta) => {
@@ -736,7 +737,7 @@ function Composer({
     ? [
         t(`writing.scope.${task.scope}`),
         ...writingMaterialNames(task.request),
-        ...(attempt?.approved ?? []),
+        ...(attempt?.approved.map(({ name }) => name) ?? []),
         ...(materialRequests.pending ? [materialRequests.pending.name] : []),
       ].join(" · ")
     : "";
@@ -863,6 +864,13 @@ function Composer({
             {origin.text}
           </pre>
         </>
+      )}
+      {sidebar && attempt && (
+        <WritingTaskMaterials
+          request={attempt.task.request}
+          approved={attempt.approved}
+          folder={attempt.task.searchFolder}
+        />
       )}
       {messages.some((turn) => turn.suggestions?.length) && (
         <label className="flex items-center gap-1">
@@ -1184,8 +1192,8 @@ function Composer({
           pending={materialRequests.pending}
           platform={platform}
           onDecision={(decision) => {
-            if (!sidebar && active && action === "direct") origin.editor.focus();
             materialRequests.decide(decision);
+            if (active && attempt?.task.action === "direct") origin.editor.focus();
           }}
         />
       )}

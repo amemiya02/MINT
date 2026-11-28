@@ -91,11 +91,11 @@ export function useMaterialRequests() {
       const id = ++sequence.current;
       let outbound = request;
       while (true) {
-        options?.signal?.throwIfAborted();
+        if (options?.signal?.aborted) throw "stopped";
         const reply = await send(outbound, options);
         const extra = requestedMaterial(reply);
         if (!extra) return reply;
-        options?.signal?.throwIfAborted();
+        if (options?.signal?.aborted) throw "stopped";
         // A skipped or supplied request is already resolved for this task.
         const previous = outbound.taskContext?.materialDecisions ?? [];
         if (id !== sequence.current || previous.some(({ name }) => name === extra.name))

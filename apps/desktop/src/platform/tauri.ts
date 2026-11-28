@@ -67,7 +67,7 @@ function writingCancellation(signal?: AbortSignal) {
 }
 
 const sendTauriModelMessage = createModelSender(async (request, receive, signal) => {
-  signal?.throwIfAborted();
+  if (signal?.aborted) throw "stopped";
   const cancellation = writingCancellation(signal);
   let finish: (error: number | string | null) => void = () => {};
   const completed = new Promise<number | string | null>((resolve) => {
@@ -111,7 +111,7 @@ export function createTauriPlatform(): Platform {
       async send({ path, revision }, access, request, options) {
         const args = { path, revision, access, request };
         if (!options) return invoke("send_external_agent", args);
-        options.signal?.throwIfAborted();
+        if (options.signal?.aborted) throw "stopped";
         const cancellation = writingCancellation(options.signal);
         type AgentEvent =
           | { kind: "started" }

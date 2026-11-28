@@ -106,6 +106,10 @@ test("a background edit keeps complete suggestions and partial replies across st
     await tasks.getByRole("button", { name: "Open task for origin.md" }).click();
     const conversation = page.getByRole("complementary", { name: "Writing Assistant" });
     await expect(conversation.getByText(partial.trim(), { exact: true })).toBeVisible();
+    const materials = conversation.getByRole("group", { name: "Task materials" });
+    await materials.getByText("Task materials", { exact: true }).click();
+    await materials.getByText("Current selection", { exact: true }).click();
+    await expect(materials.getByText(original, { exact: true })).toBeVisible();
     await expect(editor).toHaveText(original);
     await conversation.getByRole("button", { name: "Apply proposed edit" }).click();
     await expect(editor).toHaveText("It was a slow start.");

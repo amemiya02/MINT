@@ -1,6 +1,7 @@
 /** English UI strings. This is the reference catalogue: every locale must provide the same keys. */
 export const en = {
   "writing.tasks": "Writing tasks",
+  "writing.task.materials": "Task materials",
   "writing.task.open": "Open task for {name}",
   "writing.task.working": "Generating",
   "writing.task.approval": "Waiting for approval",
