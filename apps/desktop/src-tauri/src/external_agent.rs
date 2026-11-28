@@ -16,6 +16,8 @@ use std::time::{Duration, Instant};
 use tauri::ipc::{Channel, JavaScriptChannelId};
 use tauri::{AppHandle, Manager, WebviewWindow};
 
+mod task_copy;
+
 const REGISTRY: &str = "external-agents.json";
 const POLICY_REVISION: &str = "codex-exec-1";
 static REGISTRY_LOCK: Mutex<()> = Mutex::new(());
@@ -26,12 +28,14 @@ const TIMEOUT: Duration = Duration::from_secs(120);
 const UNAVAILABLE: &str = "agentUnavailable";
 const CHANGED: &str = "agentChanged";
 const ACCESS_REQUIRED: &str = "agentAccessRequired";
+const SANDBOX_UNAVAILABLE: &str = "agentTaskCopyUnavailable";
 const FAILED: &str = "agentFailed";
 
 #[derive(Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AgentAccess {
     ReadOnly,
+    TaskCopy,
     Configured,
 }
 
@@ -39,6 +43,8 @@ pub enum AgentAccess {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WritingRequest {
     instruction: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    task_copy: Option<task_copy::Mode>,
     #[serde(skip_serializing_if = "Option::is_none")]
     selected_text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -128,8 +134,13 @@ struct WritingTurn {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WritingReply {
     text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    task_copy: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ignored_changes: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -153,6 +164,8 @@ pub struct ExternalAgent {
     approved: Vec<AgentAccess>,
     verified: Vec<AgentAccess>,
     preferred_access: AgentAccess,
+    #[serde(default)]
+    supports_task_copy: bool,
 }
 
 fn inspect(path: &Path) -> Result<ExternalAgent, String> {
@@ -205,6 +218,7 @@ fn inspect(path: &Path) -> Result<ExternalAgent, String> {
         approved: Vec::new(),
         verified: Vec::new(),
         preferred_access: AgentAccess::ReadOnly,
+        supports_task_copy: task_copy::SUPPORTED,
     })
 }
 
@@ -291,7 +305,10 @@ pub async fn saved_external_agents(app: AppHandle) -> Result<Vec<ExternalAgent>,
             .into_iter()
             .map(|stored| match inspect(&stored.path) {
                 Ok(current) if current.revision != stored.revision => current,
-                _ => stored,
+                _ => ExternalAgent {
+                    supports_task_copy: task_copy::SUPPORTED,
+                    ..stored
+                },
             })
             .collect())
     })
@@ -314,6 +331,9 @@ pub async fn approve_external_agent(
     access: AgentAccess,
 ) -> Result<ExternalAgent, String> {
     blocking(move || {
+        if access == AgentAccess::TaskCopy && !task_copy::SUPPORTED {
+            return Err(SANDBOX_UNAVAILABLE.to_owned());
+        }
         let mut current = inspect(&path)?;
         same_revision(&current, &revision)?;
         update_registry(&app, |records| {
@@ -382,7 +402,14 @@ pub(crate) async fn send_external_agent(
         if !current.approved.contains(&access) {
             return Err(ACCESS_REQUIRED.to_owned());
         }
-        let scratch = crate::writing_tasks::agent_scratch(&app, task_id.as_deref())
+        let task_copy = access == AgentAccess::TaskCopy;
+        if task_copy && !task_copy::SUPPORTED {
+            return Err(SANDBOX_UNAVAILABLE.to_owned());
+        }
+        if !task_copy && request.task_copy.is_some() {
+            return Err(ACCESS_REQUIRED.to_owned());
+        }
+        let scratch = crate::writing_tasks::agent_scratch(&app, task_id.as_deref(), task_copy)
             .map_err(|_| FAILED.to_owned())?;
         let reply = run_codex(
             &current.path,
@@ -401,7 +428,9 @@ pub(crate) async fn send_external_agent(
                     && stored.approved.contains(&access)
             }) {
                 let mut stored = records.remove(index);
-                if !stored.verified.contains(&access) {
+                if (access != AgentAccess::TaskCopy || reply.task_copy.is_some())
+                    && !stored.verified.contains(&access)
+                {
                     stored.verified.push(access);
                 }
                 stored.preferred_access = access;
@@ -446,13 +475,33 @@ fn run_codex(
     if request.instruction.trim().is_empty() {
         return Err(failed());
     }
-    let private = scratch.private_spool().map_err(|_| failed())?;
+    let file_access = access == AgentAccess::TaskCopy;
+    let private = scratch.private_spool(file_access).map_err(|_| failed())?;
+    let workspace = fs::canonicalize(scratch.path()).map_err(|_| failed())?;
+    let (copy, input) = if file_access {
+        let spool = fs::canonicalize(private.path()).map_err(|_| failed())?;
+        task_copy::verify(
+            codex_command(path, &paths, true),
+            &workspace,
+            &spool,
+            stopped,
+        )?;
+        match request.task_copy {
+            Some(mode) => {
+                let (copy, input) = task_copy::TaskCopy::stage(&workspace, request, mode)?;
+                (Some(copy), input)
+            }
+            None => (None, input),
+        }
+    } else {
+        (None, input)
+    };
     // Independent offsets allow live reads. Keep the spool outside the Agent task copy.
     let stdin = temporary_input(&input, private.path()).map_err(|_| failed())?;
     let output = tempfile::NamedTempFile::new_in(private.path()).map_err(|_| failed())?;
     let stdout = output.reopen().map_err(|_| failed())?;
     let mut reader = BufReader::new(output.reopen().map_err(|_| failed())?);
-    let mut command = Command::new(path);
+    let mut command = codex_command(path, &paths, file_access);
     command.args([
         "--ask-for-approval",
         "never",
@@ -461,7 +510,9 @@ fn run_codex(
         "--ephemeral",
         "--skip-git-repo-check",
     ]);
-    if access == AgentAccess::ReadOnly {
+    if file_access {
+        task_copy::configure(&mut command, path)?;
+    } else if access == AgentAccess::ReadOnly {
         command.args([
             "--sandbox",
             "read-only",
@@ -469,21 +520,12 @@ fn run_codex(
             "--ignore-rules",
         ]);
     }
-    if let Ok(path_env) = env::join_paths(paths) {
-        command.env("PATH", path_env);
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
     if stopped.load(Ordering::Relaxed) {
         return Err("stopped".to_owned());
     }
     let mut child = command
         .arg("-")
-        .current_dir(scratch.path())
+        .current_dir(workspace.as_path())
         .stdin(Stdio::from(stdin))
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::null())
@@ -506,7 +548,10 @@ fn run_codex(
             Err(error) => break Err(error),
             Ok(Some(status)) => {
                 break match output.text {
-                    Some(text) if status.success() && output.completed => Ok(WritingReply { text }),
+                    Some(text) if status.success() && output.completed => Ok(text),
+                    None if status.success() && output.completed && copy.is_some() => {
+                        Ok(String::new())
+                    }
                     Some(_) => Err("interrupted".to_owned()),
                     None => Err(failed()),
                 };
@@ -514,11 +559,54 @@ fn run_codex(
             Ok(None) => std::thread::sleep(Duration::from_millis(40)),
         }
     };
-    if result.is_err() {
-        let _ = child.kill();
-        let _ = child.wait();
+    if file_access || result.is_err() {
+        stop_child(&mut child, file_access);
     }
-    result
+    let text = result?;
+    let (task_copy, ignored) = match copy {
+        Some(copy) => copy.result()?,
+        None => (None, false),
+    };
+    Ok(WritingReply {
+        text,
+        task_copy,
+        ignored_changes: ignored.then_some(true),
+    })
+}
+
+fn codex_command(path: &Path, paths: &[PathBuf], isolate_children: bool) -> Command {
+    let mut command = Command::new(path);
+    if let Ok(path_env) = env::join_paths(paths) {
+        command.env("PATH", path_env);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(unix)]
+    if isolate_children {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    #[cfg(not(unix))]
+    let _ = isolate_children;
+    command
+}
+
+fn stop_child(child: &mut std::process::Child, isolate_children: bool) {
+    #[cfg(unix)]
+    if isolate_children {
+        // The child started a separate process group. Stop its sandbox/tool descendants too.
+        if let Ok(group) = i32::try_from(child.id()) {
+            unsafe { libc::kill(-group, libc::SIGKILL) };
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = isolate_children;
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 #[derive(Default)]

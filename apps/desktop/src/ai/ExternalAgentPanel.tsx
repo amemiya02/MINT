@@ -37,11 +37,10 @@ export function ExternalAgentAccessNotice({ access }: { readonly access: AgentAc
   return (
     <>
       <p>
-        {t("agent.processAccess")}{" "}
-        {t(access === "readOnly" ? "agent.readOnlyAccess" : "agent.configuredAccess")}
+        {t("agent.processAccess")} {t(`agent.${access}Access`)}
       </p>
-      <p>{t("agent.tools")}</p>
-      <p>{t("agent.usesLogin")}</p>
+      <p>{t(access === "taskCopy" ? "agent.taskCopyTools" : "agent.tools")}</p>
+      <p>{t(access === "taskCopy" ? "agent.taskCopyLogin" : "agent.usesLogin")}</p>
       <p>{t("agent.retention")}</p>
     </>
   );
@@ -328,7 +327,13 @@ function ExternalAgentPanel({
         if (agent) select(await platform.inspect(agent.path).catch(() => null), access);
         setError("agent.reviewAgain");
       } else {
-        setError(code === "agentUnavailable" ? "agent.unavailable" : "agent.failed");
+        setError(
+          code === "agentTaskCopyUnavailable"
+            ? "agent.taskCopyUnavailable"
+            : code === "agentUnavailable"
+              ? "agent.unavailable"
+              : "agent.failed",
+        );
       }
     } finally {
       setBusy(false);
@@ -402,11 +407,15 @@ function ExternalAgentPanel({
         const verified = {
           ...connection,
           preferredAccess: access,
-          verified: [...new Set([...connection.verified, access])],
+          verified:
+            access !== "taskCopy" ||
+            (result.taskCopy != null && result.taskCopy !== request.selectedText)
+              ? [...new Set([...connection.verified, access])]
+              : connection.verified,
         };
         setAgent(verified);
         setSaved((list) => [verified, ...list.filter((item) => item.path !== verified.path)]);
-        setReply(result.text);
+        setReply(result.taskCopy ?? result.text);
         target?.record(entry.id, {
           instruction: request.instruction,
           material: request.selectedText,
@@ -520,6 +529,10 @@ function ExternalAgentPanel({
               const request = {
                 instruction: selection === undefined ? sampleInstruction : instruction.trim(),
                 selectedText: material,
+                responseFormat:
+                  access === "taskCopy" && selection === undefined
+                    ? ("replacement" as const)
+                    : undefined,
                 taskContext: named.entries.length
                   ? { materials: named.entries.map(({ material }) => material) }
                   : undefined,
@@ -546,13 +559,16 @@ function ExternalAgentPanel({
                 disabled={busy}
                 onChange={(event) => {
                   picker.clear();
-                  setAccess(event.target.value === "configured" ? "configured" : "readOnly");
+                  setAccess(event.target.value as AgentAccess);
                   setReply("");
                   setStatus(null);
                   setError(null);
                 }}
               >
                 <option value="readOnly">{t("agent.readOnly")}</option>
+                {(agent.supportsTaskCopy || access === "taskCopy") && (
+                  <option value="taskCopy">{t("agent.taskCopy")}</option>
+                )}
                 <option value="configured">{t("agent.configured")}</option>
               </select>
             </label>
@@ -608,8 +624,20 @@ function ExternalAgentPanel({
                   : t(selection === undefined ? "agent.try" : "agent.send")}
               </button>
             </div>
-            <p>{t(agent.verified.includes(access) ? "agent.verified" : "agent.unverified")}</p>
-            <p className="text-(--mint-muted)">{t("agent.unsupported")}</p>
+            <p>
+              {t(
+                access === "taskCopy"
+                  ? agent.verified.includes(access)
+                    ? "agent.taskCopyVerified"
+                    : "agent.taskCopyUnverified"
+                  : agent.verified.includes(access)
+                    ? "agent.verified"
+                    : "agent.unverified",
+              )}
+            </p>
+            <p className="text-(--mint-muted)">
+              {t(access === "taskCopy" ? "agent.taskCopySingle" : "agent.unsupported")}
+            </p>
           </form>
         )}
       </fieldset>
@@ -621,7 +649,7 @@ function ExternalAgentPanel({
           <p>
             {t("agent.consent", {
               path: agent.path,
-              access: t(access === "readOnly" ? "agent.readOnly" : "agent.configured"),
+              access: t(`agent.${access}`),
             })}
           </p>
           <div className="flex flex-wrap gap-2">

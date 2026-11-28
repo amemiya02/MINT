@@ -18,6 +18,7 @@ export function memoryExternalAgent(
       agents.get(path) ?? {
         path,
         revision: path,
+        supportsTaskCopy: true,
         approved: [],
         verified: [],
         preferredAccess: "readOnly",
@@ -65,7 +66,11 @@ export function memoryExternalAgent(
         agents.set(path, {
           ...saved,
           preferredAccess: access,
-          verified: [...new Set([...saved.verified, access])],
+          verified:
+            access !== "taskCopy" ||
+            (reply.taskCopy !== undefined && reply.taskCopy !== request.selectedText)
+              ? [...new Set([...saved.verified, access])]
+              : saved.verified,
         });
       }
       return reply;

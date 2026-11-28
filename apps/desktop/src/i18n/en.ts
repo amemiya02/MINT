@@ -319,6 +319,18 @@ export const en = {
   "agent.recipient": "Recipient · Codex · {path}",
   "agent.access": "Agent permissions",
   "agent.readOnly": "Codex read-only shell",
+  "agent.taskCopy": "Codex task copy",
+  "agent.taskCopyAccess":
+    "Codex tools can edit the task copy and read the files it contains, plus the runtime files they need. Before sending, MINT checks that a tool can read and write inside the copy and is denied access to a test file beside it.",
+  "agent.taskCopyTools":
+    "MINT skips your Codex configuration and rules and requests no network access for local commands.",
+  "agent.taskCopyLogin": "Codex uses its existing login and sends task content to its provider.",
+  "agent.taskCopyVerified": "Task copy editing verified",
+  "agent.taskCopyUnverified": "Task copy editing unverified",
+  "agent.taskCopySingle": "Task copy editing applies to one manuscript at a time.",
+  "agent.taskCopyIgnored": "Other changes in the task copy were discarded.",
+  "agent.taskCopyUnavailable":
+    "Codex could not verify the task copy sandbox. Update Codex or choose a different connection.",
   "agent.configured": "Use Codex’s configured permissions",
   "agent.processAccess": "MINT launches this executable with your account’s file access.",
   "agent.readOnlyAccess":

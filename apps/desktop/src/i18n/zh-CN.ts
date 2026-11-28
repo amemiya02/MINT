@@ -302,6 +302,16 @@ export const zhCN: Messages = {
   "agent.recipient": "接收方 · Codex · {path}",
   "agent.access": "Agent 权限",
   "agent.readOnly": "Codex 只读 Shell",
+  "agent.taskCopy": "Codex 任务副本",
+  "agent.taskCopyAccess":
+    "Codex 工具可以编辑任务副本、读取副本中的文件和所需的运行时文件。发送前，MINT 会验证工具可以读写副本内的文件，且无法访问副本旁的测试文件。",
+  "agent.taskCopyTools": "MINT 跳过 Codex 用户配置和规则，并禁止本地命令联网。",
+  "agent.taskCopyLogin": "Codex 沿用现有登录并将任务内容发送给其服务提供方。",
+  "agent.taskCopyVerified": "任务副本改稿已验证",
+  "agent.taskCopyUnverified": "任务副本改稿待验证",
+  "agent.taskCopySingle": "每个任务副本只支持修改一篇稿件。",
+  "agent.taskCopyIgnored": "已丢弃任务副本中的其他改动。",
+  "agent.taskCopyUnavailable": "无法验证 Codex 的任务副本沙盒。请更新 Codex 或选择其他连接。",
   "agent.configured": "沿用 Codex 已配置的权限",
   "agent.processAccess": "MINT 以当前系统账户的文件访问权限启动此程序。",
   "agent.readOnlyAccess":

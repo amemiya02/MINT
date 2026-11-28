@@ -272,6 +272,7 @@ export function DraftComposer({
         request: {
           instruction: t("draft.prompt", { instruction: instruction.trim() }),
           taskContext: capacity.plan.contexts[0],
+          responseFormat: "draft",
         },
         folder: searchFolder,
       },
@@ -329,9 +330,10 @@ export function DraftComposer({
             setAttempt({ ...entry, approved, partial, status: "working" });
           },
           mapBatchReply(reply, context) {
+            if (reply.taskCopy === null) throw "invalidReply";
             if (replyStatus(reply) !== "complete")
               return readingSources ? { ...reply, text: draftText(reply.text) } : reply;
-            const result = readDraftPassages(reply.text, context);
+            const result = readDraftPassages(reply.text, context, reply.taskCopy);
             if (!result.text.trim()) throw "invalidReply";
             for (const passage of result.passages)
               passages.push({ ...passage, from: passage.from + nextOffset });
@@ -368,6 +370,7 @@ export function DraftComposer({
             recipient: connection.label,
             recipientId: connection.id,
             direct: inserted,
+            ignoredChanges: reply.ignoredChanges,
             toolOutcome: toolApproval.result(),
             sourcePassages: passages.length ? passages : undefined,
             status,
@@ -396,9 +399,11 @@ export function DraftComposer({
         setError(
           code === "agentChanged" || code === "agentAccessRequired"
             ? "agent.reviewAgain"
-            : code === "connectionMissing"
-              ? "draft.connectionUnavailable"
-              : "draft.failed",
+            : code === "agentTaskCopyUnavailable"
+              ? "agent.taskCopyUnavailable"
+              : code === "connectionMissing"
+                ? "draft.connectionUnavailable"
+                : "draft.failed",
         );
       }
     }
@@ -662,9 +667,7 @@ export function DraftComposer({
         <WritingToolPicker picker={toolPicker} />
         {agent && (
           <details className="space-y-1 text-xs text-(--mint-muted)">
-            <summary>
-              {t(agent.preferredAccess === "readOnly" ? "agent.readOnly" : "agent.configured")}
-            </summary>
+            <summary>{t(`agent.${agent.preferredAccess}`)}</summary>
             <ExternalAgentAccessNotice access={agent.preferredAccess} />
           </details>
         )}
