@@ -4409,13 +4409,16 @@ if (prompt.instruction === ${JSON.stringify(cancelInstruction)}) {
   await keyActions(typing("Draft one paragraph about the ridge."));
   await addPastedWritingMaterial("A named detail for the Agent.");
   await clickPath("//button[not(@disabled) and normalize-space(.)='Generate draft']");
-  await until("the completed Agent reply in the draft editor", () =>
-    command<boolean>("POST", `/session/${session}/execute/sync`, {
-      script: `return document.querySelector('.cm-content:focus')?.textContent === 'Fixture Agent reply.'
-        && document.querySelector('[role=tab][aria-selected=true]')?.textContent === 'Untitled';`,
-      args: [],
-    }).then((ready) => ready || null),
-  ).catch(explain);
+  // WebKit's :focus also depends on the native window being active.
+  await waitForView(
+    "the completed Agent reply in the draft editor",
+    `const tab = [...document.querySelectorAll('[role=tab][aria-selected=true]')]
+        .find(tab => tab.textContent === 'Untitled');
+      const editor = document.getElementById(tab?.getAttribute('aria-controls'))
+        ?.querySelector('.cm-content');
+      return editor?.isContentEditable && document.activeElement === editor
+        && editor.textContent === 'Fixture Agent reply.';`,
+  );
   const draftCall = JSON.parse((await readFile(calls, "utf8")).trim().split("\n").at(-1) ?? "");
   const { instruction: agentInstruction, ...agentContext } = draftCall.prompt;
   assert.match(
@@ -5251,7 +5254,7 @@ test("changing Codex MCP configuration invalidates native configured consent", a
 
 test("production Codex exec can write only to the native task copy and returns it on Stop", async () => {
   const codex = process.env.MINT_SMOKE_CODEX;
-  const base = process.env.OPENAI_BASE_URL;
+  const base = process.env.MINT_SMOKE_CODEX_BASE_URL;
   const home = process.env.CODEX_HOME;
   assert.ok(codex && base && home, "the hosted smoke provides a native CLI and loopback receiver");
   const endpoint = new URL(base);
@@ -5263,16 +5266,21 @@ test("production Codex exec can write only to the native task copy and returns i
   const revision = "Complete edit waiting for review.";
   await writeFile(manuscript, "Original disk bytes.");
   await writeFile(sibling, "Private material.");
-  await mkdir(home, { recursive: true });
   const auth = join(home, "auth.json");
   await writeFile(auth, JSON.stringify({ OPENAI_API_KEY: "mint-smoke-fixture" }), { mode: 0o600 });
-  let toolOutput = "";
+  let toolOutput: string | undefined;
+  let fixtureFailure: string | undefined;
   let sentTask = "";
   let toolConnected = false;
-  let resolveTool: () => void = () => {};
-  const toolFinished = new Promise<void>((resolve) => {
-    resolveTool = resolve;
-  });
+  type ExecResult = {
+    reply: { taskCopy?: string; finishReason?: string } | null;
+    error: string | null;
+  };
+  const readExecResult = () =>
+    command<ExecResult | null>("POST", `/session/${session}/execute/sync`, {
+      script: "return window.mintExecFixture;",
+      args: [],
+    });
   const receiver = createServer(async (request, response) => {
     const path = new URL(request.url ?? "/", endpoint).pathname;
     if (path === "/tool-network-probe") {
@@ -5292,22 +5300,23 @@ test("production Codex exec can write only to the native task copy and returns i
     let raw = "";
     for await (const part of request) raw += part.toString();
     const body = JSON.parse(raw) as {
+      model: string;
       input: { type: string; call_id?: string; output?: unknown }[];
-      tools: { name?: string }[];
+      tools?: { name?: string }[];
     };
     const result = body.input.find(
       ({ type, call_id }) => type === "function_call_output" && call_id === "mint-containment",
     );
     if (result) {
       toolOutput = JSON.stringify(result.output);
-      resolveTool();
       // Leave the second model call open so Stop interrupts a real exec turn.
       return;
     }
     sentTask = JSON.stringify(body.input);
-    const tool = body.tools.find(({ name }) => name === "exec_command")?.name;
+    const tool = body.tools?.find(({ name }) => name === "exec_command")?.name;
     if (!tool) {
-      response.writeHead(422).end(JSON.stringify(body.tools.map(({ name }) => name)));
+      fixtureFailure = `Codex model ${body.model} did not advertise exec_command.`;
+      response.writeHead(422).end(fixtureFailure);
       return;
     }
     const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
@@ -5372,7 +5381,7 @@ test("production Codex exec can write only to the native task copy and returns i
         });
         window.mintExecFixture = null;
         internals.invoke('send_external_agent', { ...arguments[0], onEvent: '__CHANNEL__:' + event })
-          .catch(error => { window.mintExecFixture = { error: String(error) }; });
+          .catch(error => { window.mintExecFixture = { reply: null, error: String(error) }; });
         return true;`,
       args: [
         {
@@ -5384,20 +5393,22 @@ test("production Codex exec can write only to the native task copy and returns i
         },
       ],
     });
-    await Promise.race([
-      toolFinished,
-      new Promise<never>((_, reject) => {
-        const timer = setTimeout(
-          () => reject(new Error(`Codex tool did not finish. Request: ${sentTask}`)),
-          25_000,
-        );
-        timer.unref();
-      }),
-    ]);
+    await until(
+      "Codex to report its tool result",
+      async () => toolOutput !== undefined || fixtureFailure || (await readExecResult()),
+      25_000,
+    );
+    assert.equal(fixtureFailure, undefined);
+    if (toolOutput === undefined) {
+      assert.fail(
+        `Codex finished before reporting its tool result: ${JSON.stringify(await readExecResult())}`,
+      );
+    }
     assert.match(toolOutput, /MINT_EXEC_BOUNDARY_PASSED/);
     assert.equal(toolConnected, false);
     assert.match(sentTask, /Edit the task copy/);
     assert.doesNotMatch(sentTask, /Private material|Original disk bytes/);
+    assert.ok(!sentTask.includes(input), "the approved draft stays in the task copy");
 
     const runs = join(
       process.env.XDG_DATA_HOME ?? "",
@@ -5411,14 +5422,8 @@ test("production Codex exec can write only to the native task copy and returns i
       assert.equal((await stat(join(runs, name))).mode & 0o077, 0);
     }
     await invokeNative("stop_writing_request", { requestId });
-    const result = await until("the interrupted production Agent reply", () =>
-      command<{ reply?: { taskCopy: string; finishReason: string }; error?: string } | null>(
-        "POST",
-        `/session/${session}/execute/sync`,
-        { script: "return window.mintExecFixture;", args: [] },
-      ),
-    );
-    assert.equal(result.error, undefined);
+    const result = await until("the interrupted production Agent reply", readExecResult);
+    assert.equal(result.error, null);
     assert.equal(result.reply?.finishReason, "stopped");
     assert.equal(result.reply?.taskCopy, revision);
     assert.deepEqual(await readdir(runs), []);

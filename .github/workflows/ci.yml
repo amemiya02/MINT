@@ -198,6 +198,7 @@ jobs:
         working-directory: apps/desktop
         env:
           MINT_APP: ${{ github.workspace }}/apps/desktop/src-tauri/target/debug/mint
+          MINT_SMOKE_CODEX_BASE_URL: http://127.0.0.1:8476/v1
         run: |
           fixture=$(mktemp -d)
           trap 'rm -rf "$fixture"' EXIT
@@ -206,7 +207,18 @@ jobs:
           export XDG_DATA_HOME="$fixture/data" XDG_CONFIG_HOME="$fixture/config"
           export XDG_RUNTIME_DIR="$fixture/runtime" XDG_CACHE_HOME="$fixture/cache"
           unset GNOME_KEYRING_CONTROL GNOME_KEYRING_PID AT_SPI_BUS_ADDRESS
-          mkdir -m 700 "$HOME" "$XDG_RUNTIME_DIR"
+          export CODEX_HOME="$HOME/.codex"
+          mkdir -m 700 "$HOME" "$CODEX_HOME" "$XDG_RUNTIME_DIR"
+          # Codex exec loads system settings even with --ignore-user-config. The
+          # loopback fixture uses the direct exec_command tool schema of gpt-5.2.
+          cat > "$fixture/codex-config.toml" <<EOF
+          openai_base_url = "$MINT_SMOKE_CODEX_BASE_URL"
+          chatgpt_base_url = "$MINT_SMOKE_CODEX_BASE_URL"
+          model = "gpt-5.2"
+          EOF
+          sudo test ! -e /etc/codex/config.toml
+          sudo install -D -m 644 "$fixture/codex-config.toml" /etc/codex/config.toml
+          trap 'sudo rm -f /etc/codex/config.toml; rm -rf "$fixture"' EXIT
           export MINT_SMOKE_CREDENTIAL_POLICY="$fixture/credentials.conf"
           echo '<busconfig/>' > "$MINT_SMOKE_CREDENTIAL_POLICY"
           cat > "$fixture/session.conf" <<EOF
@@ -223,8 +235,9 @@ jobs:
             timeout 15s secret-tool clear mint-smoke setup
             gdbus call --session --dest org.a11y.Bus --object-path /org/a11y/bus --method org.a11y.Bus.GetAddress
             gdbus call --session --dest org.a11y.Bus --object-path /org/a11y/bus --method org.freedesktop.DBus.Properties.Set org.a11y.Status IsEnabled "<true>"
-            # The real Codex exec smoke talks only to the suite’s loopback Responses fixture.
-            export CODEX_HOME="$HOME/.codex" OPENAI_BASE_URL=http://127.0.0.1:8476/v1
+            # Block Codex startup discovery outside the loopback smoke endpoints.
+            export HTTP_PROXY=http://127.0.0.1:1 HTTPS_PROXY=http://127.0.0.1:1
+            export ALL_PROXY=http://127.0.0.1:1 NO_PROXY=127.0.0.1,localhost,::1
             export OPENAI_API_KEY=mint-smoke-fixture
             tauri-driver &
             driver_pid=$!
