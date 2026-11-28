@@ -596,7 +596,10 @@ function Composer({
         </button>
       ) : (
         <form onSubmit={(event) => void submit(event)} className="space-y-2">
-          <fieldset disabled={busy} className="flex min-w-0 flex-col gap-2">
+          <fieldset
+            disabled={busy}
+            className={materialRequests.pending ? "hidden" : "flex min-w-0 flex-col gap-2"}
+          >
             <label className="grid gap-1">
               {t("agent.instruction")}
               <input

@@ -1,5 +1,5 @@
 import { expect, type Locator, test } from "@playwright/test";
-import { launch } from "./memory-platform.ts";
+import { launch, readFile, settingsPath } from "./memory-platform.ts";
 
 const address = "https://materials.example.test/v1";
 const endpoint = `${address}/chat/completions`;
@@ -73,7 +73,7 @@ test("drop and paste two materials, check the send list, and edit the resulting 
 });
 
 for (const decision of ["allow", "skip"] as const) {
-  test(`rewrite a selection and ${decision} a requested folder excerpt`, async ({ page }) => {
+  test(`rewrite a selection and ${decision} requested material`, async ({ page }) => {
     const folder = "/trail";
     const draft = `${folder}/draft.md`;
     const selection = "The gate opens in the morning.";
@@ -101,6 +101,7 @@ for (const decision of ["allow", "skip"] as const) {
     await launch(page, {
       locale: "en-US",
       files: {
+        [settingsPath]: '{"autosave":false}',
         [draft]: `Trail notes.\n\n${selection}`,
         [`${folder}/gate-hours.md`]:
           "Internal contact: do not send.\nThe ridge gate opens at 07:30.\n",
@@ -141,14 +142,15 @@ for (const decision of ["allow", "skip"] as const) {
     await expect(context.getByText("interview.txt", { exact: true })).toBeVisible();
     const folderSearch = context.getByLabel("Allow searching the current working folder");
     await expect(folderSearch).not.toBeChecked();
-    await folderSearch.check();
+    if (decision === "allow") await folderSearch.check();
     await composer.getByRole("textbox", { name: "Instruction", exact: true }).fill(instruction);
     await composer.getByRole("button", { name: "Send", exact: true }).click();
 
     const approval = composer.getByRole("group", { name: "Additional material requested" });
     await expect(approval.getByText("Check the exact opening time.")).toBeVisible();
     const excerpt = approval.getByRole("radio", { name: "gate-hours.md · line 2" });
-    await expect(excerpt).toBeVisible();
+    if (decision === "allow") await expect(excerpt).toBeVisible();
+    else await expect(excerpt).toHaveCount(0);
     await expect(approval.getByText("Outside the folder", { exact: false })).toHaveCount(0);
     await expect(approval.getByRole("button", { name: "Allow once" })).toBeDisabled();
     expect(requests).toHaveLength(1);
@@ -161,7 +163,7 @@ for (const decision of ["allow", "skip"] as const) {
           text: `Trail notes. Author's unsaved addition.\n\n${selection}`,
         },
         materials: [{ name: "interview.txt", text: "Interview: the ridge reopened Tuesday.\n" }],
-        folderSearch: true,
+        ...(decision === "allow" ? { folderSearch: true } : {}),
       },
     };
     expect(requests[0]).toEqual(initial);
@@ -176,6 +178,7 @@ for (const decision of ["allow", "skip"] as const) {
         ? "The ridge gate opens at 07:30."
         : "The ridge gate opens each morning.",
     );
+    expect(await readFile(page, draft)).toBe(`Trail notes.\n\n${selection}`);
     expect(requests).toHaveLength(2);
     expect(requests[1]).toEqual({
       ...initial,

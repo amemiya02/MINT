@@ -39,6 +39,7 @@ export const en = {
   "materials.emptyDraft": "Empty untitled draft",
   "materials.excluded": "Excluded",
   "materials.add": "Add files or paste text",
+  "materials.dropHint": "You can drop UTF-8 text files into this list.",
   "materials.chooseFile": "Choose text file",
   "materials.pasted": "Pasted material",
   "materials.pastedName": "Pasted text",

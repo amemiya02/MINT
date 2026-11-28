@@ -38,6 +38,7 @@ export const zhCN: Messages = {
   "materials.emptyDraft": "空白未命名稿",
   "materials.excluded": "不发送",
   "materials.add": "添加文件或粘贴文字",
+  "materials.dropHint": "可以将 UTF-8 文本文件拖入此列表。",
   "materials.chooseFile": "选择文本文件",
   "materials.pasted": "粘贴的材料",
   "materials.pastedName": "粘贴的文字",

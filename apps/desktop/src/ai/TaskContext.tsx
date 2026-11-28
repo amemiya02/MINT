@@ -211,6 +211,7 @@ export function MaterialPicker({
     <>
       <details className="space-y-2">
         <summary className="cursor-pointer">{t("materials.add")}</summary>
+        <p className="text-(--mint-muted)">{t("materials.dropHint")}</p>
         <button
           type="button"
           className={buttonClass}

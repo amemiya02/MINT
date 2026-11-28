@@ -192,7 +192,9 @@ export function MaterialRequestNotice({
       <legend className="px-1 font-medium">{t("materials.requested")}</legend>
       <p className="wrap-anywhere">{recipient}</p>
       <p className="font-medium wrap-anywhere">{name}</p>
-      <p className="whitespace-pre-wrap wrap-anywhere">{purpose}</p>
+      <p role="status" className="whitespace-pre-wrap wrap-anywhere">
+        {purpose}
+      </p>
       {folder && query && (
         <div className="wrap-anywhere">
           <p>{t("materials.searchingFolderFor", { folder, query })}</p>

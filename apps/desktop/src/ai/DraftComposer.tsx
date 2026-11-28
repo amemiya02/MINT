@@ -176,7 +176,11 @@ export function DraftComposer({
           {t("settings.close")}
         </button>
       </div>
-      <fieldset disabled={busy || !!unapplied} className="space-y-2">
+      <fieldset
+        hidden={!!materialRequests.pending}
+        disabled={busy || !!unapplied}
+        className="space-y-2"
+      >
         <label className="block">
           {t("draft.instruction")}
           <input
