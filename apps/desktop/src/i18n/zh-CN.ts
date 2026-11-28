@@ -53,6 +53,7 @@ export const zhCN: Messages = {
   "command.file.new": "新建",
   "command.edit.selectNextOccurrence": "选择下一个相同项",
   "command.file.saveAs": "另存为…",
+  "command.file.export": "导出…",
   "command.file.exportHtml": "导出为 HTML…",
   "command.file.exportPdf": "导出为 PDF…",
   "command.file.openFolder": "打开文件夹…",
@@ -205,6 +206,8 @@ export const zhCN: Messages = {
   "settings.shortcuts.cancel": "取消",
   "settings.shortcuts.alsoUsedBy": "与「{commands}」冲突",
 
+  "export.title": "导出",
+  "export.format": "格式",
   "export.html.title": "导出为 HTML",
   "export.html.saveTitle": "导出为 HTML",
   "export.html.embedImages": "内嵌图片",

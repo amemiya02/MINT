@@ -52,6 +52,7 @@ export const en = {
   "command.file.new": "New",
   "command.edit.selectNextOccurrence": "Select Next Occurrence",
   "command.file.saveAs": "Save As…",
+  "command.file.export": "Export…",
   "command.file.exportHtml": "Export as HTML…",
   "command.file.exportPdf": "Export as PDF…",
   "command.file.openFolder": "Open Folder…",
@@ -208,6 +209,8 @@ export const en = {
   "settings.shortcuts.cancel": "Cancel",
   "settings.shortcuts.alsoUsedBy": "Also used by {commands}",
 
+  "export.title": "Export",
+  "export.format": "Format",
   "export.html.title": "Export as HTML",
   "export.html.saveTitle": "Export as HTML",
   "export.html.embedImages": "Embed images",
