@@ -126,3 +126,9 @@ Packages can contribute this view with `"sidebar": "kanban"` and `"permissions":
 ## LaTeX export
 
 Install **LaTeX export** in Settings → Plugins and grant access to the current document. Choose **File → Import / Export… → LaTeX** to save the current draft as a standalone UTF-8 `.tex` document. Headings become section commands, lists become LaTeX lists, and inline and display equations preserve their TeX notation. Packages can register this format with `"exportFormat": "latex"` and the `document.read` permission.
+
+## Relationship graph
+
+Install **Relationship graph** in Settings → Plugins and allow it to read Markdown documents in the current folder. Open its sidebar to see which documents cite each other. Arrows point from the citing document to its target. Select a document to open it, or use the references below the graph to select the exact citation in the source or jump to the cited heading.
+
+The graph reads the same on-disk references as Backlinks. It includes links whose targets resolve to documents in the folder and recognizes wikilinks when enabled for that folder. A package can contribute this view with `"sidebar": "graph"` and `"permissions": ["folder.read"]`.

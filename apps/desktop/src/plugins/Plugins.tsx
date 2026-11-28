@@ -16,6 +16,7 @@ import {
   type PluginManifest,
   propertyTable,
   readStatistics,
+  relationshipGraph,
   tagBrowser,
   timingDiagrams,
   uninstall,
@@ -48,6 +49,7 @@ export function pluginName(m: PluginManifest, t: Translate) {
   if (m.id === writingTemplates.id) return t("plugin.templates");
   if (m.id === propertyTable.id) return t("plugin.properties");
   if (m.id === kanbanBoard.id) return t("kanban.name");
+  if (m.id === relationshipGraph.id) return t("graph.name");
   if (m.id === tagBrowser.id) return t("plugin.tags");
   return m.id === writingStatistics.id ? t("plugin.statistics") : m.name;
 }
@@ -80,6 +82,7 @@ export function PluginSettings() {
     writingStatistics,
     writingTemplates,
     tagBrowser,
+    relationshipGraph,
     kanbanBoard,
     propertyTable,
     timingDiagrams,
