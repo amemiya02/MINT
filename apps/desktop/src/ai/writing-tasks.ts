@@ -37,6 +37,7 @@ export interface SavedWritingTask {
   readonly version: 1;
   readonly id: string;
   readonly path: string | null;
+  readonly folder?: string;
   readonly title: string;
   readonly updatedAt: number;
   readonly baseline: string;
@@ -49,7 +50,7 @@ export interface SavedWritingTask {
 }
 
 export interface WritingTasksPlatform {
-  list(path: string | null): Promise<SavedWritingTask[]>;
+  list(path: string | null, all?: boolean): Promise<SavedWritingTask[]>;
   create(task: SavedWritingTask): Promise<void>;
   update(task: SavedWritingTask, expectedUpdatedAt: number): Promise<void>;
   remove(id: string): Promise<void>;
@@ -58,9 +59,11 @@ export interface WritingTasksPlatform {
 }
 
 interface OpenWritingReview {
+  readonly tabId: number;
   readonly busy: boolean;
+  readonly temporary: boolean;
   focus(): void;
-  remove(remaining: number): void;
+  remove(): void;
 }
 
 const openReviews = new WeakMap<WritingTasksPlatform, Map<string, OpenWritingReview>>();

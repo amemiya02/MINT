@@ -264,9 +264,16 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     for (const [key, value] of [...appData]) {
       if (key.startsWith(taskRoot) && key.endsWith("/review.json")) {
         const task = JSON.parse(value);
-        if (task.path !== null && within(task.path, from) && isFile(task.path)) {
-          appData.set(key, JSON.stringify({ ...task, path: to + task.path.slice(from.length) }));
-        }
+        const path =
+          task.path !== null && within(task.path, from) && isFile(task.path)
+            ? to + task.path.slice(from.length)
+            : task.path;
+        const folder =
+          task.folder && within(task.folder, from)
+            ? to + task.folder.slice(from.length)
+            : task.folder;
+        if (path !== task.path || folder !== task.folder)
+          appData.set(key, JSON.stringify({ ...task, path, folder }));
         continue;
       }
       const match = /^(history:|snapshot:\d+:|annotations:)([\s\S]+)$/.exec(key);
@@ -362,11 +369,11 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       (id) => temporaryTasks.has(id) || appData.has(taskRecord(id)),
     ),
     writingTasks: {
-      async list(path) {
+      async list(path, all) {
         return [...appData.entries()].flatMap(([key, json]) => {
           if (!key.startsWith(taskRoot) || !key.endsWith("/review.json")) return [];
           const task = JSON.parse(json);
-          return task.path === path ? [task] : [];
+          return all || (!task.folder && task.path === path) ? [task] : [];
         });
       },
       async create(task) {
@@ -382,7 +389,10 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
         if (stored.updatedAt !== expectedUpdatedAt || task.updatedAt <= expectedUpdatedAt) {
           throw new Error("Writing task changed");
         }
-        appData.set(key, JSON.stringify({ ...task, path: stored.path ?? task.path }));
+        appData.set(
+          key,
+          JSON.stringify({ ...task, path: stored.path ?? task.path, folder: stored.folder }),
+        );
       },
       async remove(id) {
         const prefix = `${taskRoot}${id}/`;

@@ -1522,6 +1522,11 @@ test("a native model receives only the sample or live selection and edits throug
       "the external change during generation",
       "return document.querySelector('.cm-content')?.textContent.includes('Disk closing.');",
     );
+    await nativeShortcut("ctrl+n");
+    await waitForView(
+      "the second document to have focus before the native model completes",
+      "return document.querySelector('[role=tab][aria-selected=true]')?.textContent === 'Untitled' && document.activeElement?.matches('.cm-content');",
+    );
     previewReply.writeHead(200, { "Content-Type": "application/json" }).end(
       JSON.stringify({
         choices: [
@@ -1534,6 +1539,16 @@ test("a native model receives only the sample or live selection and edits throug
           },
         ],
       }),
+    );
+    await waitForView(
+      "a passive completion notice while the second editor retains focus",
+      `const notice = document.querySelector('[aria-label="Writing task notifications"]');
+       return notice?.innerText.includes('2 decisions needed') &&
+         document.querySelector('[role=tab][aria-selected=true]')?.textContent === 'Untitled' &&
+         document.activeElement?.matches('.cm-content');`,
+    );
+    await clickPath(
+      "//section[@aria-label='Writing task notifications']//button[normalize-space(.)='Open task for ask-ai-model.md']",
     );
     await waitForView(
       "independent rendered proposals with the changed text compared",
@@ -1552,7 +1567,7 @@ test("a native model receives only the sample or live selection and edits throug
         (await readFile(draft, "utf8")) ===
           externallyEdited.replace("Opening line.", "Revised opening.") || null,
     ).catch(explain);
-    await clickPath("//section[@aria-label='Ask AI']//button[normalize-space(.)='Close']");
+    await clickPath("//aside[@aria-label='Writing Assistant']//button[normalize-space(.)='Close']");
     await keyActions(chord(keys.control, "z"));
     await until(
       "undo to preserve the external edit",
@@ -1562,7 +1577,7 @@ test("a native model receives only the sample or live selection and edits throug
     await keyActions(chord(keys.control, "a"));
     await askSelection(stopInstruction);
     await shows("Native partial text.");
-    await nativeShortcut("ctrl+n");
+    await clickPath("//*[@role='tab' and normalize-space(.)='Untitled']");
     await waitForView(
       "the second document to have focus during native streaming",
       "return document.querySelector('[role=tab][aria-selected=true]')?.textContent === 'Untitled' && document.activeElement?.matches('.cm-content');",
@@ -1745,6 +1760,33 @@ test("a saved writing review resumes after a native restart without contacting i
       return line?.textContent === 'Last draft.';
     `,
     );
+    await nativeShortcut("ctrl+w");
+    await nativeShortcut("ctrl+n");
+    await nativeShortcut("ctrl+shift+p");
+    await waitForView(
+      "the Command Palette to receive focus",
+      `return document.activeElement?.matches('dialog[aria-label="Command Palette"] input');`,
+    );
+    await keyActions(typing("All writing tasks"));
+    await shows("All writing tasks");
+    await keyActions(typing(keys.enter));
+    await waitForView(
+      "the closed document's task and outstanding decisions in All writing tasks",
+      `const dialog = document.querySelector('dialog[aria-label="All writing tasks"]');
+       return [...dialog?.querySelectorAll('li') ?? []].some(row =>
+         row.innerText.includes(${JSON.stringify(instruction)}) &&
+         row.innerText.includes('renamed-writing-review.md') &&
+         row.innerText.includes('2 decisions needed'));`,
+    );
+    await clickPath(
+      `//dialog[@aria-label='All writing tasks']//button[normalize-space(.)='${instruction}']`,
+    );
+    await waitForView(
+      "the task to open its manuscript and saved review",
+      `return document.querySelector('[role=tab][aria-selected=true]')?.textContent.includes('renamed-writing-review.md') &&
+        !!document.querySelector('aside[aria-label="Writing Assistant"] [aria-label="Proposed edit 4 of 4"]');`,
+    );
+    assert.equal(requests.length, 1, "finding a task does not send another native model request");
     assert.equal(await readFile(renamedDraft, "utf8"), changed);
     assert.deepEqual(
       await invokeNative<number[]>("list_versions", { path: renamedDraft }),
@@ -2246,6 +2288,16 @@ test("a native model reply stays editable and untitled until the author chooses 
     await until("the author's addition in the draft", () => draftMatches(edited)).catch(explain);
     await saveWith("Save");
     assert.equal(await until("the saved draft", () => readFile(path, "utf8")), edited);
+    const saved = await until("the draft task to follow the native Save As path", async () => {
+      const tasks = await invokeNative<{ title: string; turns: { reply: string }[] }[]>(
+        "list_writing_tasks",
+        { path },
+      );
+      return tasks.find((task) => task.title === instruction) ?? null;
+    });
+    assert.equal(saved.turns[0]?.reply, generated);
+    assert.ok(!JSON.stringify(saved).includes("draft-fixture-secret"));
+    assert.equal(requests.length, 2);
   } finally {
     endpoint.closeAllConnections();
     await new Promise<void>((resolve) => endpoint.close(() => resolve()));
@@ -2937,7 +2989,7 @@ if (prompt.instruction === ${JSON.stringify(cancelInstruction)}) {
   const assistant = "//aside[@aria-label='Writing Assistant']";
   await waitForView(
     "the applied temporary edit to remain reviewable",
-    `const edit = document.querySelector('aside[aria-label="Writing Assistant"] [role="group"]');
+    `const edit = document.querySelector('aside[aria-label="Writing Assistant"] [aria-label="Proposed edit 1 of 1"]');
       return edit?.innerText.includes("Short sentence.") &&
         [...edit.querySelectorAll("button")].some((button) => button.textContent === "Revert this edit");`,
   );

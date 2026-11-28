@@ -6,6 +6,7 @@ import { ExternalAgentAccessNotice } from "./ExternalAgentPanel.tsx";
 import { type ExternalAgent, externalAgentSender } from "./external-agent.ts";
 import { MaterialRequestNotice, useMaterialRequests } from "./MaterialRequest.tsx";
 import { modelEndpoint, modelWritingSender, type SavedModelConnection } from "./model.ts";
+import { recordWritingResult } from "./record-writing-result.ts";
 import { TaskContextChecklist, useNamedMaterials } from "./TaskContext.tsx";
 import { useWritingTask, WritingTaskMaterials } from "./WritingTasks.tsx";
 import {
@@ -28,13 +29,16 @@ interface DraftConnection {
 }
 
 interface DraftTask {
+  readonly id: string;
+  readonly title: string;
   readonly request: WritingRequest;
   readonly folder: string | null;
 }
 
 interface DraftAttempt {
+  readonly id: string;
   readonly task: DraftTask;
-  readonly connection: DraftConnection;
+  readonly connection: Omit<DraftConnection, "send">;
   readonly status: AttemptStatus;
   readonly partial: string;
   readonly approved: readonly NamedMaterial[];
@@ -59,13 +63,14 @@ export function DraftComposer({
   readonly settingsOpen: boolean;
   readonly canApplyDraft: () => boolean;
   readonly onDraft: (text: string) => boolean;
-  readonly onClose: () => void;
+  readonly onClose: (tabId: number) => void;
 }) {
   const t = useT();
   const id = useId();
   const input = useRef<HTMLInputElement>(null);
   const store = useTabStore();
   const controller = useRef<AbortController | null>(null);
+  const retryConnection = useRef<DraftConnection | null>(null);
   const mounted = useRef(true);
   const [collapsed, setCollapsed] = useState(false);
   const [attempt, setAttempt] = useState<DraftAttempt | null>(null);
@@ -81,6 +86,9 @@ export function DraftComposer({
   const busy = attempt?.status === "working" || attempt?.status === "approval";
   const [error, setError] = useState<MessageKey | null>(null);
   const [unapplied, setUnapplied] = useState("");
+  const [appliedReply, setAppliedReply] = useState("");
+  const [showAppliedReply, setShowAppliedReply] = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false);
   const named = useNamedMaterials();
   const [allowedFolder, setAllowedFolder] = useState<string | null>(null);
   const searchFolder = allowedFolder === folder ? folder : null;
@@ -114,6 +122,16 @@ export function DraftComposer({
   useEffect(() => {
     if (store.getState().activeId === tabId && !collapsed && !settingsOpen) input.current?.focus();
   }, [collapsed, settingsOpen, store, tabId]);
+
+  useEffect(() => {
+    if (!appliedReply) return;
+    const editor = store.editor(tabId);
+    return editor?.subscribe(({ type }) => {
+      if (type !== "change") return;
+      const tab = store.getState().tabs.find(({ id }) => id === tabId);
+      if (tab?.path === null && editor.getText() === "") onClose(tabId);
+    });
+  }, [appliedReply, onClose, store, tabId]);
 
   useEffect(() => {
     if (settingsOpen) return;
@@ -182,6 +200,8 @@ export function DraftComposer({
     if (!connection) return;
     await runDraft(
       {
+        id: crypto.randomUUID(),
+        title: instruction.trim(),
         request: {
           instruction: t("draft.prompt", { instruction: instruction.trim() }),
           taskContext:
@@ -203,16 +223,22 @@ export function DraftComposer({
     const running = new AbortController();
     const { signal } = running;
     controller.current = running;
-    const entry = { task, connection };
+    retryConnection.current = connection;
+    const { id, label } = connection;
+    const entry = { id: crypto.randomUUID(), task, connection: { id, label } };
     let partial = "";
     let approved: NamedMaterial[] = [];
+    let sentContext = task.request.taskContext;
     let status: AttemptStatus;
     setError(null);
     setRetryId("");
     setAttempt({ ...entry, approved, partial, status: "working" });
     try {
       const reply = await materialRequests.send(
-        connection.send,
+        (outbound, options) => {
+          sentContext = outbound.taskContext;
+          return connection.send(outbound, options);
+        },
         task.request,
         connection.label,
         task.folder,
@@ -238,8 +264,30 @@ export function DraftComposer({
       partial = reply.text;
       if (status === "complete") {
         controller.current = null;
-        if (onDraft(reply.text)) {
-          onClose();
+        retryConnection.current = null;
+        setKey("");
+        const inserted = onDraft(reply.text);
+        recordWritingResult(platform.writingTasks, store, {
+          tabId,
+          id: task.id,
+          turn: {
+            instruction: task.title,
+            reply: reply.text,
+            context: sentContext,
+            searchFolder: task.folder ?? undefined,
+            recipient: connection.label,
+            recipientId: connection.id,
+            direct: inserted,
+            status,
+          },
+          onError: () => {
+            if (mounted.current) setSaveFailed(true);
+          },
+        });
+        if (inserted) {
+          setAppliedReply(reply.text);
+          setAttempt({ ...entry, approved, status, partial: "" });
+          if (store.getState().activeId === tabId) store.editor(tabId)?.focus();
           return;
         }
         setUnapplied(reply.text);
@@ -273,6 +321,9 @@ export function DraftComposer({
   const report = useMemo(
     () =>
       attempt && {
+        id: attempt.task.id,
+        tabId,
+        title: attempt.task.title,
         name,
         recipient: attempt.connection.label,
         material: [
@@ -283,28 +334,91 @@ export function DraftComposer({
         ].join(" · "),
         status: attempt.status,
         count: 0,
+        decisions: Number(!!pending || !!unapplied),
+        background: !active || collapsed,
+        notice: pending
+          ? { id: `${attempt.id}:approval:${pending.id}`, detail: pending.name, decisions: 1 }
+          : attempt.status === "complete"
+            ? { id: attempt.id, decisions: Number(!!unapplied) }
+            : undefined,
         stop: busy ? () => controller.current?.abort() : undefined,
+        forget: () => {
+          setAttempt(null);
+          setPartials([]);
+          setUnapplied("");
+          if (appliedReply) onClose(tabId);
+        },
         reveal: () => {
-          setCollapsed(false);
           store.activate(tabId);
+          setCollapsed(false);
+          if (appliedReply) setShowAppliedReply(true);
         },
       },
-    [attempt, busy, name, pending, store, t, tabId],
+    [
+      active,
+      appliedReply,
+      attempt,
+      busy,
+      collapsed,
+      name,
+      onClose,
+      pending,
+      store,
+      t,
+      tabId,
+      unapplied,
+    ],
   );
   useWritingTask(report);
 
   function close() {
-    if (!attempt || (!busy && attempt.status === "complete")) onClose();
+    if (!attempt || (!busy && attempt.status === "complete")) onClose(tabId);
     else {
       setCollapsed(true);
       if (active) store.editor(tabId)?.focus();
     }
   }
 
-  const retry = attempt && !busy && attempt.status !== "complete" ? attempt : null;
+  const retry =
+    attempt && !busy && retryConnection.current
+      ? { ...attempt, connection: retryConnection.current }
+      : null;
   const alternatives = retry ? connections.filter(({ id }) => id !== retry.connection.id) : [];
   const alternate = alternatives.find(({ id }) => id === retryId);
 
+  if (appliedReply)
+    return (
+      <>
+        {showAppliedReply && (
+          <section
+            aria-label={t("command.file.draftWithAi")}
+            className="max-h-[70%] shrink-0 space-y-2 overflow-auto border-b border-(--mint-border) px-4 py-3 text-sm"
+          >
+            <header className="flex items-center justify-between gap-2">
+              <h2 className="font-medium">{attempt?.task.title}</h2>
+              <button
+                type="button"
+                className={button}
+                onClick={() => {
+                  setShowAppliedReply(false);
+                  store.editor(tabId)?.focus();
+                }}
+              >
+                {t("settings.close")}
+              </button>
+            </header>
+            <textarea
+              aria-label={t("writing.reply")}
+              className="block w-full resize-y rounded bg-(--mint-hover) p-2 font-mono focus-visible:outline-2 focus-visible:outline-(--mint-accent)"
+              readOnly
+              rows={3}
+              value={appliedReply}
+            />
+          </section>
+        )}
+        {saveFailed && <p role="alert">{t("writing.tasks.saveFailed")}</p>}
+      </>
+    );
   if (collapsed)
     return (
       active && (
@@ -517,6 +631,7 @@ export function DraftComposer({
         </section>
       )}
       {error && <p role="alert">{t(error)}</p>}
+      {saveFailed && <p role="alert">{t("writing.tasks.saveFailed")}</p>}
       {unapplied && (
         <pre className="max-h-32 overflow-auto whitespace-pre-wrap wrap-anywhere">{unapplied}</pre>
       )}

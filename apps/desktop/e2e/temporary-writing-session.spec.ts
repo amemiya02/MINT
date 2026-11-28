@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import type { SavedWritingTask } from "../src/ai/writing-tasks.ts";
 import type { MemoryPlatform } from "../src/platform/memory.ts";
 import { launch, readFile, runMenuItem, settingsPath } from "./memory-platform.ts";
 
@@ -10,6 +11,19 @@ const revised = "The team met.\n\nKeep these bytes.  \n\nThe group decided.";
 const retained = "The team discussed the result.\n\nKeep these bytes.  \n\nThe group decided.";
 const instruction = "Shorten the two sentences, apply directly";
 const material = "Private interview excerpt for the temporary task.";
+const savedTask: SavedWritingTask = {
+  version: 1,
+  id: "22b21885-47e5-456e-8314-3f84835cccbb",
+  path,
+  title: "An ordinary writing review",
+  updatedAt: 1,
+  baseline: original,
+  origin: { from: 0, to: original.length, text: original, located: true },
+  reading: { anchor: 0, head: 0, top: 0 },
+  reviewScroll: 0,
+  showSource: false,
+  turns: [],
+};
 type MintWindow = { __MINT_MEMORY_PLATFORM__: MemoryPlatform };
 
 test("a temporary session allows selective reversion before clearing its review and materials", async ({
@@ -31,6 +45,7 @@ test("a temporary session allows selective reversion before clearing its review 
     locale: "en-US",
     files: { [path]: original, [settingsPath]: '{"autosave":false}' },
     openedPaths: [{ path, kind: "file" }],
+    appData: { [`ai/tasks/${savedTask.id}/review.json`]: JSON.stringify(savedTask) },
   });
   await page.keyboard.press("ControlOrMeta+,");
   const settings = page.getByRole("dialog", { name: "Settings" });
@@ -112,13 +127,24 @@ test("a temporary session allows selective reversion before clearing its review 
   await expect(confirm).toBeVisible();
   await confirm.getByRole("button", { name: "Cancel" }).click();
   expect(await closingWindow).toBe(false);
+
+  await runMenuItem(page, "edit.writingTasks");
+  const historyDialog = page.getByRole("dialog", { name: "Writing tasks", exact: true });
+  await historyDialog.getByRole("button", { name: savedTask.title }).click();
+  await expect(historyDialog.getByRole("alert")).toContainText(
+    "Close the temporary session before opening a saved task in this pane.",
+  );
+  await historyDialog.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(review.getByRole("button", { name: "Revert this edit" })).toHaveCount(1);
   await review.getByRole("button", { name: "Close temporary session" }).click();
   await confirm.getByRole("button", { name: "Close temporary session" }).click();
 
   await expect(review).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Resume conversation" })).toHaveCount(0);
-  await runMenuItem(page, "edit.writingTasks");
-  await expect(page.getByText("No saved writing tasks for this document.")).toBeVisible();
+  await runMenuItem(page, "edit.allWritingTasks");
+  const allTasks = page.getByRole("dialog", { name: "All writing tasks" });
+  await expect(allTasks.getByRole("button", { name: savedTask.title })).toBeVisible();
+  await expect(allTasks.getByRole("button", { name: instruction })).toHaveCount(0);
   expect(await readFile(page, path)).toBe(retained);
   const data = await storedData();
   expect(JSON.stringify(data)).not.toContain(instruction);

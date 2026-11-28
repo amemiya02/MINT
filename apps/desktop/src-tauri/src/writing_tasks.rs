@@ -21,6 +21,8 @@ pub struct WritingTask {
     version: u32,
     id: String,
     path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    folder: Option<String>,
     updated_at: u64,
     #[serde(flatten)]
     review: serde_json::Map<String, Value>,
@@ -123,6 +125,7 @@ fn save(
         // The file move owns changes to a saved path. A queued checkpoint can
         // still refer to the old path. Untitled tasks acquire a path on save.
         task.path = previous.path.or(task.path);
+        task.folder = previous.folder;
     }
     let json = serde_json::to_vec(&task).map_err(|error| error.to_string())?;
     let create = expected_updated_at.is_none();
@@ -152,19 +155,24 @@ pub fn relocate(
     let mut staged = Vec::new();
     let result = (|| {
         for (record, mut task) in records(&root).map_err(io::Error::other)? {
-            let Some(path) = task.path.as_deref() else {
+            let relocate = |path: &str| {
+                Path::new(path).strip_prefix(from).ok().map(|relative| {
+                    let destination = if relative.as_os_str().is_empty() {
+                        to.to_owned()
+                    } else {
+                        to.join(relative)
+                    };
+                    destination.to_string_lossy().into_owned()
+                })
+            };
+            let path = task.path.as_deref().and_then(relocate);
+            let folder = task.folder.as_deref().and_then(relocate);
+            if path.is_none() && folder.is_none() {
                 continue;
-            };
-            let Ok(relative) = Path::new(path).strip_prefix(from) else {
-                continue;
-            };
-            let destination = if relative.as_os_str().is_empty() {
-                to.to_owned()
-            } else {
-                to.join(relative)
-            };
+            }
             let original = serde_json::to_vec(&task).map_err(io::Error::other)?;
-            task.path = Some(destination.to_string_lossy().into_owned());
+            task.path = path.or(task.path);
+            task.folder = folder.or(task.folder);
             let relocated = serde_json::to_vec(&task).map_err(io::Error::other)?;
             crate::fs::write_atomic_at(&record, &relocated)?;
             staged.push((record, original));
@@ -317,13 +325,16 @@ pub fn discard_abandoned_temporary_tasks(app: &AppHandle) -> Result<(), String> 
 pub async fn list_writing_tasks(
     app: AppHandle,
     path: Option<String>,
+    all: Option<bool>,
 ) -> Result<Vec<WritingTask>, String> {
     blocking(move || {
         let root = root(&app, SAVED_TASKS)?;
         let _guard = TASKS.lock().map_err(|error| error.to_string())?;
         Ok(records(&root)?
             .into_iter()
-            .filter_map(|(_, task)| (task.path == path).then_some(task))
+            .filter_map(|(_, task)| {
+                (all == Some(true) || (task.folder.is_none() && task.path == path)).then_some(task)
+            })
             .collect())
     })
     .await
