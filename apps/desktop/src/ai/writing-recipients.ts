@@ -24,11 +24,12 @@ export type WritingConnectionSetting =
   | "reviewWritingConnection"
   | "multiFileWritingConnection";
 
-export const useDefaultConnection = "default";
+export const inheritWritingConnection = "default";
 
 export function writingConnectionChoice(settings: Settings, setting: WritingConnectionSetting) {
   const choice = settings[setting];
-  if (setting === "inlineCompletionModel" && choice !== useDefaultConnection) return choice;
+  if (setting === "inlineCompletionModel")
+    return choice === inheritWritingConnection ? settings.defaultWritingConnection : choice;
   return choice || settings.defaultWritingConnection;
 }
 
@@ -38,7 +39,7 @@ export function writingConnectionId(recipient: WritingRecipient) {
 }
 
 export function effectiveWritingRecipient(available: readonly WritingRecipient[], choice: string) {
-  if (!choice) return available[0];
+  if (!choice) return available.find(({ kind }) => kind === "model") ?? available[0];
   return available.find(
     (item) =>
       writingConnectionId(item) === choice || (item.kind === "model" && item.modelId === choice),

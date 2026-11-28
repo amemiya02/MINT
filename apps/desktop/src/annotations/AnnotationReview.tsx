@@ -1,5 +1,6 @@
 import type { Annotation, MintEditor, SharedDocument } from "@mint/editor";
 import { useEffect, useRef, useState } from "react";
+import { isLocalModelOffline } from "../ai/model.ts";
 import { ProposedSelectionEdit } from "../ai/ProposedSelectionEdit.tsx";
 import {
   effectiveWritingRecipient,
@@ -62,7 +63,11 @@ export function AnnotationReview({
   const [loadFailed, setLoadFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<
-    "annotationReview.emptyDocument" | "annotationReview.invalid" | "writing.sendFailed" | null
+    | "annotationReview.emptyDocument"
+    | "annotationReview.invalid"
+    | "writing.sendFailed"
+    | "writing.localOffline"
+    | null
   >(null);
   const [results, setResults] = useState<readonly AnnotationResult[] | null>(null);
   const [findingCount, setFindingCount] = useState<number | null>(null);
@@ -190,9 +195,15 @@ export function AnnotationReview({
         return [];
       });
       setResults(completed);
-    } catch {
+    } catch (problem) {
       if (!isDocument) clearTrackedRanges();
-      if (mounted.current) setError("writing.sendFailed");
+      if (mounted.current) {
+        setError(
+          recipient.kind === "model" && isLocalModelOffline(recipient.endpoint, problem)
+            ? "writing.localOffline"
+            : "writing.sendFailed",
+        );
+      }
     } finally {
       running.current = false;
       if (mounted.current) setBusy(false);

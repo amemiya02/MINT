@@ -21,7 +21,7 @@ export function inlineCompletionFor(
   };
 }
 
-export function inlineCompletionSender(
+function inlineCompletionSender(
   send: SendModelMessage,
   connectionId: string,
 ): RequestInlineCompletion {

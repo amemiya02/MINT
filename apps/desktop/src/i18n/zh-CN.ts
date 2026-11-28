@@ -8,6 +8,7 @@ export const zhCN: Messages = {
   "writing.task.complete": "已完成",
   "writing.task.stopped": "已停止",
   "writing.task.interrupted": "连接已中断",
+  "writing.localOffline": "本地模型无法连接。已保留你的输入。",
   "writing.task.limit": "已达到生成上限",
   "writing.task.failed": "生成失败",
   "writing.task.one": "1 条建议",
@@ -660,7 +661,7 @@ export const zhCN: Messages = {
   "settings.modelUnavailable": "连接不可用",
   "settings.modelRecipient": "发送至 {address}",
   "settings.inlineCompletion.hint":
-    "停笔后，MINT 会把光标附近的稿件文本发送给所选模型。按 Tab 接受建议，按 Esc 忽略。",
+    "停笔后，MINT 会把光标附近的稿件文本发送至此连接。按 Tab 接受建议，按 Esc 忽略。",
   "settings.wikilinks": "在 {folder} 中识别双链语法",
   "settings.expected.folders": "工作文件夹路径数组",
   "settings.extendedToc": "扩展语法：[TOC] 目录标记",

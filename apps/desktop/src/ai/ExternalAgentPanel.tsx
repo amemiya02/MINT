@@ -427,7 +427,9 @@ function ExternalAgentPanel({
               : connection.verified,
         };
         setAgent(verified);
-        setSaved((list) => [verified, ...list.filter((item) => item.path !== verified.path)]);
+        const connections = [verified, ...saved.filter((item) => item.path !== verified.path)];
+        setSaved(connections);
+        onConnectionsChanged?.(connections);
         setReply(result.taskCopy ?? result.text);
         target?.record(entry.id, {
           instruction: request.instruction,

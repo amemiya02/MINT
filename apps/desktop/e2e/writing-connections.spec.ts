@@ -16,7 +16,7 @@ async function openSettings(page: Page) {
 }
 
 async function addModels(settings: Locator, withReviewer = false) {
-  const entries = [
+  const entries: [name: string, address: string, model: string][] = [
     ["Local writer", local, "local-writer"],
     ["Cloud writer", cloud, "cloud-writer"],
   ];
@@ -70,7 +70,7 @@ test("each writing action can try its effective connection with sample text", as
     [completion, local, "Sample model response."],
     [review, cloud, "Sample model response."],
     [multiFile, agent, "Sample Agent response."],
-  ]) {
+  ] as const) {
     const setting = settings.getByRole("group", { name: action, exact: true });
     await expect(setting.locator("p").filter({ hasText: recipient })).toBeVisible();
     await setting.getByRole("button", { name: "Run sample" }).click();
@@ -165,4 +165,113 @@ test("the default, review and multi-file connections reach their normal writing 
     },
     { model: "cloud-writer", input: expect.stringContaining("Write an opening line.") },
   ]);
+});
+
+test("an offline local edit keeps the instruction and asks before retrying in the cloud", async ({
+  page,
+}) => {
+  const draft = "/notes/draft.md";
+  const original = "A long opening sentence.";
+  const typed = "Shorten this, apply directly";
+  const received: unknown[] = [];
+  let localRequests = 0;
+  await page.route(`${local}/chat/completions`, (route) => {
+    localRequests++;
+    return route.abort("connectionrefused");
+  });
+  const endpoint = `${cloud}/chat/completions`;
+  await page.route(endpoint, (route) => {
+    const body = route.request().postDataJSON();
+    received.push(JSON.parse(body.messages.at(-1).content));
+    return route.fulfill({
+      json: { choices: [{ message: { content: "<replacement>Short opening.</replacement>" } }] },
+    });
+  });
+  await launch(page, {
+    locale: "en-US",
+    files: { [draft]: original },
+    openedPaths: [{ path: draft, kind: "file" }],
+  });
+  const settings = await openSettings(page);
+  await addModels(settings);
+  await settings.getByLabel(defaults).selectOption({ label: "Local writer" });
+  await settings.getByRole("button", { name: "Close", exact: true }).click();
+  const editor = page.getByRole("tabpanel").getByRole("textbox", { name: "", exact: true });
+  await editor.press("ControlOrMeta+A");
+  await runMenuItem(page, "edit.askAI");
+  const assistant = page.getByRole("region", { name: "Ask AI", exact: true });
+  const instruction = assistant.getByRole("textbox", { name: "Instruction" });
+  await instruction.fill(typed);
+  await assistant
+    .getByRole("button", { name: /Apply directly · Current selection · Local writer/ })
+    .click();
+  await expect(assistant.getByRole("alert")).toContainText("Local model is unreachable");
+  await expect(instruction).toHaveValue(typed);
+  await expect(editor).toHaveText(original);
+  expect(localRequests).toBe(1);
+  expect(received).toEqual([]);
+
+  await assistant
+    .getByLabel("Retry connection")
+    .selectOption({ label: `Cloud writer · ${endpoint}` });
+  await expect(assistant.locator("p").filter({ hasText: endpoint }).first()).toBeVisible();
+  expect(received).toEqual([]);
+  await assistant.getByRole("button", { name: "Retry with selected connection" }).click();
+  await expect(editor).toHaveText("Short opening.");
+  expect(received).toEqual([{ instruction: typed, selectedText: original }]);
+});
+
+test("inline completion retries the same excerpt once with an explicitly chosen cloud model", async ({
+  page,
+}) => {
+  const draft = "/notes/draft.md";
+  const receivedLocal: unknown[] = [];
+  const receivedCloud: unknown[] = [];
+  await page.route(`${local}/chat/completions`, (route) => {
+    receivedLocal.push(JSON.parse(route.request().postDataJSON().messages.at(-1).content));
+    return route.abort("connectionrefused");
+  });
+  const endpoint = `${cloud}/chat/completions`;
+  await page.route(endpoint, (route) => {
+    receivedCloud.push(JSON.parse(route.request().postDataJSON().messages.at(-1).content));
+    return route.fulfill({
+      json: { choices: [{ message: { content: " follows the ridge." }, finish_reason: "stop" }] },
+    });
+  });
+  await launch(page, {
+    locale: "en-US",
+    files: { [draft]: "The" },
+    openedPaths: [{ path: draft, kind: "file" }],
+  });
+  const settings = await openSettings(page);
+  await addModels(settings);
+  await settings.getByLabel(defaults).selectOption({ label: "Local writer" });
+  await settings
+    .getByLabel(completion)
+    .selectOption({ label: "Use the default writing connection" });
+  await settings.getByRole("button", { name: "Close", exact: true }).click();
+  const editor = page.getByRole("tabpanel").getByRole("textbox", { name: "", exact: true });
+  await editor.press("End");
+  await page.keyboard.type(" trail");
+
+  const recovery = page.getByRole("region", { name: "Inline completion" });
+  await expect(recovery.getByRole("status")).toContainText("Local model is unreachable");
+  await expect(editor).toHaveText("The trail");
+  expect(receivedLocal).toEqual([{ before: "The trail", after: "" }]);
+  expect(receivedCloud).toEqual([]);
+  await recovery
+    .getByLabel("Retry connection")
+    .selectOption({ label: `Cloud writer · ${endpoint}` });
+  await expect(recovery.locator("p").filter({ hasText: endpoint })).toBeVisible();
+  expect(receivedCloud).toEqual([]);
+  await recovery.getByRole("button", { name: "Retry with selected connection" }).click();
+  await expect(editor.getByText("follows the ridge.", { exact: true })).toBeVisible();
+  expect(receivedCloud).toEqual(receivedLocal);
+  await editor.press("Tab");
+  await expect(editor).toHaveText("The trail follows the ridge.");
+
+  await page.keyboard.type(" Today");
+  await expect(recovery.getByRole("status")).toContainText("Local model is unreachable");
+  expect(receivedLocal).toHaveLength(2);
+  expect(receivedCloud).toHaveLength(1);
 });

@@ -7,7 +7,7 @@ import { ExternalAgentAccessNotice } from "./ExternalAgentPanel.tsx";
 import { inlineCompletionFor } from "./inline-completion.ts";
 import {
   effectiveWritingRecipient,
-  useDefaultConnection,
+  inheritWritingConnection,
   type WritingConnectionSetting,
   type WritingRecipient,
   writingConnectionChoice,
@@ -65,14 +65,16 @@ export function WritingConnectionControl({
             )}
           </option>
           {completion && (
-            <option value={useDefaultConnection}>{t("settings.writingConnection.inherit")}</option>
+            <option value={inheritWritingConnection}>
+              {t("settings.writingConnection.inherit")}
+            </option>
           )}
           {available?.map((candidate) => (
             <option key={candidate.id} value={writingConnectionId(candidate)}>
               {candidate.kind === "model" ? candidate.name : candidate.path}
             </option>
           ))}
-          {saved && saved !== useDefaultConnection && !chosen && (
+          {saved && saved !== inheritWritingConnection && !chosen && (
             <option value={saved} disabled>
               {t("settings.modelUnavailable")}
             </option>

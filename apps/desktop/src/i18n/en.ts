@@ -7,6 +7,7 @@ export const en = {
   "writing.task.complete": "Complete",
   "writing.task.stopped": "Stopped",
   "writing.task.interrupted": "Connection interrupted",
+  "writing.localOffline": "Local model is unreachable. Your input is kept.",
   "writing.task.limit": "Generation limit reached",
   "writing.task.failed": "Generation failed",
   "writing.task.one": "1 suggestion",

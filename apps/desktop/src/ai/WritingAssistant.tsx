@@ -25,6 +25,7 @@ import {
 import { MaterialRequestNotice, useMaterialRequests } from "./MaterialRequest.tsx";
 import { useModelVision, VisionControl } from "./ModelVision.tsx";
 import { materialLabel } from "./material-display.ts";
+import { isLocalModelOffline } from "./model.ts";
 import { ProposedSelectionEdit } from "./ProposedSelectionEdit.tsx";
 import { ReplyExcerpt } from "./ReplyExcerpt.tsx";
 import { SourcePassageReview } from "./SourcePassageReview.tsx";
@@ -55,6 +56,7 @@ import {
   loadWritingRecipients,
   type WritingRecipient,
   writingConnectionChoice,
+  writingRecipientLabel,
 } from "./writing-recipients.ts";
 import { captureWritingSelection, type WritingSelection } from "./writing-selection.ts";
 import {
@@ -127,6 +129,7 @@ interface Attempt {
   readonly approved: readonly NamedMaterial[];
   readonly newDecisions?: number;
   readonly capacityRejected?: boolean;
+  readonly localOffline?: boolean;
 }
 
 interface Turn extends Omit<SavedTurn, "suggestions"> {
@@ -515,7 +518,8 @@ function Composer({
   const [draft, setDraft] = useState(() => origin.editor.getText());
   const connectionChoice = writingConnectionChoice(settings, connectionSettingForScope(scope));
   const recipient = recipientId
-    ? recipients.find(({ id }) => id === recipientId)
+    ? (recipients.find(({ id }) => id === recipientId) ??
+      effectiveWritingRecipient(recipients, recipientId))
     : effectiveWritingRecipient(recipients, connectionChoice);
   const checkVision = useModelVision(platform.sendModelMessage);
   const visionFor = (candidate?: WritingRecipient) =>
@@ -525,10 +529,7 @@ function Composer({
         : undefined,
     );
   const vision = visionFor(recipient);
-  const labelFor = (candidate: WritingRecipient) =>
-    candidate.kind === "agent"
-      ? t("writing.recipient.agent", { path: candidate.path })
-      : t("writing.recipient.model", { name: candidate.name, endpoint: candidate.endpoint });
+  const labelFor = (candidate: WritingRecipient) => writingRecipientLabel(t, candidate);
   const selectedText = scope === "selection" ? origin.text : undefined;
   const sendDraft = scope === "document" || (scope === "selection" && includeDraft);
   const canEditDocument =
@@ -1264,6 +1265,7 @@ function Composer({
     let finalReplacement: string | undefined;
     let ignoredChanges: boolean | undefined;
     let capacityRejected = false;
+    let localOffline = false;
     setRetryId("");
     setError(null);
     setAttempt({ ...entry, approved, status: "working", partial: "" });
@@ -1349,6 +1351,10 @@ function Composer({
     } catch (problem) {
       status = failureStatus(problem, signal);
       capacityRejected = !signal.aborted && !!task.plan && isMaterialCapacityError(problem);
+      localOffline =
+        status === "interrupted" &&
+        connection.kind === "model" &&
+        isLocalModelOffline(connection.endpoint, problem);
       if (mounted.current) {
         if (capacityRejected) capacity.reject(recipient);
         else if (status === "failed") reportSendError(problem);
@@ -1356,7 +1362,7 @@ function Composer({
     }
     if (!mounted.current) return false;
 
-    if (!capacityRejected) onSavedRequest?.();
+    if (!capacityRejected && !localOffline) onSavedRequest?.();
     else if (onSavedRequest) setActionOverride(task.action);
     if (signal.aborted) status = "stopped";
     const canApplyDirectly =
@@ -1445,6 +1451,7 @@ function Composer({
       partial: "",
       newDecisions: suggestions?.filter(({ status }) => status === "preview").length,
       capacityRejected,
+      localOffline,
     });
     controller.current = null;
     taskRunning.current = false;
@@ -1999,6 +2006,11 @@ function Composer({
       )}
       {canRetry && (
         <div className="flex flex-wrap items-end gap-2">
+          {attempt.localOffline && (
+            <p role="alert" className="basis-full">
+              {t("writing.localOffline")}
+            </p>
+          )}
           {retryHasImages && sameVision && !sameVision.verified && (
             <VisionControl check={sameVision} />
           )}
@@ -2074,7 +2086,7 @@ function Composer({
         </p>
       )}
       {saveFailed && <p role="alert">{t("writing.tasks.saveFailed")}</p>}
-      {!sidebar && turns.length > 0 && !attempt?.capacityRejected ? (
+      {!sidebar && turns.length > 0 && !attempt?.capacityRejected && !attempt?.localOffline ? (
         <button
           type="button"
           className={`${buttonClass} self-start`}

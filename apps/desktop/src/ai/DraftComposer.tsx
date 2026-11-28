@@ -4,7 +4,7 @@ import type { Platform } from "../platform/platform.ts";
 import { useSettings } from "../settings/useSettings.ts";
 import { useTabStore } from "../tabs/context.ts";
 import { ExternalAgentAccessNotice } from "./ExternalAgentPanel.tsx";
-import { type AgentAccess, type ExternalAgent, externalAgentSender } from "./external-agent.ts";
+import type { AgentAccess } from "./external-agent.ts";
 import {
   type MaterialPlan,
   MaterialPlanPreview,
@@ -12,7 +12,7 @@ import {
 } from "./MaterialCapacity.tsx";
 import { MaterialRequestNotice, useMaterialRequests } from "./MaterialRequest.tsx";
 import { useModelVision, VisionControl, type VisionTarget } from "./ModelVision.tsx";
-import { modelEndpoint, modelWritingSender, type SavedModelConnection } from "./model.ts";
+import { isLocalModelOffline, modelEndpoint, modelWritingSender } from "./model.ts";
 import { recordWritingResult } from "./record-writing-result.ts";
 import { SourcePassageReview } from "./SourcePassageReview.tsx";
 import {
@@ -38,6 +38,13 @@ import {
   writingMaterialNames,
 } from "./writing-attempt.ts";
 import {
+  effectiveWritingRecipient,
+  loadWritingRecipients,
+  type WritingRecipient,
+  writingConnectionId,
+  writingRecipientLabel,
+} from "./writing-recipients.ts";
+import {
   hasTaskImages,
   type NamedMaterial,
   type TaskContext,
@@ -54,6 +61,7 @@ interface DraftConnection {
   readonly id: string;
   readonly label: string;
   readonly send: WritingSender;
+  readonly endpoint?: string;
   readonly visionTarget?: VisionTarget;
   readonly agentAccess?: AgentAccess;
 }
@@ -112,8 +120,7 @@ export function DraftComposer({
   const [address, setAddress] = useState("");
   const [model, setModel] = useState("");
   const [key, setKey] = useState("");
-  const [agents, setAgents] = useState<ExternalAgent[]>([]);
-  const [models, setModels] = useState<readonly SavedModelConnection[]>([]);
+  const [recipients, setRecipients] = useState<readonly WritingRecipient[] | null>(null);
   const [choice, setChoice] = useState<string | null>(null);
   const { settings } = useSettings();
   const busy = attempt?.status === "working" || attempt?.status === "approval";
@@ -135,27 +142,21 @@ export function DraftComposer({
   const toolPicker = useWritingToolPicker(platform.sendMcpRequest);
   const toolApproval = materialRequests.externalTool;
   const defaultConnection = settings.defaultWritingConnection;
-  const selected =
-    choice ??
-    (defaultConnection ||
-      (models[0] ? `model:${models[0].id}` : agents[0] ? `agent:${agents[0].path}` : ""));
-  const agent = agents.find(({ path }) => `agent:${path}` === selected);
-  const remembered = models.find(({ id }) => `model:${id}` === selected);
+  const preferred = effectiveWritingRecipient(recipients ?? [], defaultConnection);
+  const selected = choice ?? (preferred ? writingConnectionId(preferred) : defaultConnection);
+  const saved = recipients?.find((item) => writingConnectionId(item) === selected);
+  const agent = saved?.kind === "agent" ? saved : undefined;
   const custom = !selected;
-  const unavailable = !custom && !agent && !remembered;
-  let endpoint = "";
-  try {
-    endpoint = modelEndpoint(remembered?.address ?? address);
-  } catch {
-    // Sending stays unavailable until the endpoint is valid.
+  const unavailable = !custom && !saved;
+  let endpoint = saved?.kind === "model" ? saved.endpoint : "";
+  if (custom) {
+    try {
+      endpoint = modelEndpoint(address);
+    } catch {
+      // Sending stays unavailable until the endpoint is valid.
+    }
   }
-  const recipient = agent
-    ? t("writing.recipient.agent", { path: agent.path })
-    : !unavailable && endpoint
-      ? remembered
-        ? t("writing.recipient.model", { name: remembered.name, endpoint })
-        : endpoint
-      : undefined;
+  const recipient = saved ? writingRecipientLabel(t, saved) : endpoint || undefined;
 
   const capacity = useMaterialCapacity({
     recipient,
@@ -187,28 +188,14 @@ export function DraftComposer({
 
   useEffect(() => {
     if (settingsOpen) return;
-    let mounted = true;
-    void platform.listModelConnections().then(
-      (saved) => {
-        if (!mounted) return;
-        setModels(saved);
-      },
-      () => {
-        if (mounted) setError("models.error.connections");
-      },
-    );
-    void platform.externalAgent.saved().then(
-      (saved) => {
-        if (mounted) {
-          setAgents(saved.filter((agent) => agent.approved.includes(agent.preferredAccess)));
-        }
-      },
-      () => {
-        if (mounted) setError("agent.loadFailed");
-      },
-    );
+    let current = true;
+    void loadWritingRecipients(platform).then(({ available, failed }) => {
+      if (!current) return;
+      setRecipients(available);
+      if (failed) setError("writing.connectionsFailed");
+    });
     return () => {
-      mounted = false;
+      current = false;
     };
   }, [platform, settingsOpen]);
 
@@ -218,38 +205,30 @@ export function DraftComposer({
     [address, model, key],
   );
   const vision = checkVision(
-    remembered
-      ? { id: `model:${remembered.id}`, connection: { id: remembered.id } }
+    saved?.kind === "model"
+      ? { id: saved.id, connection: { id: saved.modelId } }
       : custom && endpoint && model.trim()
         ? inlineTarget
         : undefined,
   );
   const canSend =
+    recipients !== null &&
     !!instruction.trim() &&
     !toolPicker.incomplete &&
     !named.loading &&
     !named.unconfirmed &&
     (!named.hasImages || vision?.verified === true) &&
     !!capacity.plan &&
-    (!!agent || (!!endpoint && (!!remembered || (custom && !!model.trim()))));
+    (!!saved || (custom && !!endpoint && !!model.trim()));
 
-  const connections: DraftConnection[] = [
-    ...models.map((item) => ({
-      id: `model:${item.id}`,
-      label: t("writing.recipient.model", {
-        name: item.name,
-        endpoint: modelEndpoint(item.address),
-      }),
-      send: modelWritingSender(platform.sendModelMessage, item),
-      visionTarget: { id: `model:${item.id}`, connection: { id: item.id } },
-    })),
-    ...agents.map((item) => ({
-      id: `agent:${item.path}`,
-      label: t("writing.recipient.agent", { path: item.path }),
-      send: externalAgentSender(platform.externalAgent, item, item.preferredAccess),
-      agentAccess: item.preferredAccess,
-    })),
-  ];
+  const connections: DraftConnection[] = (recipients ?? []).map((item) => ({
+    id: writingConnectionId(item),
+    label: writingRecipientLabel(t, item),
+    send: item.send,
+    ...(item.kind === "model"
+      ? { endpoint: item.endpoint, visionTarget: { id: item.id, connection: { id: item.modelId } } }
+      : { agentAccess: item.access }),
+  }));
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -262,6 +241,7 @@ export function DraftComposer({
       ? {
           id: "",
           label: recipient,
+          endpoint,
           send: modelWritingSender(platform.sendModelMessage, inlineTarget.connection, {
             apiKey: key,
           }),
@@ -399,7 +379,9 @@ export function DraftComposer({
       status = failureStatus(error, signal);
       capacityRejected = !signal.aborted && isMaterialCapacityError(error);
       if (capacityRejected) capacity.reject(connection.label);
-      else if (status === "failed") {
+      else if (status === "interrupted" && isLocalModelOffline(connection.endpoint, error)) {
+        setError("writing.localOffline");
+      } else if (status === "failed") {
         const code = error instanceof Error ? error.message : error;
         setError(
           code === "agentChanged" || code === "agentAccessRequired"
@@ -581,7 +563,7 @@ export function DraftComposer({
             onChange={(event) => setInstruction(event.target.value)}
           />
         </label>
-        {(models.length > 0 || agents.length > 0 || unavailable) && (
+        {(!!recipients?.length || unavailable) && (
           <label className="block">
             {t("draft.connection")}
             <select
@@ -600,14 +582,9 @@ export function DraftComposer({
                   {t("draft.connectionUnavailable")}
                 </option>
               )}
-              {models.map(({ id, name }) => (
-                <option key={id} value={`model:${id}`}>
-                  {name}
-                </option>
-              ))}
-              {agents.map(({ path }) => (
-                <option key={path} value={`agent:${path}`}>
-                  {path}
+              {recipients?.map((candidate) => (
+                <option key={candidate.id} value={writingConnectionId(candidate)}>
+                  {candidate.kind === "agent" ? candidate.path : candidate.name}
                 </option>
               ))}
             </select>
@@ -672,8 +649,8 @@ export function DraftComposer({
         <WritingToolPicker picker={toolPicker} />
         {agent && (
           <details className="space-y-1 text-xs text-(--mint-muted)">
-            <summary>{t(`agent.${agent.preferredAccess}`)}</summary>
-            <ExternalAgentAccessNotice access={agent.preferredAccess} />
+            <summary>{t(`agent.${agent.access}`)}</summary>
+            <ExternalAgentAccessNotice access={agent.access} />
           </details>
         )}
         <button type="submit" disabled={!canSend} className={button}>
