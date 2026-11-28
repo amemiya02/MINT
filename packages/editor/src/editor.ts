@@ -1,4 +1,11 @@
-import { defaultKeymap, history, historyKeymap, redo, undo } from "@codemirror/commands";
+import {
+  defaultKeymap,
+  history,
+  historyKeymap,
+  isolateHistory,
+  redo,
+  undo,
+} from "@codemirror/commands";
 import { syntaxTree } from "@codemirror/language";
 import { selectNextOccurrence } from "@codemirror/search";
 import {
@@ -6,6 +13,7 @@ import {
   EditorSelection,
   EditorState,
   type Extension,
+  Text,
   Transaction,
 } from "@codemirror/state";
 import {
@@ -61,6 +69,7 @@ import { tableOfContents } from "./live-preview/toc.ts";
 import { markupContinuation } from "./markup-continuation.ts";
 import { type OutlineHeading, outline, sameOutline } from "./outline.ts";
 import { editorPreferences } from "./preferences.ts";
+import { type ProsePassage, prosePassageAtCursor } from "./prose-passage.ts";
 import { pasteText, richPaste } from "./rich-paste.ts";
 import type { SharedDocument } from "./shared-document.ts";
 import { type TableCommands, tableCommands } from "./table/commands.ts";
@@ -154,6 +163,11 @@ export interface TextSelection {
   readonly head: number;
 }
 
+export interface TextRange {
+  readonly from: number;
+  readonly to: number;
+}
+
 /** Named commands and their arguments. */
 export interface EditorCommands extends FindCommands, FormattingCommands, TableCommands {
   undo: [];
@@ -196,6 +210,10 @@ export interface MintEditor {
    * disk. The selection stays next to the text around it; undo restores the old text.
    */
   replaceText(text: string): void;
+  /** Replace one range in its own undo step, preserving the surrounding file text. */
+  replaceRange(range: TextRange, text: string): void;
+  /** Capture a bounded passage of ordinary prose at the cursor for proofreading. */
+  getProofreadingPassage(): ProsePassage | null;
   /** The main selection range. */
   getSelection(): TextSelection;
   /** Capture the selected manuscript content for a new annotation. */
@@ -404,6 +422,22 @@ export function createEditor(options: EditorOptions): MintEditor {
     replaceText(text) {
       view.dispatch(replaceFileText(view.state, text));
     },
+    replaceRange(range, text) {
+      const state = view.state;
+      const from = fromFileOffset(state, range.from);
+      const to = fromFileOffset(state, range.to);
+      const insert = Text.of(text.split(/\r\n|\r|\n/));
+      const { main, ranges } = state.selection;
+      view.dispatch({
+        changes: { from, to, insert },
+        selection:
+          ranges.length === 1 && main.from === from && main.to === to
+            ? { anchor: from + insert.length }
+            : undefined,
+        annotations: isolateHistory.of("full"),
+      });
+    },
+    getProofreadingPassage: () => prosePassageAtCursor(view.state),
     getSelection() {
       const { anchor, head } = view.state.selection.main;
       return { anchor: toFileOffset(view.state, anchor), head: toFileOffset(view.state, head) };

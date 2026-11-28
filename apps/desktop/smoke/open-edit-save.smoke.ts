@@ -1147,6 +1147,114 @@ test("a model trial sends only the visible sample and shows native streaming rep
   }
 });
 
+test("automatic proofreading sends only the active passage and undo restores the native file", async () => {
+  const path = join(dir, "proofreading.md");
+  const original = "\uFEFFA speeling error.  \r\n\r\nPrivate appendix.\n";
+  await writeFile(path, original);
+  const requests: { url?: string; authorization?: string; body: unknown }[] = [];
+  const endpoint = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(chunk);
+    requests.push({
+      url: request.url,
+      authorization: request.headers.authorization,
+      body: JSON.parse(Buffer.concat(chunks).toString("utf8")),
+    });
+    response.writeHead(200, { "Content-Type": "application/json" }).end(
+      JSON.stringify({
+        choices: [
+          {
+            message: { content: '{"original":"speeling","replacement":"spelling"}' },
+            finish_reason: "stop",
+          },
+        ],
+      }),
+    );
+  });
+  await new Promise<void>((resolve, reject) => {
+    endpoint.once("error", reject);
+    endpoint.listen(0, "127.0.0.1", resolve);
+  });
+  const address = endpoint.address();
+  assert.ok(address && typeof address !== "string");
+  const api = `http://127.0.0.1:${address.port}/v1`;
+  const secret = "native-proofreading-fixture-key";
+  const checkbox =
+    "//input[@type='checkbox' and @id=//label[normalize-space(.)='Automatic proofreading']/@for]";
+
+  try {
+    await restart([path]);
+    await clickPath("//div[contains(@class,'cm-content') and contains(.,'A speeling error.')]");
+    await keyActions(chord(keys.control, keys.home));
+    await openSettings();
+    await click("Model connections");
+    await shows("Sample prompt");
+    for (const [label, value] of [
+      ["Connection name", "Native proofreading fixture"],
+      ["API address", api],
+      ["Model name", "native-proofreader"],
+      ["API key", secret],
+    ]) {
+      const input = await command<Record<string, string>>("POST", `/session/${session}/element`, {
+        using: "xpath",
+        value: `//dialog[@open]//label[normalize-space(.)='${label}']/input`,
+      });
+      await command("POST", `/session/${session}/element/${input[elementKey]}/value`, {
+        text: value,
+      });
+    }
+    await clickPath("//button[not(@disabled) and normalize-space(.)='Use for this launch']");
+    await clickPath(
+      "//select/option[starts-with(normalize-space(.),'Native proofreading fixture')]",
+    );
+    assert.deepEqual(requests, [], "setting up a model does not send the manuscript");
+    await clickPath(checkbox);
+    await click("Close");
+    await clickPath(
+      "//section[@aria-label='Proofreading suggestion']//button[normalize-space(.)='Apply correction']",
+    );
+    assert.equal(requests.length, 1);
+    const { url, authorization, body } = requests[0] as {
+      url: string;
+      authorization: string;
+      body: { model: string; messages: { content: string }[] };
+    };
+    assert.equal(url, "/v1/chat/completions");
+    assert.equal(authorization, `Bearer ${secret}`);
+    assert.equal(body.model, "native-proofreader");
+    assert.equal(body.messages.length, 1);
+    assert.equal(JSON.parse(body.messages[0].content).selectedText, "A speeling error.");
+    await nativeShortcut("ctrl+s");
+    await until(
+      "only the corrected fragment to reach disk",
+      async () =>
+        (await readFile(path, "utf8")) === original.replace("speeling", "spelling") || null,
+    ).catch(explain);
+    await keyActions(chord(keys.control, "z"));
+    await nativeShortcut("ctrl+s");
+    await until(
+      "Undo to restore the exact native bytes",
+      async () => (await readFile(path)).equals(Buffer.from(original)) || null,
+    ).catch(explain);
+
+    await openSettings();
+    await clickPath(checkbox);
+    await click("Close");
+    const sentBeforeTyping = requests.length;
+    await keyActions([...typing(keys.end), ...typing(" More notes.")]);
+    await nativeShortcut("ctrl+s");
+    await until(
+      "ordinary writing to reach disk after turning proofreading off",
+      async () => (await readFile(path, "utf8")).includes("More notes.") || null,
+    ).catch(explain);
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    assert.equal(requests.length, sentBeforeTyping);
+  } finally {
+    endpoint.closeAllConnections();
+    await new Promise<void>((resolve) => endpoint.close(() => resolve()));
+  }
+});
+
 test("a native model reply stays editable and untitled until the author chooses a Save As path", async () => {
   const folder = await mkdtemp(join(homedir(), "mint-ai-draft-"));
   const path = join(folder, "field-notes.md");

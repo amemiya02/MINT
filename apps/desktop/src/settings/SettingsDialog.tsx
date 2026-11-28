@@ -173,6 +173,8 @@ function SettingControl({
       );
       break;
     case "text":
+      // The Model connections section owns this selector and its live list of saved models.
+      if (definition.optionsFrom === "modelConnections") return null;
       control =
         definition.optionsFrom === "themes" ? (
           <ThemeSelect id={id} value={String(value)} onChange={set} />
@@ -194,6 +196,9 @@ function SettingControl({
         {control}
       </div>
       {definition.kind === "text" && definition.optionsFrom === "themes" && <ThemeFolderHint />}
+      {settingKey === "proofreading" && (
+        <p className="text-xs text-(--mint-muted)">{t("settings.proofreadingHint")}</p>
+      )}
     </div>
   );
 }

@@ -1,6 +1,8 @@
 import { type FormEvent, useEffect, useId, useState } from "react";
 import { type MessageKey, useT } from "../i18n/index.ts";
 import type { Platform } from "../platform/platform.ts";
+import { settingsSchema } from "../settings/schema.ts";
+import { useSettings, useSettingsStore } from "../settings/useSettings.ts";
 import { ConnectionSection } from "./ConnectionSection.tsx";
 import { modelEndpoint, modelWritingSender, type SavedModelConnection } from "./model.ts";
 
@@ -28,6 +30,8 @@ export function ModelConnections({ platform }: { readonly platform: Platform }) 
 
 function ConnectionList({ platform }: { readonly platform: Platform }) {
   const t = useT();
+  const store = useSettingsStore();
+  const { proofreadingModel } = useSettings().settings;
   const [connections, setConnections] = useState<readonly SavedModelConnection[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   useEffect(() => {
@@ -59,6 +63,21 @@ function ConnectionList({ platform }: { readonly platform: Platform }) {
         platform={platform}
         onSaved={(saved) => setConnections((previous) => [...(previous ?? []), saved])}
       />
+      <label className="block space-y-1 px-3 text-sm">
+        {t(settingsSchema.proofreadingModel.label)}
+        <select
+          className={fieldClass}
+          value={connections.some(({ id }) => id === proofreadingModel) ? proofreadingModel : ""}
+          onChange={(event) => void store.set("proofreadingModel", event.target.value)}
+        >
+          <option value="">{t("models.proofreadingNone")}</option>
+          {connections.map(({ id, name, address }) => (
+            <option key={id} value={id}>
+              {t("models.proofreadingOption", { name, address })}
+            </option>
+          ))}
+        </select>
+      </label>
       {connections.map((connection) => (
         <section
           key={connection.id}

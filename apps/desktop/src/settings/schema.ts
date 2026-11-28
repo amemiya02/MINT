@@ -64,6 +64,13 @@ export const settingsSchema = {
   vimMode: toggle({ label: "settings.vimMode", default: false }),
   /** The system spellchecker underlines misspelled words (not in code, math or URLs). */
   spellcheck: toggle({ label: "settings.spellcheck", default: true }),
+  proofreading: toggle({ label: "settings.proofreading", default: false }),
+  proofreadingModel: text({
+    label: "settings.proofreadingModel",
+    default: "",
+    maxLength: 200,
+    optionsFrom: "modelConnections",
+  }),
   // Extended syntax (ADR-0004), each off by default: the dialect's `extended` switches (see dialect.ts).
   extendedToc: toggle({ label: "settings.extendedToc", default: false }),
   extendedHighlight: toggle({ label: "settings.extendedHighlight", default: false }),
@@ -142,8 +149,8 @@ export interface TextSetting extends BaseSetting<string> {
   readonly maxLength: number;
   /** Shown in the empty field. */
   readonly placeholder?: MessageKey;
-  /** `themes`: the built-in themes and any user themes in the theme folder. */
-  readonly optionsFrom?: "themes";
+  /** The catalog from which the user chooses a stored value. */
+  readonly optionsFrom?: "themes" | "modelConnections";
 }
 
 /** Shortcut overrides: a command id to an accelerator, or to `null` for no shortcut. */

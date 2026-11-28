@@ -139,6 +139,12 @@ export const commands = [
     group: "spelling",
   },
   {
+    id: "edit.toggleProofreading",
+    title: "command.edit.toggleProofreading",
+    menu: "edit",
+    group: "spelling",
+  },
+  {
     id: "edit.addAnnotation",
     title: "command.edit.addAnnotation",
     accelerator: "CmdOrCtrl+Alt+M",

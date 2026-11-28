@@ -1,5 +1,6 @@
 import type { CodeBlockRenderer, DocumentLink, LinkTarget, WordCount } from "@mint/editor";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { Proofreading } from "../ai/Proofreading.tsx";
 import { createImageHost, type ImageSaveFailure } from "../assets/image-host.ts";
 import { EditorPane } from "../EditorPane.tsx";
 import { resolveDocumentLink } from "../folder/wikilinks.ts";
@@ -7,7 +8,7 @@ import { useT } from "../i18n/index.ts";
 import { isAbsolutePath } from "../paths.ts";
 import type { Platform } from "../platform/platform.ts";
 import { useDialect } from "../settings/useDialect.ts";
-import { useSettingsStore } from "../settings/useSettings.ts";
+import { useSettings, useSettingsStore } from "../settings/useSettings.ts";
 import { useTabStore } from "../tabs/context.ts";
 import { ExternalChangeNotice } from "../tabs/ExternalChangeNotice.tsx";
 import type { Tab, TabStore } from "../tabs/tab-store.ts";
@@ -29,6 +30,7 @@ export function TabPanel({
   onEditorChange,
   onEdited,
   onWordCount,
+  proofreadingPaused,
   drafting,
 }: {
   readonly tab: Tab;
@@ -44,6 +46,7 @@ export function TabPanel({
   readonly onEditorChange: () => void;
   readonly onEdited: (id: number) => void;
   readonly onWordCount: (count: WordCount) => void;
+  readonly proofreadingPaused: boolean;
   readonly drafting: ReactNode;
 }) {
   const store = useTabStore();
@@ -73,6 +76,9 @@ export function TabPanel({
   const dialect = useDialect(wikilinkFolder !== null);
   const t = useT();
   const settings = useSettingsStore();
+  const { proofreading, proofreadingModel } = useSettings().settings;
+  const editor =
+    active && !proofreadingPaused && proofreading && proofreadingModel ? store.editor(id) : null;
   const [imageFailure, setImageFailure] = useState<ImageSaveFailure | null>(null);
   const [imageHost] = useState(() =>
     createImageHost(
@@ -132,6 +138,14 @@ export function TabPanel({
         <ImageSaveNotice failure={imageFailure} onDismiss={() => setImageFailure(null)} />
       )}
       {drafting}
+      {editor && (
+        <Proofreading
+          key={proofreadingModel}
+          editor={editor}
+          platform={platform}
+          modelId={proofreadingModel}
+        />
+      )}
       <div
         className={`flex min-h-0 min-w-0 flex-1 ${toolbarPosition === "side" ? "flex-row" : "flex-col"}`}
       >
