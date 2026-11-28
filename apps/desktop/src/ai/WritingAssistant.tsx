@@ -2,8 +2,8 @@ import type { MintEditor } from "@mint/editor";
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { useT } from "../i18n/index.ts";
 import type { Platform } from "../platform/platform.ts";
-import { type ExternalAgent, externalAgentSender } from "./external-agent.ts";
 import { type EditStatus, ProposedSelectionEdit } from "./ProposedSelectionEdit.tsx";
+import { loadWritingRecipients, type WritingRecipient } from "./writing-recipients.ts";
 import { replacementFromReply, type WritingTurn } from "./writing-sender.ts";
 
 const buttonClass =
@@ -149,8 +149,8 @@ function Composer({
   const [actionOverride, setActionOverride] = useState<Action | null>(null);
   const [documentText, setDocumentText] = useState("");
   const [includeHistory, setIncludeHistory] = useState(true);
-  const [agents, setAgents] = useState<readonly ExternalAgent[]>([]);
-  const [recipientPath, setRecipientPath] = useState<string | null>(null);
+  const [recipients, setRecipients] = useState<readonly WritingRecipient[]>([]);
+  const [recipientId, setRecipientId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
   const [turns, setTurns] = useState<readonly Turn[]>([]);
@@ -160,7 +160,11 @@ function Composer({
   );
   const input = useRef<HTMLInputElement>(null);
   const mounted = useRef(true);
-  const recipient = agents.find((agent) => agent.path === recipientPath);
+  const recipient = recipients.find((candidate) => candidate.id === recipientId);
+  const labelFor = (candidate: WritingRecipient) =>
+    candidate.kind === "agent"
+      ? t("writing.recipient.agent", { path: candidate.path })
+      : t("writing.recipient.model", { name: candidate.name, endpoint: candidate.endpoint });
   const material =
     scope === "selection" ? origin.text : scope === "document" ? documentText : undefined;
   const explicitDirect = /(?:^|[,，]\s*)(?:apply directly|直接改)[.!。！]?\s*$/i.test(instruction);
@@ -190,21 +194,13 @@ function Composer({
     let current = true;
     setLoading(true);
     setLoadFailed(false);
-    void platform.externalAgent.saved().then(
-      (saved) => {
-        if (!current) return;
-        const available = saved.filter((agent) => agent.approved.includes(agent.preferredAccess));
-        setAgents(available);
-        setRecipientPath((previous) => previous ?? available[0]?.path ?? null);
-        setLoading(false);
-      },
-      () => {
-        if (!current) return;
-        setAgents([]);
-        setLoadFailed(true);
-        setLoading(false);
-      },
-    );
+    void loadWritingRecipients(platform).then(({ available, failed }) => {
+      if (!current) return;
+      setRecipients(available);
+      setRecipientId((previous) => previous ?? available[0]?.id ?? null);
+      setLoadFailed(failed);
+      setLoading(false);
+    });
     return () => {
       current = false;
     };
@@ -254,12 +250,7 @@ function Composer({
     if (placement === "inline") origin.editor.focus();
 
     try {
-      const send = externalAgentSender(
-        platform.externalAgent,
-        recipient,
-        recipient.preferredAccess,
-      );
-      const result = await send({
+      const result = await recipient.send({
         instruction: prompt,
         selectedText: material,
         history,
@@ -274,7 +265,7 @@ function Composer({
           instruction: prompt,
           reply: replacement ?? result.text,
           material,
-          recipient: recipient.path,
+          recipient: labelFor(recipient),
           edit,
         },
       ]);
@@ -426,34 +417,35 @@ function Composer({
                 {t("writing.recipient")}
                 <select
                   className={fieldClass}
-                  value={recipient?.path ?? ""}
-                  onChange={(event) => setRecipientPath(event.target.value)}
+                  value={recipient?.id ?? ""}
+                  title={recipient && labelFor(recipient)}
+                  onChange={(event) => setRecipientId(event.target.value)}
                 >
                   {!recipient && (
                     <option value="">
                       {t(loading ? "writing.loading" : "writing.chooseRecipient")}
                     </option>
                   )}
-                  {agents.map((agent) => (
-                    <option key={agent.path} value={agent.path}>
-                      {t("agent.recipient", { path: agent.path })}
+                  {recipients.map((candidate) => (
+                    <option key={candidate.id} value={candidate.id}>
+                      {labelFor(candidate)}
                     </option>
                   ))}
                 </select>
               </label>
             </div>
-            {recipient && (
+            {recipient?.kind === "agent" && (
               <p className="text-xs text-(--mint-muted)">
                 {t("agent.processAccess")}{" "}
                 {t(
-                  recipient.preferredAccess === "readOnly"
+                  recipient.access === "readOnly"
                     ? "agent.readOnlyAccess"
                     : "agent.configuredAccess",
                 )}{" "}
-                {t("agent.tools")}
+                {t("agent.tools")} {t("agent.usesLogin")}
               </p>
             )}
-            {loadFailed && <p role="alert">{t("agent.loadFailed")}</p>}
+            {loadFailed && <p role="alert">{t("writing.connectionsFailed")}</p>}
             {material !== undefined && (
               <div>
                 <p className="text-xs text-(--mint-muted)">{t("writing.context")}</p>

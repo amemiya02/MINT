@@ -33,7 +33,7 @@ test("settings tries a discovered Agent only after the author allows its access"
   await expect(page.getByText("The sample reads clearly.")).toBeVisible();
   await expect(page.getByText("Conversation verified")).toBeVisible();
   await expect(
-    page.getByText("Live streaming, document editing and multi-file tasks are unavailable."),
+    page.getByText("Live streaming and multi-file tasks are unavailable.", { exact: false }),
   ).toBeVisible();
   expect(received).toEqual([
     {

@@ -103,6 +103,24 @@ test("selection rewrites preview first or apply with one undo step", async ({ pa
   const executable = "/fixtures/codex";
   const selection = "We all met with the entire team.";
   const source = "\uFEFFPrivate paragraph.  \r\n\nOriginal line.\r\n";
+  const endpoint = "https://model.example.test/v1/chat/completions";
+  const requests: { authorization?: string; body: unknown }[] = [];
+  await page.route(endpoint, (route) => {
+    requests.push({
+      authorization: route.request().headers().authorization,
+      body: route.request().postDataJSON(),
+    });
+    return route.fulfill({
+      json: {
+        choices: [
+          {
+            message: { content: "<replacement>The team met.</replacement>" },
+            finish_reason: "stop",
+          },
+        ],
+      },
+    });
+  });
   await page.route("**/__test/ask-ai-edit", (route) =>
     route.fulfill({
       json: {
@@ -140,11 +158,41 @@ test("selection rewrites preview first or apply with one undo step", async ({ pa
 
   await inline.getByRole("button", { name: "Close" }).click();
   await page.getByRole("button", { name: "Ask AI", exact: true }).click();
+  await inline.getByRole("button", { name: "Connection settings" }).click();
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  await settings.getByRole("button", { name: "Model connections" }).click();
+  await settings.getByLabel("Connection name").fill("Editorial model");
+  await settings.getByLabel("API address").fill(endpoint);
+  await settings.getByLabel("Model name").fill("fixture-writer");
+  await settings.getByLabel("API key").fill("fixture-key");
+  await settings.getByRole("button", { name: "Use for this launch" }).click();
+  await expect(settings.getByRole("region", { name: "Editorial model" })).toBeVisible();
+  await settings.getByRole("button", { name: "Close" }).click();
+  await inline.getByLabel("Recipient").selectOption({ label: `Editorial model · ${endpoint}` });
   await instruction.fill("Shorten this sentence, apply directly");
   await expect(inline.getByLabel("Action")).toHaveValue("direct");
   await instruction.press("Enter");
   await expect(editor).toContainText("Original line. The team met.");
   await expect(editor).toBeFocused();
+  expect(requests).toEqual([
+    {
+      authorization: "Bearer fixture-key",
+      body: {
+        model: "fixture-writer",
+        stream: false,
+        messages: [
+          { role: "system", content: expect.stringContaining("<replacement>") },
+          {
+            role: "user",
+            content: JSON.stringify({
+              instruction: "Shorten this sentence, apply directly",
+              selectedText: selection,
+            }),
+          },
+        ],
+      },
+    },
+  ]);
   await page.keyboard.press("ControlOrMeta+S");
   await expect
     .poll(() => readFile(page, path))

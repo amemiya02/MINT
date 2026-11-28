@@ -20,7 +20,7 @@ export const replacementInstruction =
   "If the request calls for replacing the selected text, reply with only the new Markdown enclosed in <replacement> and </replacement>. For comments or an unclear edit, reply in plain text.";
 
 export function replacementFromReply({ text, finishReason }: WritingReply): string | undefined {
-  if (finishReason && finishReason !== "stop") return;
+  if (finishReason != null && finishReason !== "stop") return;
   const replacement = /^<replacement>([\s\S]+)<\/replacement>$/.exec(text.trim())?.[1];
   if (replacement?.trim() && !/<\/?replacement>/.test(replacement)) return replacement;
 }

@@ -22,6 +22,9 @@ export const en = {
   "writing.scope.instruction": "Instruction only",
   "writing.context": "Task context to send",
   "writing.recipient": "Recipient",
+  "writing.recipient.agent": "Codex · {path}",
+  "writing.recipient.model": "{name} · {endpoint}",
+  "writing.connectionsFailed": "Some saved connections could not be loaded.",
   "writing.chooseRecipient": "Choose a connection",
   "writing.loading": "Loading connections…",
   "writing.send": "Send",
@@ -62,7 +65,8 @@ export const en = {
   "agent.send": "Send selection",
   "agent.verified": "Conversation verified",
   "agent.unverified": "Conversation unverified",
-  "agent.unsupported": "Live streaming, document editing and multi-file tasks are unavailable.",
+  "agent.unsupported":
+    "Live streaming and multi-file tasks are unavailable. Ask AI can turn a text reply into a selection edit.",
   "agent.allow": "Allow this Agent to run?",
   "agent.expand": "Change this Agent’s approved permissions?",
   "agent.consent":

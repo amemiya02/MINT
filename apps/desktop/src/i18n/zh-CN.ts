@@ -22,6 +22,9 @@ export const zhCN: Messages = {
   "writing.scope.instruction": "仅指令",
   "writing.context": "将发送的任务材料",
   "writing.recipient": "接收方",
+  "writing.recipient.agent": "Codex · {path}",
+  "writing.recipient.model": "{name} · {endpoint}",
+  "writing.connectionsFailed": "部分已保存的连接无法加载。",
   "writing.chooseRecipient": "选择连接",
   "writing.loading": "正在加载连接…",
   "writing.send": "发送",
@@ -61,7 +64,8 @@ export const zhCN: Messages = {
   "agent.send": "发送选中文本",
   "agent.verified": "对话已验证",
   "agent.unverified": "对话待验证",
-  "agent.unsupported": "当前连接不支持实时流式生成、直接改稿和多文件任务。",
+  "agent.unsupported":
+    "当前连接不支持实时流式生成和多文件任务。「问 AI」可将文本回复转换为选区修改。",
   "agent.allow": "允许运行此 Agent 吗？",
   "agent.expand": "是否更改此 Agent 已获准的权限？",
   "agent.consent":
