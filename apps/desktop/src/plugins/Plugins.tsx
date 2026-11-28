@@ -15,6 +15,7 @@ import {
   type PluginManifest,
   propertyTable,
   readStatistics,
+  slidePresentation,
   tagBrowser,
   timingDiagrams,
   uninstall,
@@ -41,6 +42,7 @@ export function useInstallations() {
 const button = "rounded border border-(--mint-border) px-2 py-1 text-sm hover:bg-(--mint-hover)";
 export function pluginName(m: PluginManifest, t: Translate) {
   if (m.id === notionImporter.id) return t("notion.name");
+  if (m.id === slidePresentation.id) return t("slides.name");
   if (m.id === epubExport.id) return t("plugin.epub");
   if (m.id === timingDiagrams.id) return t("plugin.timing");
   if (m.id === writingTemplates.id) return t("plugin.templates");
@@ -83,6 +85,7 @@ export function PluginSettings() {
     timingDiagrams,
     notionImporter,
     epubExport,
+    slidePresentation,
   ].filter((m) => !installed.some((i) => i.manifest.id === m.id));
   return (
     <section aria-label={t("plugin.title")} className="flex flex-col gap-2">

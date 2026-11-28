@@ -19,6 +19,7 @@ export interface PluginManifest {
   templates?: { name: string; text: string }[];
   exportFormat?: PluginFormat;
   sidebar?: "tags" | "properties" | "kanban";
+  presentation?: "slides";
   diagram?: "timing";
   importer?: "notion";
 }
@@ -37,6 +38,14 @@ export const epubExport: PluginManifest = {
   name: "EPUB export",
   permissions: ["document.read"],
   exportFormat: "epub",
+};
+
+export const slidePresentation: PluginManifest = {
+  apiVersion: 1,
+  id: "mint.slides",
+  name: "Slide presentation",
+  permissions: ["document.read"],
+  presentation: "slides",
 };
 
 export const timingDiagrams: PluginManifest = {
@@ -132,6 +141,10 @@ export function isManifest(value: unknown): value is PluginManifest {
   }
   if ("exportFormat" in m) {
     if (!isPluginFormat(m.exportFormat)) return false;
+    required.add("document.read");
+  }
+  if ("presentation" in m) {
+    if (m.presentation !== "slides") return false;
     required.add("document.read");
   }
   if ("diagram" in m) {
@@ -303,4 +316,11 @@ export function activeExportFormats(items = installations()): PluginFormat[] {
       ),
     ),
   ];
+}
+
+export function canPresentSlides(items = installations()): boolean {
+  return items.some(
+    ({ enabled, grants, manifest }) =>
+      enabled && grants.includes("document.read") && manifest.presentation === "slides",
+  );
 }

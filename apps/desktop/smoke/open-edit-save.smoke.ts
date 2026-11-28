@@ -317,11 +317,11 @@ test("moving a Kanban card changes only its status on disk after the writer gran
   await click("Close");
 });
 
-const click = async (label: string, by: "text" | "aria-label" = "text") => {
+const click = async (label: string, by: "text" | "aria-label" = "text", scope = "") => {
   const element = await until(label, async () => {
     const result = await command<Record<string, string>>("POST", `/session/${session}/element`, {
       using: "xpath",
-      value: `//button[${by === "text" ? "normalize-space(.)" : "@aria-label"}='${label}']`,
+      value: `${scope}//button[${by === "text" ? "normalize-space(.)" : "@aria-label"}='${label}']`,
     });
     return result[elementKey] ?? null;
   }).catch(explain);
@@ -597,5 +597,43 @@ test("declining a plugin update keeps its native read grant and withholds its wr
   ).catch(explain);
   await nativeShortcut("ctrl+comma");
   await click("Uninstall");
+  await click("Close");
+});
+
+test("the native slide presentation returns to the draft and preserves its bytes", async () => {
+  const path = join(dir, "slides.md");
+  const source = Buffer.from(
+    "\uFEFF# Opening\r\n\r\nFirst slide.  \r\n\r\n---\r\n\r\n# Closing\r\n",
+  );
+  await writeFile(path, source);
+  await restart([path]);
+  await until("the presentation manuscript to open", () =>
+    command<boolean>("POST", `/session/${session}/execute/sync`, {
+      script:
+        "return document.querySelector('.cm-content')?.textContent.includes('Closing') === true",
+      args: [],
+    }).then((ready) => ready || null),
+  ).catch(explain);
+  await nativeShortcut("ctrl+comma");
+  const plugin = "//fieldset[@aria-label='Slide presentation']";
+  await click("Install", "text", plugin);
+  await click("Allow access");
+  await click("Close");
+  await click("Present slides");
+  await shows("First slide.");
+  await click("Next slide");
+  await shows("Closing");
+  await click("Previous slide");
+  await shows("First slide.");
+  await click("Exit presentation");
+  await until("the manuscript to receive focus again", () =>
+    command<boolean>("POST", `/session/${session}/execute/sync`, {
+      script: "return document.activeElement?.matches('.cm-content') === true",
+      args: [],
+    }).then((ready) => ready || null),
+  ).catch(explain);
+  assert.deepEqual(await readFile(path), source);
+  await nativeShortcut("ctrl+comma");
+  await click("Uninstall", "text", plugin);
   await click("Close");
 });
