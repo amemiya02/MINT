@@ -3093,8 +3093,10 @@ test("a slash writing skill sends the approved plan and remembers its folder act
   }
 });
 
-test("a shared writing skill uses fresh materials and the recipient's native connection", async () => {
-  const folder = await mkdtemp(join(dir, "shared-writing-skill-"));
+test("a shared writing skill uses fresh materials and the recipient's native connection", async (t) => {
+  // The GTK save helper navigates to the destination through Home's directory rows.
+  const folder = await mkdtemp(join(homedir(), "mint-shared-writing-skill-"));
+  t.after(() => rm(folder, { recursive: true, force: true }));
   const authorDraft = join(folder, "author-agreement.md");
   const recipientDraft = join(folder, "recipient-agreement.md");
   const exported = join(folder, "agreement-review.mint-skill.json");
@@ -4355,8 +4357,17 @@ if (prompt.instruction === ${JSON.stringify(cancelInstruction)}) {
   await shows("Fixture Agent reply.");
   assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, callsBeforeRestart + 1);
   await clickSettingsButton("Close");
-  await nativeShortcut("ctrl+n");
-  await click("Draft with AI");
+  await waitForView(
+    "Settings to close before drafting",
+    "return !document.querySelector('dialog:modal');",
+  );
+  await nativeMenuItem("File", "Draft with AI");
+  await waitForView(
+    "the native Draft with AI command to open the composer in a new untitled tab",
+    `const tab = document.querySelector('[role=tab][aria-selected=true]');
+     return tab?.textContent === 'Untitled' &&
+       !!document.getElementById(tab.getAttribute('aria-controls'))?.querySelector('form[aria-labelledby]');`,
+  );
   await until("the approved Agent to appear as a draft recipient", () =>
     command<boolean>("POST", `/session/${session}/execute/sync`, {
       script: `const select = document.querySelector('[role="tabpanel"]:not([hidden]) form[aria-labelledby] select');
@@ -4587,9 +4598,12 @@ test("Codex provides manuscript and folder reviews from approved task copies", a
   await writeFile(
     executable,
     `#!/usr/bin/env node
+const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const { spawnSync } = require("node:child_process");
 const codex = ${JSON.stringify(codex)};
+const failureLog = ${JSON.stringify(sandboxFailure)};
+process.on("uncaughtExceptionMonitor", (error) => fs.appendFileSync(failureLog, error.stack + "\\n"));
 const args = process.argv.slice(2);
 function sandbox(args) {
   // MINT grants read access to the selected launcher. The fixture delegates to
@@ -4598,11 +4612,11 @@ function sandbox(args) {
   if (profile === -1 || !args[profile].endsWith("}")) throw new Error("Missing task copy profile");
   args[profile] = args[profile].slice(0, -1) + "," + JSON.stringify(codex) + '="read"}';
   const result = spawnSync(codex, ["sandbox", ...args], {
-    stdio: ["ignore", "inherit", "pipe"],
+    stdio: ["ignore", "pipe", "pipe"],
   });
   if (result.status !== 0) {
-    fs.appendFileSync(${JSON.stringify(sandboxFailure)},
-      "Codex sandbox exit " + result.status + ": " + (result.error ?? result.stderr) + "\\n");
+    fs.appendFileSync(failureLog, "Codex sandbox exit " + (result.status ?? result.signal) + ":\\n" +
+      (result.error ?? "") + (result.stderr ?? "") + (result.stdout ?? "") + "\\n");
     process.exit(result.status ?? 1);
   }
 }
@@ -4616,9 +4630,14 @@ const config = args.flatMap((arg, i) =>
 const sample = prompt.instruction.startsWith("Suggest one concise rewrite");
 const folder = prompt.folderDocuments !== undefined;
 const batch = prompt.folderWriteTargets !== undefined;
+if (!sample && !batch) {
+  // Check MINT's staging before Codex mounts protected paths such as .codex.
+  assert.deepEqual(fs.readdirSync(".").sort(), folder ? ["documents"] : ["draft.md", "materials"],
+    "Unexpected files staged in the task copy");
+}
 if (folder) {
-  require("node:assert/strict").deepEqual(prompt.preferences, [${JSON.stringify(preference)}]);
-  require("node:assert/strict").match(prompt.instruction, /explicit current instruction takes precedence/);
+  assert.deepEqual(prompt.preferences, [${JSON.stringify(preference)}]);
+  assert.match(prompt.instruction, /explicit current instruction takes precedence/);
 }
 if (!sample && !folder && (!prompt.instruction.startsWith(${JSON.stringify(`${skillInstruction}\n\n`)}) ||
   !prompt.instruction.includes("Write the resulting Markdown to draft.md."))) process.exit(12);
@@ -4647,8 +4666,7 @@ mkdir documents/next
 mv documents/batch-old.md documents/next/moved.md
 printf '%s' '[{"from":"batch-old.md","to":"next/moved.md"}]' > moves.json
 `)} : folder ? ${JSON.stringify(`set -eu
-test "$(ls -a)" = "$(printf '.\n..\ndocuments')"
-test "$(ls documents)" = "$(printf 'index.md\nmanuscript.md\nold.md')"
+test "$(ls -A documents)" = "$(printf 'index.md\nmanuscript.md\nold.md')"
 printf '%s' "$6" > expected.txt
 cmp documents/manuscript.md expected.txt
 rm expected.txt
@@ -4664,8 +4682,7 @@ printf '%s' "$7" > documents/manuscript.md
 test "$(cat draft.md)" = "We are currently in the process of reviewing the draft."
 printf '%s' "We are reviewing the draft." > draft.md
 `)} : ${JSON.stringify(`set -eu
-test "$(ls -a)" = "$(printf '.\n..\ndraft.md\nmaterials')"
-test "$(ls materials)" = "1.txt"
+test "$(ls -A materials)" = "1.txt"
 test "$(cat materials/1.txt)" = "$3"
 if cat "$1" >/dev/null 2>&1 || cat "$2" >/dev/null 2>&1; then exit 9; fi
 if (printf 'outside write' > "$1") 2>/dev/null || (printf 'outside write' > "$2") 2>/dev/null; then exit 10; fi
