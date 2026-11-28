@@ -1,5 +1,12 @@
 /** English UI strings. This is the reference catalogue: every locale must provide the same keys. */
 export const en = {
+  "journal.needFolder": "Open a folder to create today’s journal.",
+  "journal.failed": "Could not open the journal {path}: {reason}",
+  "journal.name": "Daily journal",
+  "journal.open": "Open today’s journal",
+  "journal.openPackage": "Open today’s journal · {name}",
+  "journal.permission": "Create today’s Markdown journal in the current folder and open it",
+  "journal.denied": "Journal access was denied. Allow journal creation in Settings → Plugins.",
   "plugin.templates": "Writing templates",
   "plugin.installTemplates": "Install writing templates",
   "zotero.permission": "Connect to the local Zotero library",

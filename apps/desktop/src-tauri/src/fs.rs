@@ -44,6 +44,38 @@ pub fn write_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
     Ok(())
 }
 
+/// Publish the complete template once, even when two windows open the same new journal.
+pub fn ensure_document(path: &Path, contents: &[u8]) -> io::Result<()> {
+    fn regular_file(path: &Path) -> io::Result<()> {
+        if fs::symlink_metadata(path)?.is_file() {
+            Ok(())
+        } else {
+            Err(io::Error::other("expected a regular document"))
+        }
+    }
+    match regular_file(path) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        result => return result,
+    }
+    let dir = path
+        .parent()
+        .ok_or_else(|| io::Error::other("missing parent"))?;
+    let mut temp = tempfile::Builder::new()
+        .prefix(".mint-")
+        .suffix(".tmp")
+        .tempfile_in(dir)?;
+    temp.write_all(contents)?;
+    temp.as_file().sync_all()?;
+    match temp.persist_noclobber(path) {
+        Ok(_) => {
+            sync_dir(dir);
+            Ok(())
+        }
+        Err(e) if e.error.kind() == io::ErrorKind::AlreadyExists => regular_file(path),
+        Err(e) => Err(e.error),
+    }
+}
+
 fn resolve_link(path: &Path) -> io::Result<PathBuf> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() => fs::canonicalize(path),
@@ -72,6 +104,28 @@ mod tests {
             .collect();
         names.sort();
         names
+    }
+
+    #[test]
+    fn ensure_document_publishes_one_complete_template_and_preserves_external_edits() {
+        let dir = tempfile::tempdir().unwrap();
+        let journal = dir.path().join("2026-11-28.md");
+        let templates = ["# Daily journal\n", "# Field journal\n"];
+        let start = std::sync::Barrier::new(templates.len());
+        std::thread::scope(|scope| {
+            for template in &templates {
+                scope.spawn(|| {
+                    start.wait();
+                    ensure_document(&journal, template.as_bytes()).unwrap();
+                    assert!(templates.contains(&fs::read_to_string(&journal).unwrap().as_str()));
+                });
+            }
+        });
+        let external = "\u{feff}# Field notes\r\n\r\n本文  \r\n".as_bytes();
+        fs::write(&journal, external).unwrap();
+        ensure_document(&journal, b"new template").unwrap();
+        assert_eq!(fs::read(journal).unwrap(), external);
+        assert_eq!(entries(dir.path()), ["2026-11-28.md"]);
     }
 
     #[test]

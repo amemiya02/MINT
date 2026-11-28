@@ -125,6 +125,7 @@ export function createTauriPlatform(): Platform {
     // The asset protocol only serves files under granted roots (the backend widens its scope
     // as the user opens documents and folders); other local images fail to load.
     assetUrl: (path) => convertFileSrc(path),
+    ensureDocument: (path, initialText) => invoke<void>("ensure_document", { path, initialText }),
     createFile: (path) => invoke<void>("create_file", { path }),
     createDirectory: (path) => invoke<void>("create_directory", { path }),
     applyDocumentEdit: (edit) => invoke<void>("apply_document_edit", { ...edit }),

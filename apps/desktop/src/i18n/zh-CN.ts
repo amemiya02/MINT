@@ -1,6 +1,13 @@
 import type { Messages } from "./index.ts";
 
 export const zhCN: Messages = {
+  "journal.needFolder": "请先打开工作文件夹，再创建今日日记。",
+  "journal.failed": "无法打开日记 {path}：{reason}",
+  "journal.name": "日记",
+  "journal.open": "打开今日日记",
+  "journal.openPackage": "打开今日日记 · {name}",
+  "journal.permission": "在当前工作文件夹创建并打开今天的 Markdown 日记",
+  "journal.denied": "日记权限被拒绝。请在设置的插件选项中允许创建日记。",
   "plugin.templates": "写作模板",
   "plugin.installTemplates": "安装写作模板",
   "zotero.permission": "连接本机 Zotero 文献库",

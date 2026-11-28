@@ -5,6 +5,7 @@ import { isPluginFormat, type PluginFormat } from "./export-formats.ts";
 export type Permission =
   | "document.read"
   | "document.write"
+  | "folder.journal.create"
   | "folder.read"
   | "folder.status.write"
   | "archive.import"
@@ -24,7 +25,16 @@ export interface PluginManifest {
   diagram?: "timing";
   citation?: "zotero";
   importer?: "notion";
+  journalTemplate?: string;
 }
+
+export const dailyJournal: PluginManifest = {
+  apiVersion: 1,
+  id: "mint.daily-journal",
+  name: "Daily journal",
+  permissions: ["folder.journal.create"],
+  journalTemplate: "# {{date}}\n\n",
+};
 
 export const zotero: PluginManifest = {
   apiVersion: 1,
@@ -161,6 +171,10 @@ export function isManifest(value: unknown): value is PluginManifest {
   )
     return false;
   const required = new Set<Permission>();
+  if ("journalTemplate" in m) {
+    if (typeof m.journalTemplate !== "string") return false;
+    required.add("folder.journal.create");
+  }
   if ("citation" in m) {
     if (m.citation !== "zotero") return false;
     required.add("zotero.read");
@@ -329,6 +343,12 @@ export function canMoveCard(id: string): boolean {
       item.grants.includes("folder.read") &&
       item.grants.includes("folder.status.write"),
   );
+}
+
+export function journalTemplate(id: string): string | undefined {
+  const item = installed(id);
+  if (item?.enabled && item.grants.includes("folder.journal.create"))
+    return item.manifest.journalTemplate;
 }
 
 export function canCite(id: string) {

@@ -5,6 +5,7 @@ import { useModalDialog } from "../window/useModalDialog.ts";
 import {
   addedPermissions,
   change,
+  dailyJournal,
   epubExport,
   install,
   installations,
@@ -44,6 +45,7 @@ export function useInstallations() {
 
 const button = "rounded border border-(--mint-border) px-2 py-1 text-sm hover:bg-(--mint-hover)";
 export function pluginName(m: PluginManifest, t: Translate) {
+  if (m.id === dailyJournal.id) return t("journal.name");
   if (m.id === notionImporter.id) return t("notion.name");
   if (m.id === slidePresentation.id) return t("slides.name");
   if (m.id === latexExport.id) return t("plugin.latex");
@@ -58,6 +60,7 @@ export function pluginName(m: PluginManifest, t: Translate) {
 }
 
 function permission(action: Permission, t: Translate) {
+  if (action === "folder.journal.create") return t("journal.permission");
   if (action === "folder.status.write") return t("kanban.permission");
   if (action === "zotero.read") return t("zotero.permission");
   if (action === "archive.import") return t("notion.permission");
@@ -85,6 +88,7 @@ export function PluginSettings() {
   const available = [
     writingStatistics,
     writingTemplates,
+    dailyJournal,
     tagBrowser,
     relationshipGraph,
     kanbanBoard,
