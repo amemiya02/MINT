@@ -1,6 +1,9 @@
 //! A print window has already arranged every page, including its margins.
 //! Pass its physical sheet to the system dialog, which otherwise starts from
 //! the default printer's paper even when the web document declares @page size.
+#[cfg(windows)]
+mod windows;
+
 use serde::Deserialize;
 use tauri::WebviewWindow;
 
@@ -11,12 +14,40 @@ pub(crate) enum Paper {
     Letter,
 }
 
+#[cfg(any(windows, target_os = "macos"))]
+impl Paper {
+    fn millimetres(self) -> (f64, f64) {
+        match self {
+            Paper::A4 => (210.0, 297.0),
+            Paper::A5 => (148.0, 210.0),
+            Paper::Letter => (215.9, 279.4),
+        }
+    }
+}
+
+#[cfg(windows)]
+#[tauri::command]
+pub(crate) async fn print_pages(
+    window: WebviewWindow,
+    paper: Paper,
+    target: std::path::PathBuf,
+) -> Result<(), String> {
+    check_window(&window)?;
+    windows::save(window, paper, target).await
+}
+
+#[cfg(not(windows))]
 #[tauri::command]
 pub(crate) fn print_pages(window: WebviewWindow, paper: Paper) -> Result<(), String> {
+    check_window(&window)?;
+    print(&window, paper).map_err(|error| error.to_string())
+}
+
+fn check_window(window: &WebviewWindow) -> Result<(), String> {
     if !window.label().starts_with("print-") {
         return Err("A print window is required".into());
     }
-    print(&window, paper).map_err(|error| error.to_string())
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]
@@ -25,11 +56,7 @@ fn print(window: &WebviewWindow, paper: Paper) -> tauri::Result<()> {
     use objc2_foundation::{NSCopying, NSSize};
     use objc2_web_kit::WKWebView;
 
-    let (width, height) = match paper {
-        Paper::A4 => (210.0, 297.0),
-        Paper::A5 => (148.0, 210.0),
-        Paper::Letter => (215.9, 279.4),
-    };
+    let (width, height) = paper.millimetres();
     // with_webview runs on the native main thread and keeps both views alive
     // throughout the callback. The print operation retains its job settings.
     window.with_webview(move |view| unsafe {
@@ -84,7 +111,7 @@ fn print(window: &WebviewWindow, paper: Paper) -> tauri::Result<()> {
     })
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
 fn print(window: &WebviewWindow, _paper: Paper) -> tauri::Result<()> {
     window.print()
 }

@@ -261,6 +261,8 @@ export const en = {
   "export.html.cancel": "Cancel",
   "export.html.failed": "Could not export: {reason}",
   "export.pdf.title": "Export as PDF",
+  "export.pdf.saveTitle": "Save PDF",
+  "export.pdf.save": "Save PDF…",
   "export.pdf.print": "Print…",
   "export.pdf.paper": "Paper size",
   "export.pdf.margins": "Margins (mm)",
@@ -268,7 +270,7 @@ export const en = {
   "export.pdf.preview": "Page preview",
   "export.pdf.pages": "{count} pages",
   "export.pdf.hint":
-    "In the print dialog, choose “Save as PDF” (macOS), “Microsoft Print to PDF” (Windows) or “Print to File” (Linux).",
+    "In the print dialog, choose “Save as PDF” (macOS) or “Print to File” (Linux).",
 
   "theme.issue.missing":
     "The theme “{name}” was not found in {path}. The built-in theme is in use.",

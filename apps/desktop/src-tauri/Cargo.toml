@@ -46,5 +46,9 @@ objc2-web-kit = { version = "0.3", default-features = false, features = ["WKWebV
 gtk = "0.18"
 webkit2gtk = "2"
 
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.39"
+windows-core = "0.62"
+
 [lints.clippy]
 all = { level = "warn", priority = -1 }
