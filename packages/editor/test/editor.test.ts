@@ -26,6 +26,19 @@ describe("editor core", () => {
     expect(editor.getSelection()).toEqual({ anchor: 10, head: 10 });
   });
 
+  it("restores the native selection when focus returns without a selection", async () => {
+    const editor = open("selected text");
+    editor.focus();
+    editor.setSelection({ anchor: 0, head: 8 });
+    const content = document.activeElement as HTMLElement;
+    content.blur();
+    document.getSelection()?.removeAllRanges();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    content.focus();
+    editor.focus();
+    expect(document.getSelection()?.toString()).toBe("selected");
+  });
+
   it("notifies subscribers when the text changes", () => {
     const editor = open("a");
     const events: string[] = [];

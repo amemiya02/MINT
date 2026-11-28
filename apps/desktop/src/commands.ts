@@ -90,6 +90,7 @@ export const commands = [
     group: "save",
   },
   { id: "file.history", title: "command.file.history", menu: "file", group: "save" },
+  { id: "file.export", title: "command.file.export", menu: "file", group: "export" },
   { id: "file.exportHtml", title: "command.file.exportHtml", menu: "file", group: "export" },
   { id: "file.exportPdf", title: "command.file.exportPdf", menu: "file", group: "export" },
 
