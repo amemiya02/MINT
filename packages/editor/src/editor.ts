@@ -312,7 +312,7 @@ export interface MintEditor {
   /** Follow the current selection and scroll anchor while a review navigates the document. */
   captureReadingPosition(): {
     current(): TextSelection & { readonly top: number };
-    restore(): void;
+    restore(options?: { readonly scroll?: boolean }): void;
     release(): void;
   };
   /** Matches of the find query set with the `setFindQuery` command. */
@@ -769,8 +769,12 @@ export function createEditor(options: EditorOptions): MintEditor {
           head: toFileOffset(view.state, selection.main.head),
           top: toFileOffset(view.state, top),
         }),
-        restore() {
-          view.dispatch({ selection, effects: scroll, userEvent: "select.restoreReading" });
+        restore({ scroll: restoreScroll = true } = {}) {
+          view.dispatch({
+            selection,
+            effects: restoreScroll ? scroll : [],
+            userEvent: "select.restoreReading",
+          });
         },
         release: () => rangeTrackers.delete(track),
       };

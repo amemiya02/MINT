@@ -1,3 +1,5 @@
+/// <reference path="../css.d.ts" />
+
 import "katex/dist/katex.min.css";
 import type { EditorState, Extension } from "@codemirror/state";
 import { Decoration, EditorView, WidgetType } from "@codemirror/view";

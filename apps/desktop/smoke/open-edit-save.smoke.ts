@@ -129,15 +129,16 @@ async function nativeShortcut(chord: string) {
   await exec("xdotool", ["key", "--clearmodifiers", chord], { timeout: 5000 });
 }
 
-async function openSettings() {
-  // Wait for the real GTK menu item, which is installed after the webview starts.
+async function nativeSettingsMenu(mode: "wait" | "activate") {
   await exec(
     "/usr/bin/python3",
-    ["smoke/activate-gtk-menu.py", await instancePid(), "MINT", "Settings…"],
-    {
-      timeout: 35_000,
-    },
+    ["smoke/activate-gtk-menu.py", mode, await instancePid(), "MINT", "Settings…"],
+    { timeout: 20_000 },
   ).catch(explain);
+}
+
+async function openSettings() {
+  await nativeSettingsMenu("activate");
   await waitForView(
     "the native Settings menu command to open Settings",
     "return document.querySelector('dialog[open] h2')?.textContent === 'Settings'",
@@ -316,6 +317,8 @@ async function restart(args: string[]) {
   assert.ok(created.sessionId, "WebDriver did not create a native session");
   session = created.sessionId;
   await busCall("GetNameOwner", instanceName);
+  // A live window and D-Bus owner can precede registration of GTK accelerators.
+  await nativeSettingsMenu("wait");
 }
 
 test("saved versions survive a native restart outside the working folder", async () => {
@@ -915,6 +918,15 @@ const waitForView = (message: string, script: string) =>
         args: [],
       })) || null,
   ).catch(explain);
+
+const waitForActiveDocument = (path: string) =>
+  waitForView(
+    `${basename(path)} to open and receive focus`,
+    `const tab = document.querySelector('[role=tab][aria-selected=true]');
+     return tab?.textContent === ${JSON.stringify(basename(path))} &&
+       document.activeElement?.matches('.cm-content') &&
+       document.activeElement.closest('[role=tabpanel]')?.id === tab.getAttribute('aria-controls');`,
+  );
 
 test("the task summary reads only granted folder documents and preserves their bytes", async () => {
   const folder = await mkdtemp(join(dir, "tasks-"));
@@ -1702,7 +1714,9 @@ test("a native model receives only the sample or live selection and edits throug
     await writeFile(draft, `\uFEFF${reviewSource}`);
     await waitForView(
       "the replacement draft from disk",
-      "return document.querySelector('.cm-content')?.textContent.includes('Closing line.');",
+      `const editor = document.activeElement;
+       return editor?.matches('.cm-content') && editor.textContent.includes('Keep this.') &&
+         editor.textContent.includes('Closing line.');`,
     );
     await keyActions(chord(keys.control, "a"));
     await askSelection(previewInstruction);
@@ -2014,6 +2028,8 @@ test("a saved writing review resumes after a native restart without contacting i
       },
     ).catch(explain);
     const review = await savedReviewWithPending(4);
+    assert.equal(review.reading.anchor, accepted.length, "the stored anchor stays at Last draft.");
+    assert.equal(review.reading.head, accepted.length, "the stored caret stays at Last draft.");
     const links = await invokeNative<{ id: string; path: string; title: string }[]>(
       "list_writing_reviews_in_folder",
       { folder: dirname(draft) },
@@ -2322,8 +2338,7 @@ test("automatic proofreading sends only the active passage and undo restores the
 
   try {
     await restart([path]);
-    await clickPath("//div[contains(@class,'cm-content') and contains(.,'A speeling error.')]");
-    await keyActions(chord(keys.control, keys.home));
+    await waitForActiveDocument(path);
     await openSettings();
     await click("Model connections");
     await shows("Sample prompt");
@@ -2343,14 +2358,15 @@ test("automatic proofreading sends only the active passage and undo restores the
     }
     await clickPath("//button[not(@disabled) and normalize-space(.)='Use for this launch']");
     await chooseSettingsOption("Proofreading model", "Native proofreading fixture");
-    assert.deepEqual(requests, [], "setting up a model does not send the manuscript");
+    assert.equal(requests.length, 0, "setting up a model does not send the manuscript");
     await clickPath(checkbox);
     await click("Close");
-    await clickPath(
-      "//section[@aria-label='Proofreading suggestion']//button[normalize-space(.)='Apply correction']",
-    );
-    assert.ok(requests[0], "the correction arrived from the fixture endpoint");
-    const { url, authorization, body } = requests[0];
+    await clickPath("//div[contains(@class,'cm-line') and normalize-space(.)='A speeling error.']");
+    await keyActions(typing(keys.home));
+    const { url, authorization, body } = await until(
+      "the active passage to reach the native proofreading model",
+      async () => requests[0] ?? null,
+    ).catch(explain);
     assert.equal(url, "/v1/chat/completions");
     assert.equal(authorization, `Bearer ${secret}`);
     const { model, messages } = body as { model: string; messages: { content: string }[] };
@@ -2359,6 +2375,9 @@ test("automatic proofreading sends only the active passage and undo restores the
     const [message] = messages;
     assert.ok(message);
     assert.equal(JSON.parse(message.content).selectedText, "A speeling error.");
+    await clickPath(
+      "//section[@aria-label='Proofreading suggestion']//button[normalize-space(.)='Apply correction']",
+    );
     await nativeShortcut("ctrl+s");
     await until(
       "only the corrected fragment to reach disk",
@@ -2566,12 +2585,7 @@ test("a native model reply stays editable and untitled until the author chooses 
     const address = endpoint.address();
     assert.ok(address && typeof address !== "string");
     await restart([sources, document]);
-    await until("the original manuscript to open", () =>
-      command<boolean>("POST", `/session/${session}/execute/sync`, {
-        script: "return !!document.querySelector('.cm-content')",
-        args: [],
-      }).then((ready) => ready || null),
-    ).catch(explain);
+    await waitForActiveDocument(document);
     await nativeShortcut("ctrl+n");
     await click("Draft with AI");
 
@@ -2705,6 +2719,7 @@ test("a native model reply stays editable and untitled until the author chooses 
 
     await writeFile(source, `${unapproved}\n${revision}\n`);
     await restart([sources, path]);
+    await waitForActiveDocument(path);
     await invokeNative("save_model_connection", {
       connection: {
         name: "Source check fixture",
@@ -2814,6 +2829,7 @@ test("native writing sends only the approved excerpt after a model capacity erro
     assert.ok(address && typeof address !== "string");
     const model = `http://127.0.0.1:${address.port}/v1`;
     await restart([document]);
+    await waitForActiveDocument(document);
     await nativeShortcut("ctrl+n");
     await click("Draft with AI");
     for (const [label, value] of [
@@ -2943,6 +2959,7 @@ test("a native first model receives the selected PDF page and image crop as inli
     const address = endpoint.address();
     assert.ok(address && typeof address !== "string");
     await restart([document]);
+    await waitForActiveDocument(document);
     await nativeShortcut("ctrl+n");
     await click("Draft with AI");
     for (const [label, value] of [
@@ -3104,6 +3121,7 @@ test("native MCP calls modify only the explicitly authorized target", async () =
     assert.ok(address && typeof address !== "string");
     const base = `http://127.0.0.1:${address.port}`;
     await restart([document]);
+    await waitForActiveDocument(document);
     for (const scenario of ["Deny", "Outside", "Approve"]) {
       await nativeShortcut("ctrl+n");
       await click("Draft with AI");
@@ -4063,6 +4081,7 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   );
 
   await restart([fixture, draft]);
+  await waitForActiveDocument(draft);
   await openSettings();
   const autosave = await command<boolean>("POST", `/session/${session}/execute/sync`, {
     script: `return Boolean([...document.querySelectorAll('dialog[open] label')]
@@ -4289,8 +4308,11 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   }
   await clickPath(`${assistant}//label[normalize-space(.)='Instruction']/input`);
   await keyActions([...typing("Organize these documents."), ...typing(keys.enter)]);
-  await shows("Requires chapter/renamed.md, notes.md");
-  await shows("Folder revision. Unsaved note. New note.");
+  await showsIn('aside[aria-label="Writing Assistant"]', "Requires chapter/renamed.md, notes.md");
+  await showsIn(
+    'aside[aria-label="Writing Assistant"]',
+    "Folder revision. Unsaved note. New note.",
+  );
   assert.equal(await readFile(draft, "utf8"), changed);
   assert.equal(await readFile(index, "utf8"), "[Old](old.md#section)\n");
   assert.equal(await readFile(old, "utf8"), "## Section\n");

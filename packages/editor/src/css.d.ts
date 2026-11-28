@@ -1,2 +1,2 @@
-// Stylesheets imported for their side effect (bundled by the host's build, such as Vite).
-declare module "*.css";
+// KaTeX's stylesheet is bundled by the host for its side effect.
+declare module "katex/dist/katex.min.css";
