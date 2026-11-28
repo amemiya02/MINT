@@ -1,6 +1,7 @@
 import {
   type CodeBlockRenderer,
   createEditor,
+  type DocumentLink,
   type EditorSettings,
   type LinkTarget,
   type MintEditor,
@@ -26,6 +27,7 @@ interface EditorPaneProps {
   readonly onModeChange: () => void;
   /** The user ⌘-clicked a link. */
   readonly onOpenLink: (link: LinkTarget) => void;
+  readonly onPreviewLink: (link: DocumentLink) => void;
   readonly writeClipboardText: (text: string) => Promise<void>;
   /** Resolves and saves the document's images. */
   readonly imageHost: ImageHost;
@@ -48,6 +50,7 @@ export function EditorPane({
   onChange,
   onModeChange,
   onOpenLink,
+  onPreviewLink,
   writeClipboardText,
   imageHost,
   onWordCount,
@@ -71,6 +74,7 @@ export function EditorPane({
     onChange,
     onModeChange,
     onOpenLink,
+    onPreviewLink,
     writeClipboardText,
     imageHost,
     onWordCount,
@@ -83,6 +87,7 @@ export function EditorPane({
     onChange,
     onModeChange,
     onOpenLink,
+    onPreviewLink,
     writeClipboardText,
     imageHost,
     onWordCount,
@@ -101,6 +106,7 @@ export function EditorPane({
       phrases: phrases.current,
       settings: callbacks.current.editorSettings,
       host: {
+        previewLink: (link) => callbacks.current.onPreviewLink(link),
         openLink: (link) => callbacks.current.onOpenLink(link),
         writeClipboardText: (text) => callbacks.current.writeClipboardText(text),
         resolveImageUrl: (path) => callbacks.current.imageHost.resolveImageUrl(path),

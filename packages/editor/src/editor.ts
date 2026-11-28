@@ -35,7 +35,7 @@ import {
 import { focusMode } from "./focus-mode.ts";
 import { type FormattingCommands, formattingCommands } from "./formatting.ts";
 import { type ImageFile, imageFileInsertion } from "./image-files.ts";
-import { type LinkTarget, linkOpening } from "./links.ts";
+import { type DocumentLink, type LinkTarget, linkAt, linkOpening } from "./links.ts";
 import { codeBlocks, setCodeBlockLanguage } from "./live-preview/code-blocks.ts";
 import { type CodeBlockRenderer, fencedRenderers } from "./live-preview/fenced-renderers.ts";
 import { footnotes } from "./live-preview/footnotes.ts";
@@ -74,6 +74,8 @@ import { countWords, type WordCount } from "./word-count.ts";
 export interface HostAdapter {
   /** Open a link the user ⌘-clicked (Ctrl-clicked off macOS). Without it, links do nothing. */
   openLink?(link: LinkTarget): void;
+  /** Preview a local document without navigating away from this view. */
+  previewLink?(link: DocumentLink): void;
   /** Copy plain text. Without it, the editor uses the browser clipboard. */
   writeClipboardText?(text: string): Promise<void>;
   /**
@@ -156,6 +158,8 @@ export interface EditorCommands extends FindCommands, FormattingCommands, TableC
   pastePlainText: [text: string];
   /** Switch between live preview and source mode. Text and selection are unchanged. */
   toggleSourceMode: [];
+  /** Preview the local document linked at the main selection. */
+  previewLink: [];
   /** Set the language of the fenced code block at the cursor; only its info string changes. */
   setCodeBlockLanguage: [language: string];
   /**
@@ -311,7 +315,7 @@ export function createEditor(options: EditorOptions): MintEditor {
         preview.of(modeExtension()),
         focus.of(focusExtension()),
         typewriter.of(typewriterExtension()),
-        host.openLink ? linkOpening((link) => host.openLink?.(link)) : [],
+        linkOpening(host.openLink, host.previewLink),
         EditorView.lineWrapping,
         EditorView.domEventObservers({ scroll: () => emit({ type: "scroll" }) }),
         EditorView.updateListener.of((update) => {
@@ -366,6 +370,12 @@ export function createEditor(options: EditorOptions): MintEditor {
     },
     setCodeBlockLanguage: (language) => setCodeBlockLanguage(view, language),
     selectNextOccurrence: () => selectNextOccurrence(view),
+    previewLink: () => {
+      const link = linkAt(view.state, view.state.selection.main.head);
+      if (link?.kind !== "document" || !host.previewLink) return false;
+      host.previewLink(link);
+      return true;
+    },
     toggleSourceMode: () => {
       mode = mode === "livePreview" ? "source" : "livePreview";
       view.dispatch({ effects: preview.reconfigure(modeExtension()) });

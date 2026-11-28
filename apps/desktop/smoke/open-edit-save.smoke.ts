@@ -201,14 +201,15 @@ test("saved versions survive a native restart outside the working folder", async
     capabilities: { alwaysMatch: { "tauri:options": { application, args: [document] } } },
   });
   session = created.sessionId;
-  const clickHistory = await until("version history button", async () => {
+  const historyButton = await until("version history button", async () => {
     const item = await command<Record<string, string>>("POST", `/session/${session}/element`, {
       using: "css selector",
       value: 'footer button[aria-label="Version History"]',
     });
     return item[elementKey] ?? null;
   });
-  await command("POST", `/session/${session}/element/${clickHistory}/click`, {});
+  // A new GTK menu can move the footer during startup. Activate the button by keyboard.
+  await command("POST", `/session/${session}/element/${historyButton}/value`, { text: keys.enter });
   await until(
     "the saved text to appear in a comparison",
     async () =>
