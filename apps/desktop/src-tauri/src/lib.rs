@@ -11,6 +11,7 @@ mod fs;
 mod grants;
 mod history;
 mod model;
+mod model_connections;
 mod opened;
 mod printing;
 mod recovery;
@@ -708,6 +709,7 @@ pub fn run() {
                 app.handle().plugin(tauri_plugin_process::init())?;
             }
             let data_dir = app.path().app_data_dir()?;
+            app.manage(model_connections::Connections::new(&data_dir));
             let grants = Grants::load(GRANTS_FILE.iter().fold(data_dir.clone(), |p, n| p.join(n)));
             let path = app.path().app_config_dir()?.join(settings::FILE_NAME);
             // settings.json can be opened as a document from the settings window.
@@ -746,6 +748,10 @@ pub fn run() {
             external_agent::forget_external_agent,
             external_agent::send_external_agent,
             model::send_model_request,
+            model::send_connected_model_request,
+            model_connections::list_model_connections,
+            model_connections::save_model_connection,
+            model_connections::disconnect_model_connection,
             zotero::list_zotero_items,
             printing::print_pages,
             read_text_file,
