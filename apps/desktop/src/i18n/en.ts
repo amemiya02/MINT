@@ -9,6 +9,13 @@ export const en = {
   "plugin.file": "Install a MINT plugin file",
   "plugin.invalid": "Unsupported plugin package or plugin already installed.",
   "plugin.title": "Plugins",
+  "plugin.exampleMarkdown": "Example Markdown",
+  "plugin.timingSyntax":
+    "Invalid timing diagram on line {line}. Use a signal name followed by a colon and binary samples, e.g. CLK: 0101.",
+  "plugin.timingWidth":
+    "Invalid timing diagram on line {line}. Each signal needs the same number of samples.",
+  "plugin.timingEmpty": "Invalid timing diagram. Add a signal, e.g. CLK: 0101.",
+  "plugin.timing": "Digital timing diagrams",
   "plugin.tags": "Tag browser",
   "plugin.folderRead": "Read Markdown documents in the current folder",
   "plugin.folderDenied": "Permission to read the current folder was denied.",
