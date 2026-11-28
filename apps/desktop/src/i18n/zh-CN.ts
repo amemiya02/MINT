@@ -383,6 +383,12 @@ export const zhCN: Messages = {
   "settings.typewriterMode": "打字机模式",
   "settings.vimMode": "Vim 键位",
   "settings.spellcheck": "拼写检查",
+  "settings.inlineCompletion": "淡色续写",
+  "settings.inlineCompletion.off": "关闭",
+  "settings.inlineCompletion.unavailable": "连接不可用",
+  "settings.inlineCompletion.recipient": "发送至 {address}",
+  "settings.inlineCompletion.hint":
+    "停笔后，MINT 会把光标附近的稿件文本发送给所选模型。按 Tab 接受建议，按 Esc 忽略。",
   "settings.wikilinks": "在 {folder} 中识别双链语法",
   "settings.expected.folders": "工作文件夹路径数组",
   "settings.extendedToc": "扩展语法：[TOC] 目录标记",

@@ -16,6 +16,7 @@ export { createEditor } from "./editor.ts";
 export type { FindQuery, FindStatus } from "./find.ts";
 export type { HeadingLevel } from "./formatting.ts";
 export type { ImageFile } from "./image-files.ts";
+export type { RequestInlineCompletion } from "./inline-completion.ts";
 export { renderLinkPreview } from "./link-preview.ts";
 export {
   type DocumentLink,

@@ -1,24 +1,19 @@
-// Smoke test of the real desktop app (Tauri + system webview + Rust backend),
-// driven over WebDriver by tauri-driver. Runs on Linux CI only (WebKitGTK's
-// WebKitWebDriver; tauri-driver does not support macOS):
-//
-//   tauri-driver &                                   # listens on :4444
-//   MINT_APP=src-tauri/target/debug/mint xvfb-run node --test smoke/*.smoke.ts
-//
-// The document is handed to MINT on the command line, as a file manager does,
-// so no native dialog is involved.
+// Smoke tests of the desktop app driven through tauri-driver and WebKitWebDriver.
+// See the Linux smoke job in .github/workflows/ci.yml for the private D-Bus
+// session, Secret Service and X display used by the suite.
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer, type ServerResponse } from "node:http";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { after, before, test } from "node:test";
 import { promisify } from "node:util";
 import JSZip from "jszip";
 
 const driver = process.env.TAURI_DRIVER_URL ?? "http://127.0.0.1:4444";
 const application = process.env.MINT_APP;
+const instanceName = "io.github.amemiya02.mint.SingleInstance";
 
 /** WebDriver's key codes (https://w3c.github.io/webdriver/#keyboard-actions). */
 const keys = {
@@ -28,14 +23,17 @@ const keys = {
   home: "\uE011",
   shift: "\uE008",
   enter: "\uE007",
+  tab: "\uE004",
 } as const;
 /** The element reference key of the WebDriver protocol. */
 const elementKey = "element-6066-11e4-a52e-4f735466cecf";
 
 async function command<T>(method: string, path: string, body?: unknown): Promise<T> {
+  assert.ok(!path.startsWith("/session//") && path !== "/session/", "no active WebDriver session");
   const response = await fetch(`${driver}${path}`, {
     method,
     headers: { "content-type": "application/json" },
+    signal: AbortSignal.timeout(45_000),
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   const json = (await response.json()) as { value: T };
@@ -79,39 +77,64 @@ async function keyActions(actions: KeyAction[]): Promise<void> {
 
 const exec = promisify(execFile);
 
-/** WebDriver's keyboard targets the webview. Native menu accelerators belong to its GTK window. */
-async function nativeShortcut(chord: string) {
-  // A previous session can still own a GTK window while an unsaved draft closes.
-  const { stdout } = await exec("pgrep", ["-n", "-x", "mint"]);
-  await exec(
-    "xdotool",
+async function busCall(method: string, ...args: string[]) {
+  const { stdout } = await exec(
+    "gdbus",
     [
-      "search",
-      "--all",
-      "--onlyvisible",
-      "--pid",
-      stdout.trim(),
-      "--name",
-      "MINT$",
-      "windowfocus",
-      "--sync",
+      "call",
+      "--session",
+      "--dest",
+      "org.freedesktop.DBus",
+      "--object-path",
+      "/org/freedesktop/DBus",
+      "--method",
+      `org.freedesktop.DBus.${method}`,
+      ...args,
     ],
     { timeout: 5000 },
   );
-  await exec("xdotool", ["key", chord], { timeout: 5000 });
+  return stdout.trim();
+}
+
+async function waitForInstanceExit() {
+  // WebKitWebDriver can acknowledge DELETE before MINT drops its single-instance name.
+  await until(
+    `D-Bus name ${instanceName} to be released`,
+    async () => (await busCall("NameHasOwner", instanceName)) === "(false,)" || null,
+  );
+}
+
+async function instancePid() {
+  const reply = await busCall("GetConnectionUnixProcessID", instanceName);
+  const pid = /^\(uint32 (\d+),\)$/.exec(reply)?.[1];
+  assert.ok(pid, `expected a process ID for ${instanceName}, got ${reply}`);
+  return pid;
+}
+
+/** WebDriver's keyboard targets the webview. Native menu accelerators belong to its GTK window. */
+async function nativeShortcut(chord: string) {
+  const pid = await instancePid();
+  await exec(
+    "xdotool",
+    ["search", "--all", "--onlyvisible", "--pid", pid, "--name", "MINT$", "windowfocus", "--sync"],
+    { timeout: 5000 },
+  );
+  await exec("xdotool", ["key", "--clearmodifiers", chord], { timeout: 5000 });
 }
 
 async function openSettings() {
-  // The webview can display the document before GTK has installed its native menu.
-  await until("the native Settings menu command to open Settings", async () => {
-    const open = await command<boolean>("POST", `/session/${session}/execute/sync`, {
-      script: "return document.querySelector('dialog[open] h2')?.textContent === 'Settings'",
-      args: [],
-    });
-    if (open) return true;
-    await nativeShortcut("ctrl+comma");
-    return null;
-  }).catch(explain);
+  // Wait for the real GTK menu item, which is installed after the webview starts.
+  await exec(
+    "/usr/bin/python3",
+    ["smoke/activate-gtk-menu.py", await instancePid(), "MINT", "Settings…"],
+    {
+      timeout: 35_000,
+    },
+  ).catch(explain);
+  await waitForView(
+    "the native Settings menu command to open Settings",
+    "return document.querySelector('dialog[open] h2')?.textContent === 'Settings'",
+  );
 }
 
 /** WebDriver selects a real disk file directly on the WebView's upload control. */
@@ -172,20 +195,23 @@ let session = "";
 
 before(async () => {
   assert.ok(application, "set MINT_APP to the built MINT binary");
+  assert.ok(process.env.DBUS_SESSION_BUS_ADDRESS, "run native smoke in a private D-Bus session");
+  await until(
+    "WebDriver to accept a session",
+    async () => (await command<{ ready: boolean }>("GET", "/status")).ready || null,
+  );
   dir = await mkdtemp(join(tmpdir(), "mint-smoke-"));
   document = join(dir, "smoke.md");
   await writeFile(document, "\uFEFF# Smoke\r\n\r\nfirst line  ");
-  const created = await command<{ sessionId: string }>("POST", "/session", {
-    capabilities: {
-      alwaysMatch: { "tauri:options": { application, args: [document] } },
-    },
-  });
-  session = created.sessionId;
+  await restart([document]);
 });
 
 after(async () => {
-  if (session) await command("DELETE", `/session/${session}`).catch(() => undefined);
-  if (dir) await rm(dir, { recursive: true, force: true });
+  try {
+    if (session) await stopSession();
+  } finally {
+    if (dir) await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("a document opened from the command line can be edited and saved", async () => {
@@ -268,13 +294,21 @@ test("a document opened from the command line can be edited and saved", async ()
   ).catch(explain);
 });
 
-async function restart(args: string[]) {
+async function stopSession() {
   await command("DELETE", `/session/${session}`);
   session = "";
+  await waitForInstanceExit();
+}
+
+async function restart(args: string[]) {
+  if (session) await stopSession();
+  else await waitForInstanceExit();
   const created = await command<{ sessionId: string }>("POST", "/session", {
     capabilities: { alwaysMatch: { "tauri:options": { application, args } } },
   });
+  assert.ok(created.sessionId, "WebDriver did not create a native session");
   session = created.sessionId;
+  await busCall("GetNameOwner", instanceName);
 }
 
 test("saved versions survive a native restart outside the working folder", async () => {
@@ -330,6 +364,22 @@ test("history restores and undo autosave the exact native file", async () => {
     ).catch(explain);
   }
   assert.deepEqual(await readdir(dir), ["smoke.md"]);
+});
+
+test("a second native launch opens its document in the running instance", async (t) => {
+  assert.ok(application);
+  const folder = await mkdtemp(join(tmpdir(), "mint-activation-"));
+  t.after(() => rm(folder, { recursive: true, force: true }));
+  const path = join(folder, "activation.md");
+  await writeFile(path, "Opened through the running instance.");
+  const primary = await busCall("GetNameOwner", instanceName);
+  await exec(resolve(application), [basename(path)], { cwd: folder, timeout: 10_000 });
+  await waitForView(
+    "the forwarded document in the original session",
+    `return [...document.querySelectorAll('.cm-content')]
+      .some(editor => editor.textContent === 'Opened through the running instance.');`,
+  );
+  assert.equal(await busCall("GetNameOwner", instanceName), primary);
 });
 
 test("import a hidden Notion attachment and embed its granted bytes in a native DOCX", async (t) => {
@@ -1311,6 +1361,119 @@ test("a model receives only the sample or the chosen selection through the nativ
   }
 });
 
+test("inline completion sends the live manuscript excerpt through the native model connection", async () => {
+  const draft = join(dir, "inline-completion.md");
+  const initial = "\uFEFF# Route\r\n\r\nThe";
+  const continuation = " leads to the ridge.";
+  const name = "Completion fixture";
+  await writeFile(draft, initial);
+  const requests: {
+    method?: string;
+    path?: string;
+    authorization?: string;
+    body: { model: string; stream: boolean; messages: { role: string; content: string }[] };
+  }[] = [];
+  const endpoint = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(chunk);
+    requests.push({
+      method: request.method,
+      path: request.url,
+      authorization: request.headers.authorization,
+      body: JSON.parse(Buffer.concat(chunks).toString("utf8")),
+    });
+    response.writeHead(200, { "Content-Type": "application/json" }).end(
+      JSON.stringify({
+        choices: [{ message: { content: continuation }, finish_reason: "stop" }],
+      }),
+    );
+  });
+  await new Promise<void>((resolve, reject) => {
+    endpoint.once("error", reject);
+    endpoint.listen(0, "127.0.0.1", resolve);
+  });
+
+  const chooseCompletionModel = (label: string) =>
+    until(`the Inline completion setting to have an option for ${label}`, () =>
+      command<boolean>("POST", `/session/${session}/execute/sync`, {
+        script: `const select = [...document.querySelectorAll('dialog[open] label')]
+          .find(label => label.textContent.trim() === 'Inline completion')?.control;
+          const option = select && [...select.options].find(item => item.text === arguments[0]);
+          if (!option) return false;
+          select.value = option.value;
+          select.dispatchEvent(new Event('change', { bubbles: true }));
+          return true;`,
+        args: [label],
+      }).then((chosen) => chosen || null),
+    ).catch(explain);
+
+  try {
+    const address = endpoint.address();
+    assert.ok(address && typeof address !== "string");
+    await restart([draft]);
+    await openSettings();
+    await click("Model connections");
+    for (const [label, value] of [
+      ["API address", `http://127.0.0.1:${address.port}/v1`],
+      ["Model name", "completion-fixture"],
+      ["API key", "mint-smoke-completion-fixture"],
+      ["Connection name", name],
+    ] as const) {
+      await clickPath(`//dialog[@open]//label[normalize-space(.)='${label}']/input`);
+      await keyActions(typing(value));
+    }
+    await clickPath("//button[not(@disabled) and normalize-space(.)='Use for this launch']");
+    await chooseCompletionModel(name);
+    await click("Close");
+    await clickPath("//main//div[@role='textbox']");
+    await keyActions([...chord(keys.control, keys.end), ...typing(" trail")]);
+    await until("the inline suggestion at the focused editor", () =>
+      command<string>("POST", `/session/${session}/execute/sync`, {
+        script:
+          "return document.activeElement.querySelector('.cm-mint-inline-completion')?.textContent",
+        args: [],
+      }).then((text) => (text === continuation ? text : null)),
+    ).catch(explain);
+    assert.equal(requests.length, 1);
+    const [sent] = requests;
+    assert.ok(sent);
+    assert.equal(sent.method, "POST");
+    assert.equal(sent.path, "/v1/chat/completions");
+    assert.equal(sent.authorization, "Bearer mint-smoke-completion-fixture");
+    assert.equal(sent.body.model, "completion-fixture");
+    assert.equal(sent.body.stream, false);
+    assert.deepEqual(
+      sent.body.messages.filter(({ role }) => role === "user"),
+      [{ role: "user", content: JSON.stringify({ before: "# Route\n\nThe trail", after: "" }) }],
+    );
+    assert.ok(!(await readFile(draft, "utf8")).includes(continuation));
+
+    await keyActions(typing(keys.tab));
+    await nativeShortcut("ctrl+s");
+    await until(
+      "Tab to save the continuation with the original line endings",
+      async () => (await readFile(draft, "utf8")) === `${initial} trail${continuation}` || null,
+    ).catch(explain);
+
+    await openSettings();
+    await chooseCompletionModel("Off");
+    await click("Close");
+    await clickPath("//main//div[@role='textbox']");
+    await keyActions([...chord(keys.control, keys.end), ...typing(" Today.")]);
+    await nativeShortcut("ctrl+s");
+    await until(
+      "writing after switching inline completion off",
+      async () =>
+        (await readFile(draft, "utf8")) === `${initial} trail${continuation} Today.` || null,
+    ).catch(explain);
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    assert.equal(requests.length, 1, "switching inline completion off stops subsequent requests");
+  } finally {
+    endpoint.closeAllConnections();
+    await new Promise<void>((resolve) => endpoint.close(() => resolve()));
+  }
+});
+
 test("a native model reply stays editable and untitled until the author chooses a Save As path", async () => {
   const folder = await mkdtemp(join(homedir(), "mint-ai-draft-"));
   const path = join(folder, "field-notes.md");
@@ -1477,17 +1640,24 @@ test("model keys survive a restart only when remembered and disconnect removes t
         ? "<busconfig/>"
         : '<busconfig><policy context="mandatory"><deny send_destination="org.freedesktop.secrets"/></policy></busconfig>',
     );
-    await exec("gdbus", [
-      "call",
-      "--session",
-      "--dest",
-      "org.freedesktop.DBus",
-      "--object-path",
-      "/org/freedesktop/DBus",
-      "--method",
-      "org.freedesktop.DBus.ReloadConfig",
-    ]);
+    await busCall("ReloadConfig");
   }
+  const readDefaultCollection = () =>
+    exec(
+      "gdbus",
+      [
+        "call",
+        "--session",
+        "--dest",
+        "org.freedesktop.secrets",
+        "--object-path",
+        "/org/freedesktop/secrets",
+        "--method",
+        "org.freedesktop.Secret.Service.ReadAlias",
+        "default",
+      ],
+      { timeout: 5000 },
+    );
   const versions = () => invokeNative<number[]>("list_versions", { path: draft });
   const versionText = (id: number) => invokeNative<string>("read_version", { path: draft, id });
   const annotations = () =>
@@ -1549,6 +1719,7 @@ test("model keys survive a restart only when remembered and disconnect removes t
     assert.ok(!visible.includes(persistentKey));
 
     await setStoreAvailable(false);
+    await assert.rejects(readDefaultCollection(), /org\.freedesktop\.DBus\.Error\.AccessDenied/);
     await fill("Connection name", "Launch model");
     await fill("API key", sessionKey);
     await clickPath("//button[not(@disabled) and normalize-space(.)='Remember connection']");
@@ -1558,6 +1729,10 @@ test("model keys survive a restart only when remembered and disconnect removes t
     await clickCard("Launch model", "Run sample");
     await shows("Fixture reply 1");
     await setStoreAvailable(true);
+    assert.match(
+      (await readDefaultCollection()).stdout,
+      /objectpath '\/org\/freedesktop\/secrets\/collection\//,
+    );
 
     await click("Close");
     await restart([draft]);
