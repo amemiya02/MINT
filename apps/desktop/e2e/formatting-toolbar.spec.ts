@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import { launch, settingsPath } from "./memory-platform.ts";
+import { launch, readFile, settingsPath } from "./memory-platform.ts";
 
 async function openPanes(page: Page) {
   await launch(page, {
@@ -59,15 +59,19 @@ test("move, hide and restore a pane's toolbar without losing the selected text",
   await editor.press("End");
   for (let i = 0; i < 4; i++) await page.keyboard.press("Shift+ArrowLeft");
   await runCommand(page, "Show formatting toolbar on the side");
-  const side = (await toolbar.boundingBox())!;
-  expect(side.x + side.width).toBeLessThanOrEqual((await surface.boundingBox())!.x);
+  const sideEdge = await toolbar.evaluate((bar) => bar.getBoundingClientRect().right);
+  expect(sideEdge).toBeLessThanOrEqual(
+    await surface.evaluate((el) => el.getBoundingClientRect().left),
+  );
   await runCommand(page, "Hide formatting toolbar");
   await expect(toolbar).toHaveCount(0);
   await expect(draft.getByRole("toolbar")).toBeVisible();
   await expect(editor).toBeFocused();
   await runCommand(page, "Show formatting toolbar on top");
-  const top = (await toolbar.boundingBox())!;
-  expect(top.y + top.height).toBeLessThanOrEqual((await surface.boundingBox())!.y);
+  const bottomEdge = await toolbar.evaluate((bar) => bar.getBoundingClientRect().bottom);
+  expect(bottomEdge).toBeLessThanOrEqual(
+    await surface.evaluate((el) => el.getBoundingClientRect().top),
+  );
   await toolbar.getByRole("button", { name: "Bold" }).click();
   await expect(editor).toHaveText("Reference **pear**");
   await expect(draft.getByRole("textbox")).toHaveText("Draft apple");
@@ -108,4 +112,39 @@ test("keyboard focus identifies the target pane in light and dark themes", async
   await expect(editor).toBeFocused();
   await expect(editor).toHaveText("*Reference pear*");
   await expect(draft.getByRole("textbox")).toHaveText("Draft apple");
+});
+
+test("toolbars for the same manuscript use each view's selection and share undo", async ({
+  page,
+}) => {
+  const path = "/notes/manuscript.md";
+  await launch(page, {
+    files: { [path]: "Definition\n\nConclusion", [settingsPath]: '{"autosave":false}' },
+    openDialogResults: [path],
+    locale: "en-US",
+  });
+  await page.keyboard.press("ControlOrMeta+O");
+  const left = page.getByRole("textbox").first();
+  await expect(left).toBeFocused();
+  await left.press("Shift+End");
+  await page.getByRole("button", { name: "Open manuscript.md in other pane" }).click();
+  const right = page.getByRole("textbox").nth(1);
+  await expect(right).toBeFocused();
+  await right.press("ControlOrMeta+End");
+  await right.press("Shift+Home");
+
+  const leftBar = page.getByRole("toolbar", {
+    name: "Formatting for manuscript.md in the left pane",
+  });
+  const rightBar = page.getByRole("toolbar", {
+    name: "Formatting for manuscript.md in the right pane",
+  });
+  await leftBar.getByRole("button", { name: "Link" }).click();
+  await page.keyboard.type("#term");
+  await rightBar.getByRole("button", { name: "Bold" }).click();
+  await page.keyboard.press("ControlOrMeta+S");
+  await expect.poll(() => readFile(page, path)).toBe("[Definition](#term)\n\n**Conclusion**");
+  await left.press("ControlOrMeta+z");
+  await page.keyboard.press("ControlOrMeta+S");
+  await expect.poll(() => readFile(page, path)).toBe("[Definition](#term)\n\nConclusion");
 });
