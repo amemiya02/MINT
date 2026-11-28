@@ -238,8 +238,8 @@ export interface MintEditor {
   getProofreadingPassage(): ProsePassage | null;
   /** The main selection range. */
   getSelection(): TextSelection;
-  /** Capture the selected manuscript content for a new annotation. */
-  getAnnotationTarget(): AnnotationTarget | null;
+  /** Capture a file-text range or the current selection for a new annotation. */
+  getAnnotationTarget(range?: TextRange): AnnotationTarget | null;
   /** Scroll to and focus an existing annotation target. */
   revealAnnotation(annotation: Annotation): void;
   /** Every selection range (several when there are several cursors), in document order. */
@@ -538,11 +538,13 @@ export function createEditor(options: EditorOptions): MintEditor {
       const { anchor, head } = view.state.selection.main;
       return { anchor: toFileOffset(view.state, anchor), head: toFileOffset(view.state, head) };
     },
-    getAnnotationTarget() {
+    getAnnotationTarget(range) {
       const { state } = view;
-      const focused = focusedTableCell(view);
+      const focused = range ? null : focusedTableCell(view);
       if (focused) return cellTarget(state, focused.table, focused.address);
-      const { from, to } = state.selection.main;
+      const { from, to } = range
+        ? { from: fromFileOffset(state, range.from), to: fromFileOffset(state, range.to) }
+        : state.selection.main;
       const object = markdownTarget(state, from, to);
       if (object) return object;
       const cell = annotationCellAt(state, from, to);

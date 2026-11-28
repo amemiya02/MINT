@@ -1,7 +1,10 @@
 import type { Annotation, AnnotationTarget, SharedDocument } from "@mint/editor";
 import { useState, useSyncExternalStore } from "react";
 import { useT } from "../i18n/index.ts";
+import type { Platform } from "../platform/platform.ts";
+import type { TabStore } from "../tabs/tab-store.ts";
 import { useModalDialog } from "../window/useModalDialog.ts";
+import { AnnotationReview, type AnnotationReviewKind } from "./AnnotationReview.tsx";
 
 export function AnnotationDialog({
   target,
@@ -77,15 +80,36 @@ function Excerpt({ target }: { readonly target: Pick<Annotation, "kind" | "excer
 
 export function AnnotationPanel({
   annotations,
+  documentId,
+  name,
+  platform,
+  store,
+  visible,
+  settingsOpen,
+  reviewKind,
+  onReview,
+  onSettings,
   onClose,
   onReveal,
 }: {
   readonly annotations: SharedDocument["annotations"];
+  readonly documentId: number;
+  readonly name: string;
+  readonly platform: Platform;
+  readonly store: TabStore;
+  readonly visible: boolean;
+  readonly settingsOpen: boolean;
+  readonly reviewKind: AnnotationReviewKind | undefined;
+  readonly onReview: (kind: AnnotationReviewKind) => void;
+  readonly onSettings: () => void;
   readonly onClose: () => void;
   readonly onReveal: (item: Annotation) => void;
 }) {
   const t = useT();
   const items = useSyncExternalStore(annotations.subscribe, annotations.getSnapshot);
+  const [excluded, setExcluded] = useState<ReadonlySet<string>>(() => new Set());
+  const unresolved = items.filter((item) => !item.resolved);
+  const selected = unresolved.filter(({ id }) => !excluded.has(id));
   const groups = {
     pending: items.filter((item) => item.range && !item.resolved),
     resolved: items.filter((item) => item.range && item.resolved),
@@ -94,7 +118,8 @@ export function AnnotationPanel({
   return (
     <aside
       aria-label={t("command.view.annotations")}
-      className="max-h-52 min-w-0 overflow-auto border-t border-(--mint-border) p-3 text-sm md:max-h-none md:w-72 md:shrink-0 md:border-s md:border-t-0"
+      hidden={!visible}
+      className={`max-h-[40vh] min-w-0 overflow-auto border-t border-(--mint-border) p-3 text-sm md:max-h-none md:shrink-0 md:border-s md:border-t-0 ${reviewKind ? "md:w-96" : "md:w-72"}`}
     >
       <div className="flex items-center justify-between gap-2">
         <h2 className="font-medium">{t("command.view.annotations")}</h2>
@@ -106,6 +131,39 @@ export function AnnotationPanel({
           {t("annotations.close")}
         </button>
       </div>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {items.length > 0 && (
+          <button
+            type="button"
+            className="rounded border border-(--mint-border) px-2 py-1"
+            onClick={() => onReview("batch")}
+          >
+            {t("annotationReview.start")}
+          </button>
+        )}
+        <button
+          type="button"
+          className="rounded border border-(--mint-border) px-2 py-1"
+          onClick={() => onReview("document")}
+        >
+          {t("command.edit.reviewDocument")}
+        </button>
+      </div>
+      {reviewKind && (
+        <AnnotationReview
+          kind={reviewKind}
+          name={name}
+          items={selected}
+          unresolved={unresolved}
+          annotations={annotations}
+          documentId={documentId}
+          platform={platform}
+          store={store}
+          settingsOpen={settingsOpen}
+          onSettings={onSettings}
+          onResolve={(id) => annotations.setResolved(id, true)}
+        />
+      )}
       {items.length === 0 && <p className="text-(--mint-muted)">{t("annotations.empty")}</p>}
       {(["pending", "resolved", "lost"] as const).map((status) => (
         <section key={status} aria-label={t(`annotations.${status}`)} className="mt-3">
@@ -117,6 +175,25 @@ export function AnnotationPanel({
               <li key={item.id} className="space-y-2 border-b border-(--mint-border) py-2">
                 <Excerpt target={item} />
                 <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{item.note}</p>
+                {!item.resolved && (
+                  <label className="flex items-center gap-2 text-xs">
+                    <input
+                      type="checkbox"
+                      aria-label={t("annotationReview.select", { note: item.note })}
+                      checked={!excluded.has(item.id)}
+                      onChange={(event) => {
+                        const checked = event.currentTarget.checked;
+                        setExcluded((previous) => {
+                          const next = new Set(previous);
+                          if (checked) next.delete(item.id);
+                          else next.add(item.id);
+                          return next;
+                        });
+                      }}
+                    />
+                    {t("annotationReview.include")}
+                  </label>
+                )}
                 <div className="flex flex-wrap gap-3 text-xs">
                   {item.range && (
                     <>

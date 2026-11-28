@@ -718,6 +718,7 @@ export const en = {
   "external.dismiss": "Dismiss",
 
   "command.edit.addAnnotation": "Add annotation",
+  "command.edit.reviewDocument": "Review Document (Read Only)…",
   "command.view.annotations": "Annotations",
   "annotations.note": "Annotation",
   "annotations.save": "Save annotation",
@@ -736,4 +737,24 @@ export const en = {
   "annotations.kind.image": "Image",
   "annotations.emptyCell": "Empty cell",
   "annotations.storageError": "Could not read or save annotations for {path}. {reason}",
+  "annotationReview.start": "Send annotations for review",
+  "annotationReview.select": "Select annotation {note}",
+  "annotationReview.include": "Include in review",
+  "annotationReview.scope": "{count} annotations",
+  "annotationReview.context": "Send the excerpts and notes for {scope}.",
+  "annotationReview.documentContext":
+    "Send the full current Markdown of {name}, including unsaved edits.",
+  "annotationReview.emptyDocument": "Add text to the draft before requesting a review.",
+  "annotationReview.documentConnection":
+    "Choose a model or approve Codex’s read-only shell in Connection settings.",
+  "annotationReview.noFindings": "The review found no issues.",
+  "annotationReview.findings": "Review annotations added · {count}",
+  "annotationReview.working": "Review in progress…",
+  "annotationReview.results": "Annotation review results",
+  "annotationReview.invalid":
+    "The connection returned an incomplete or invalid review. You can retry.",
+  "annotationReview.unanswered": "No valid result for this annotation.",
+  "annotationReview.missing": "Material needed · {material}",
+  "annotationReview.appliedOne": "1 edit applied",
+  "annotationReview.applied": "{count} edits applied",
 } as const;
