@@ -1,5 +1,5 @@
 import type { LinkTarget, WordCount } from "@mint/editor";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createImageHost, type ImageSaveFailure } from "../assets/image-host.ts";
 import { EditorPane } from "../EditorPane.tsx";
 import { useT } from "../i18n/index.ts";
@@ -10,12 +10,14 @@ import { useSettingsStore } from "../settings/useSettings.ts";
 import { useTabStore } from "../tabs/context.ts";
 import { ExternalChangeNotice } from "../tabs/ExternalChangeNotice.tsx";
 import type { Tab, TabStore } from "../tabs/tab-store.ts";
+import { FormattingToolbar, type ToolbarPosition } from "./FormattingToolbar.tsx";
 
 /** Every open tab keeps its editor mounted, so undo history and selection survive switching. */
 export function TabPanel({
   tab,
   active,
   visible,
+  toolbarPosition,
   platform,
   onModeChange,
   onEditorChange,
@@ -25,6 +27,7 @@ export function TabPanel({
   readonly tab: Tab;
   readonly active: boolean;
   readonly visible: boolean;
+  readonly toolbarPosition: ToolbarPosition;
   readonly platform: Platform;
   readonly onModeChange: () => void;
   /** The tab's editor was created or destroyed. */
@@ -34,6 +37,11 @@ export function TabPanel({
 }) {
   const store = useTabStore();
   const { id, path } = tab;
+  const panel = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // Tabbing into a pane's toolbar activates the pane with focus already in the right place.
+    if (active && !panel.current?.contains(document.activeElement)) store.editor(id)?.focus();
+  }, [store, id, active]);
   const onReady = useCallback(
     (editor: Parameters<TabStore["attachEditor"]>[1]) => {
       store.attachEditor(id, editor);
@@ -75,6 +83,7 @@ export function TabPanel({
   );
   return (
     <div
+      ref={panel}
       role="tabpanel"
       id={`tabpanel-${id}`}
       aria-labelledby={`tab-${id}`}
@@ -89,19 +98,24 @@ export function TabPanel({
       {imageFailure && (
         <ImageSaveNotice failure={imageFailure} onDismiss={() => setImageFailure(null)} />
       )}
-      <div className="min-h-0 flex-1">
-        <EditorPane
-          text={tab.text}
-          active={active}
-          onReady={onReady}
-          onChange={onChange}
-          onModeChange={onModeChange}
-          onOpenLink={onOpenLink}
-          writeClipboardText={platform.writeClipboardText}
-          imageHost={imageHost}
-          onWordCount={onWordCount}
-          dialect={dialect}
-        />
+      <div
+        className={`flex min-h-0 min-w-0 flex-1 ${toolbarPosition === "side" ? "flex-row" : "flex-col"}`}
+      >
+        {toolbarPosition !== "hidden" && <FormattingToolbar tab={tab} position={toolbarPosition} />}
+        <div className="min-h-0 min-w-0 flex-1">
+          <EditorPane
+            text={tab.text}
+            active={active}
+            onReady={onReady}
+            onChange={onChange}
+            onModeChange={onModeChange}
+            onOpenLink={onOpenLink}
+            writeClipboardText={platform.writeClipboardText}
+            imageHost={imageHost}
+            onWordCount={onWordCount}
+            dialect={dialect}
+          />
+        </div>
       </div>
     </div>
   );

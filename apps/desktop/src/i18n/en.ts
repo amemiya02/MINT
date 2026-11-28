@@ -55,6 +55,9 @@ export const en = {
   "command.view.toggleTypewriterMode": "Toggle Typewriter Mode",
 
   "command.tab.close": "Close Tab",
+  "command.view.toolbarTop": "Show formatting toolbar on top",
+  "command.view.toolbarSide": "Show formatting toolbar on the side",
+  "command.view.toolbarHide": "Hide formatting toolbar",
   "command.view.openInOtherPane": "Open in other pane",
   "command.view.focusOtherPane": "Focus other pane",
   "command.view.closeReferencePane": "Close reference pane",
@@ -78,6 +81,8 @@ export const en = {
   "command.paragraph.codeBlock": "Code Block",
   "command.paragraph.table": "Insert Table",
   "command.paragraph.formatTable": "Format Table",
+  "toolbar.left": "Formatting for {name} in the left pane",
+  "toolbar.right": "Formatting for {name} in the right pane",
   "command.format.bold": "Bold",
   "command.format.italic": "Italic",
   "command.format.link": "Link",

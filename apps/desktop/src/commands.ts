@@ -203,6 +203,9 @@ export const commands = [
     menu: "view",
     group: "layout",
   },
+  { id: "view.toolbarTop", title: "command.view.toolbarTop", menu: "view", group: "toolbar" },
+  { id: "view.toolbarSide", title: "command.view.toolbarSide", menu: "view", group: "toolbar" },
+  { id: "view.toolbarHide", title: "command.view.toolbarHide", menu: "view", group: "toolbar" },
   {
     id: "view.openInOtherPane",
     title: "command.view.openInOtherPane",
