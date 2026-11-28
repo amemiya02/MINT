@@ -5,13 +5,18 @@ const path = "/notes/quick-edit.md";
 const endpoint = "http://127.0.0.1:9876/v1/chat/completions";
 const instruction = "缩短一半，直接改";
 
-async function openManuscript(page: Page, source: string, autosave: boolean) {
+async function openManuscript(
+  page: Page,
+  source: string,
+  autosave: boolean,
+  primary = "ControlOrMeta",
+) {
   await launch(page, {
     locale: "en-US",
     files: { [path]: source, [settingsPath]: JSON.stringify({ autosave }) },
     openedPaths: [{ path, kind: "file" }],
   });
-  await page.keyboard.press("ControlOrMeta+,");
+  await page.keyboard.press(`${primary}+,`);
   const settings = page.getByRole("dialog", { name: "Settings" });
   await settings.getByRole("button", { name: "Model connections" }).click();
   await settings.getByLabel("Connection name").fill("Quick edit fixture");
@@ -98,15 +103,26 @@ test("one Enter edits the live selection, keeps both panes usable, and saves and
   await expect(left.getByText(live, { exact: true })).toBeInViewport();
 });
 
-test("autosave writes independent changes and leaves a concurrent edit for comparison", async ({
+test("Windows redo autosaves independent direct edits with mixed line endings", async ({
   page,
 }) => {
-  const source =
-    "\uFEFFOpening line.\nExtra opening detail.\r\n\r\nMiddle line.\n\nKeep these spaces.  \r\n\r\nClosing line.\nClosing detail.\r\n";
+  await autosaveConcurrentDirectEdit(page, "\n");
+});
+
+test("Windows redo autosaves independent direct edits in a CRLF document", async ({ page }) => {
+  await autosaveConcurrentDirectEdit(page, "\r\n");
+});
+
+async function autosaveConcurrentDirectEdit(page: Page, lineBreak: "\n" | "\r\n") {
+  await page.context().addInitScript(() => {
+    Object.defineProperty(Navigator.prototype, "platform", { get: () => "Win32" });
+  });
+  const opening = `Opening line.${lineBreak}Extra opening detail.`;
+  const closing = `Closing line.${lineBreak}Closing detail.`;
+  const shortClosing = `Short close.${lineBreak}Short detail.`;
+  const source = `\uFEFF${opening}\r\n\r\nMiddle line.${lineBreak}${lineBreak}Keep these spaces.  \r\n\r\n${closing}\r\n`;
   const author = source.replace("Middle line.", "Author's middle line.");
-  const expected = author
-    .replace("Opening line.\nExtra opening detail.", "Short opening.")
-    .replace("Closing line.\nClosing detail.", "Short close.\nShort detail.");
+  const expected = author.replace(opening, "Short opening.").replace(closing, shortClosing);
   let releaseReply!: () => void;
   const pending = new Promise<void>((resolve) => {
     releaseReply = resolve;
@@ -122,14 +138,14 @@ test("autosave writes independent changes and leaves a concurrent edit for compa
       ),
     });
   });
-  await openManuscript(page, source, true);
+  await openManuscript(page, source, true, "Control");
   await page.getByRole("button", { name: "Track changes", exact: true }).click();
   const trackedChanges = page.getByRole("region", { name: "Tracked changes" });
   const trackedEdits = trackedChanges.getByRole("button", { name: "Reject", exact: true });
 
   const editor = page.locator(".cm-content");
   await expect(editor).toBeFocused();
-  await editor.press("ControlOrMeta+A");
+  await editor.press("Control+A");
   await page.getByRole("button", { name: "Ask AI", exact: true }).click();
   const input = page.getByRole("textbox", { name: "Instruction" });
   await input.fill(instruction);
@@ -140,6 +156,7 @@ test("autosave writes independent changes and leaves a concurrent edit for compa
   await editor.press("Home");
   await editor.press("Shift+End");
   await page.keyboard.insertText("Author's middle line.");
+  await expect.poll(() => readFile(page, path)).toBe(author);
   releaseReply();
   await expect(page.getByRole("status")).toHaveText("2 edits applied · 1 to review");
   await expect.poll(() => readFile(page, path)).toBe(expected);
@@ -152,12 +169,19 @@ test("autosave writes independent changes and leaves a concurrent edit for compa
   await expect(conflict.getByRole("button", { name: "Apply to compared text" })).toBeVisible();
   await review.getByRole("button", { name: "Close", exact: true }).click();
 
-  await editor.press("ControlOrMeta+Z");
-  await expect.poll(() => readFile(page, path)).toBe(author);
-  await expect(trackedEdits).toHaveCount(1);
-  await editor.press("ControlOrMeta+Shift+Z");
-  await expect.poll(() => readFile(page, path)).toBe(expected);
-  await expect(trackedEdits).toHaveCount(3);
+  for (const redoShortcut of ["Control+Y", "Control+Shift+Z"]) {
+    await editor.press("Control+Z");
+    await expect.poll(() => readFile(page, path)).toBe(author);
+    await expect(trackedEdits).toHaveCount(1);
+    await editor.press(redoShortcut);
+    await expect(
+      editor.getByText("Short opening.", { exact: true }),
+      `${redoShortcut} should restore the rewritten opening`,
+    ).toBeVisible();
+    await expect(editor.getByText("Short close.", { exact: true })).toBeVisible();
+    await expect.poll(() => readFile(page, path)).toBe(expected);
+    await expect(trackedEdits).toHaveCount(3);
+  }
 
   await editor.getByText("Short close.", { exact: true }).click();
   await editor.press("Home");
@@ -167,9 +191,9 @@ test("autosave writes independent changes and leaves a concurrent edit for compa
   await page.getByRole("button", { name: "Undo direct edits", exact: true }).click();
   await expect
     .poll(() => readFile(page, path))
-    .toBe(author.replace("Closing line.\nClosing detail.", "Author's closing.\nShort detail."));
+    .toBe(author.replace(closing, shortClosing.replace("Short close.", "Author's closing.")));
   const changed = review.getByRole("group", { name: "Proposed edit 3 of 3" });
   await expect(changed.getByText(/Author's closing\./)).toBeVisible();
   await changed.getByRole("button", { name: "Revert to selected text" }).click();
   await expect.poll(() => readFile(page, path)).toBe(author);
-});
+}
