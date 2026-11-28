@@ -1,9 +1,23 @@
 import type { Messages } from "./index.ts";
 
 export const zhCN: Messages = {
+  "plugin.templates": "写作模板",
+  "plugin.installTemplates": "安装写作模板",
+  "plugin.write": "在选区修改当前文档",
+  "plugin.writeDenied": "修改当前文档的请求已被拒绝。",
+  "plugin.templateEmpty": "请先打开文档以插入模板。",
+  "plugin.insertTemplate": "插入模板 · {name}",
   "plugin.file": "从文件安装 MINT 插件",
   "plugin.invalid": "插件包不受支持，或插件已安装。",
   "plugin.title": "插件",
+  "plugin.tags": "标签浏览",
+  "plugin.folderRead": "读取当前工作文件夹中的 Markdown 文档",
+  "plugin.folderDenied": "读取当前工作文件夹的请求已被拒绝。",
+  "plugin.tag": "标签",
+  "plugin.needFolder": "打开工作文件夹以浏览标签。",
+  "plugin.noTags": "未找到带标签的文档。",
+  "plugin.loadingTags": "正在读取标签…",
+  "plugin.folderError": "无法读取工作文件夹。",
   "plugin.statistics": "写作统计",
   "plugin.install": "安装",
   "plugin.read": "读取当前文档",

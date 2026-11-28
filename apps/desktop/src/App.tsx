@@ -13,11 +13,13 @@ import { ExportDialog } from "./export/ExportDialog.tsx";
 import { FindBar, type FindMode } from "./find/FindBar.tsx";
 import { FolderTree } from "./folder/file-tree.ts";
 import { useRecent } from "./folder/recent.ts";
-import { NavigationRail, Sidebar, type SidebarView } from "./folder/Sidebar.tsx";
+import { NavigationRail, Sidebar, type SidebarTool } from "./folder/Sidebar.tsx";
 import { type Translate, useT } from "./i18n/index.ts";
 import { documentExtensions } from "./paths.ts";
 import type { Platform } from "./platform/platform.ts";
-import { PluginEntries } from "./plugins/Plugins.tsx";
+import { insertTemplate } from "./plugins/host.ts";
+import { PluginEntries, pluginName, useInstallations } from "./plugins/Plugins.tsx";
+import { TagBrowser } from "./plugins/TagBrowser.tsx";
 import { QuickOpen } from "./quick-open/QuickOpen.tsx";
 import { createRecovery, type Recovery } from "./recovery/recovery.ts";
 import { FolderSearch } from "./search/FolderSearch.tsx";
@@ -116,7 +118,16 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     [],
   );
   const [sidebarVisible, setSidebarVisible] = useState(false);
-  const [sidebarView, setSidebarView] = useState<SidebarView>("outline");
+  const [sidebarView, setSidebarView] = useState<Exclude<SidebarTool, "search">>("outline");
+  const sidebarPlugins = useInstallations().filter((i) => i.enabled && "sidebar" in i.manifest);
+  const selectedPlugin = sidebarPlugins.find((i) => sidebarView === `plugin:${i.manifest.id}`);
+  const removed = sidebarView.startsWith("plugin:") && !selectedPlugin;
+  useEffect(() => {
+    if (removed) {
+      setSidebarView("files");
+      setSidebarVisible(false);
+    }
+  }, [removed]);
   const sidebarTool = folderSearch !== null ? "search" : sidebarVisible ? sidebarView : null;
 
   function hideSidebar() {
@@ -125,7 +136,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     if (activeId !== null) store.editor(activeId)?.focus();
   }
 
-  function toggleTool(tool: SidebarView | "search") {
+  function toggleTool(tool: SidebarTool) {
     if (tool === sidebarTool) hideSidebar();
     else if (tool === "search") setFolderSearch(1);
     else {
@@ -331,7 +342,14 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
         </div>
       )}
       <div className="flex min-h-0 flex-1">
-        <NavigationRail active={sidebarTool} onToggle={toggleTool} />
+        <NavigationRail
+          plugins={sidebarPlugins.map((i) => ({
+            id: i.manifest.id,
+            label: pluginName(i.manifest, t),
+          }))}
+          active={sidebarTool}
+          onToggle={toggleTool}
+        />
         {folderSearch !== null && (
           <FolderSearch
             platform={platform}
@@ -344,20 +362,32 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
             }}
           />
         )}
-        {folderSearch === null && sidebarVisible && (
-          <Sidebar
-            tree={tree}
-            view={sidebarView}
-            onOpenFolder={() => void pickFolder()}
-            editor={activeId === null ? null : store.editor(activeId)}
-            activePath={activePath}
-            onOpenDocument={(path) => void store.openDocument(path)}
-            onRenamed={(from, to) => store.pathRenamed(from, to)}
-            onTrashed={(path) => store.pathTrashed(path)}
-            onError={setShellError}
-            onHide={hideSidebar}
+        {folderSearch === null && sidebarVisible && selectedPlugin && (
+          <TagBrowser
+            key={JSON.stringify([selectedPlugin.manifest.id, folder, selectedPlugin.granted])}
+            manifest={selectedPlugin.manifest}
+            granted={selectedPlugin.granted}
+            folder={folder}
+            platform={platform}
+            onOpen={(path) => void store.openDocument(path)}
           />
         )}
+        {folderSearch === null &&
+          sidebarVisible &&
+          (sidebarView === "files" || sidebarView === "outline") && (
+            <Sidebar
+              tree={tree}
+              view={sidebarView}
+              onOpenFolder={() => void pickFolder()}
+              editor={activeId === null ? null : store.editor(activeId)}
+              activePath={activePath}
+              onOpenDocument={(path) => void store.openDocument(path)}
+              onRenamed={(from, to) => store.pathRenamed(from, to)}
+              onTrashed={(path) => store.pathTrashed(path)}
+              onError={setShellError}
+              onHide={hideSidebar}
+            />
+          )}
         <div className="flex min-w-0 flex-1 flex-col">
           {tabs.length > 0 && (
             <div
@@ -415,7 +445,24 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
         }
       />
       {paletteVisible && (
-        <CommandPalette onRun={(id) => run.current(id)} onClose={() => setPaletteVisible(false)} />
+        <CommandPalette
+          onRun={(id) => run.current(id)}
+          onTemplate={(id, name) => {
+            const result = insertTemplate(id, name, (text) => {
+              const editor = activeId === null ? null : store.editor(activeId);
+              if (!editor) return false;
+              editor.execute("pastePlainText", text);
+              editor.focus();
+              return true;
+            });
+            setShellError(
+              result === "ok"
+                ? null
+                : t(result === "denied" ? "plugin.writeDenied" : "plugin.templateEmpty"),
+            );
+          }}
+          onClose={() => setPaletteVisible(false)}
+        />
       )}
       {quickOpenVisible && (
         <QuickOpen

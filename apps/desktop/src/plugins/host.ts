@@ -1,15 +1,49 @@
 import type { WordCount } from "@mint/editor";
 
 /** A declarative MINT document view. Packages select host operations and never execute script. */
-export interface PluginManifest {
+interface ManifestBase {
   apiVersion: 1;
   id: string;
   name: string;
+}
+
+interface StatisticsManifest extends ManifestBase {
   permissions: ["document.read"];
   statistics: (keyof WordCount)[];
 }
 
-export const writingStatistics: PluginManifest = {
+interface TemplatesManifest extends ManifestBase {
+  permissions: ["document.write"];
+  templates: { name: string; text: string }[];
+}
+
+interface SidebarManifest extends ManifestBase {
+  permissions: ["folder.read"];
+  sidebar: "tags";
+}
+
+export type PluginManifest = StatisticsManifest | TemplatesManifest | SidebarManifest;
+
+export const tagBrowser: SidebarManifest = {
+  apiVersion: 1,
+  id: "mint.tag-browser",
+  name: "Tag browser",
+  permissions: ["folder.read"],
+  sidebar: "tags",
+};
+
+export const writingTemplates: TemplatesManifest = {
+  apiVersion: 1,
+  id: "mint.writing-templates",
+  name: "Writing templates",
+  permissions: ["document.write"],
+  templates: [
+    { name: "Meeting notes", text: "## Meeting notes\n\n- " },
+    { name: "Checklist", text: "- [ ] " },
+  ],
+};
+
+export const writingStatistics: StatisticsManifest = {
   apiVersion: 1,
   id: "mint.writing-statistics",
   name: "Writing statistics",
@@ -26,24 +60,59 @@ interface Installation {
 const prefix = "mint.plugin.v1.";
 const metrics = new Set(["words", "characters", "readingMinutes"]);
 
+function isTemplate(value: unknown): value is TemplatesManifest["templates"][number] {
+  if (!value || typeof value !== "object") return false;
+  return (
+    "name" in value &&
+    typeof value.name === "string" &&
+    value.name.trim().length > 0 &&
+    "text" in value &&
+    typeof value.text === "string" &&
+    value.text.length > 0
+  );
+}
+
 export function isManifest(value: unknown): value is PluginManifest {
   if (!value || typeof value !== "object") return false;
-  const m = value as Partial<PluginManifest>;
+  const m = value as Partial<
+    ManifestBase & { permissions: unknown[]; statistics: unknown[]; templates: unknown[] }
+  >;
+  if (
+    m.apiVersion !== 1 ||
+    typeof m.id !== "string" ||
+    !/^[a-z0-9][a-z0-9.-]{0,79}$/.test(m.id) ||
+    typeof m.name !== "string" ||
+    !m.name.trim() ||
+    m.name.length > 120 ||
+    !Array.isArray(m.permissions) ||
+    m.permissions.length !== 1
+  )
+    return false;
+  if ("sidebar" in m) {
+    return (
+      m.sidebar === "tags" &&
+      m.permissions[0] === "folder.read" &&
+      !("statistics" in m) &&
+      !("templates" in m)
+    );
+  }
+  if (m.permissions[0] === "document.write") {
+    return (
+      !("statistics" in m) &&
+      Array.isArray(m.templates) &&
+      m.templates.length > 0 &&
+      m.templates.every(isTemplate) &&
+      new Set(m.templates.map((item) => item.name)).size === m.templates.length
+    );
+  }
   return (
-    m.apiVersion === 1 &&
-    typeof m.id === "string" &&
-    /^[a-z0-9][a-z0-9.-]{0,79}$/.test(m.id) &&
-    typeof m.name === "string" &&
-    m.name.trim().length > 0 &&
-    m.name.length <= 120 &&
-    Array.isArray(m.permissions) &&
-    m.permissions.length === 1 &&
     m.permissions[0] === "document.read" &&
+    !("templates" in m) &&
     Array.isArray(m.statistics) &&
     m.statistics.length > 0 &&
     m.statistics.length <= metrics.size &&
     new Set(m.statistics).size === m.statistics.length &&
-    m.statistics.every((metric) => metrics.has(metric))
+    m.statistics.every((metric) => typeof metric === "string" && metrics.has(metric))
   );
 }
 
@@ -94,11 +163,26 @@ export function uninstall(id: string) {
 
 export function readStatistics(id: string, readDocument: () => WordCount | null) {
   const item = installed(id);
-  if (!item?.enabled || !item.granted) return { status: "denied" } as const;
+  if (!item?.enabled || !item.granted || !("statistics" in item.manifest))
+    return { status: "denied" } as const;
   const counts = readDocument();
   if (!counts) return { status: "empty" } as const;
   return {
     status: "ok",
     rows: item.manifest.statistics.map((metric) => ({ metric, value: counts[metric] })),
   } as const;
+}
+
+/** Resolve the live grant and installed template again when the writer runs its command. */
+export function insertTemplate(id: string, name: string, insert: (text: string) => boolean) {
+  const item = installed(id);
+  if (!item?.enabled || !item.granted || !("templates" in item.manifest)) return "denied";
+  const template = item.manifest.templates.find((t) => t.name === name);
+  if (!template) return "denied";
+  return insert(template.text) ? "ok" : "empty";
+}
+
+export function canReadFolder(id: string): boolean {
+  const item = installed(id);
+  return Boolean(item?.enabled && item.granted && "sidebar" in item.manifest);
 }

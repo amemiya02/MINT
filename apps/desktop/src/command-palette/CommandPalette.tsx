@@ -2,6 +2,7 @@ import { type KeyboardEvent, useEffect, useId, useMemo, useState } from "react";
 import { type Command, type CommandId, commands, shortcutOf } from "../commands.ts";
 import { useT } from "../i18n/index.ts";
 import { ariaKeyShortcut, formatAccelerator } from "../keys.ts";
+import { useInstallations } from "../plugins/Plugins.tsx";
 import { type FuzzyMatch, fuzzyMatch } from "../quick-open/fuzzy.ts";
 import { useSettings } from "../settings/useSettings.ts";
 import { useModalDialog } from "../window/useModalDialog.ts";
@@ -9,18 +10,22 @@ import { useModalDialog } from "../window/useModalDialog.ts";
 export interface CommandPaletteProps {
   /** Run the chosen command; called after the palette has closed. */
   readonly onRun: (id: CommandId) => void;
+  readonly onTemplate: (id: string, name: string) => void;
   readonly onClose: () => void;
 }
 
 interface Result {
-  readonly command: Command;
+  readonly id: string;
+  readonly run: () => void;
+  readonly accelerator?: string | undefined;
   readonly title: string;
   readonly match: FuzzyMatch;
 }
 
 /** Command palette: fuzzy-search every registered command by name and run one. */
-export function CommandPalette({ onRun, onClose }: CommandPaletteProps) {
+export function CommandPalette({ onRun, onTemplate, onClose }: CommandPaletteProps) {
   const t = useT();
+  const plugins = useInstallations();
   const { shortcuts } = useSettings().settings;
   const { close, props: dialogProps } = useModalDialog(onClose);
   const listId = useId();
@@ -33,11 +38,32 @@ export function CommandPalette({ onRun, onClose }: CommandPaletteProps) {
       if (command.id === "view.commandPalette") continue;
       const title = t(command.title);
       const match = fuzzyMatch(query, title);
-      if (match) found.push({ command, title, match });
+      if (match)
+        found.push({
+          id: command.id,
+          title,
+          match,
+          accelerator: shortcutOf(command, shortcuts),
+          run: () => onRun(command.id),
+        });
+    }
+    for (const { enabled, manifest } of plugins) {
+      if (!enabled || !("templates" in manifest)) continue;
+      for (const template of manifest.templates) {
+        const title = t("plugin.insertTemplate", { name: template.name });
+        const match = fuzzyMatch(query, title);
+        if (match)
+          found.push({
+            id: `plugin:${manifest.id}:${template.name}`,
+            title,
+            match,
+            run: () => onTemplate(manifest.id, template.name),
+          });
+      }
     }
     // Registry order without a query; best match first with one.
     return query.trim() === "" ? found : found.sort((a, b) => b.match.score - a.match.score);
-  }, [t, query]);
+  }, [t, query, onRun, onTemplate, plugins, shortcuts]);
   const current = Math.min(selected, results.length - 1);
 
   useEffect(() => {
@@ -47,7 +73,7 @@ export function CommandPalette({ onRun, onClose }: CommandPaletteProps) {
   function choose(result: Result | undefined) {
     if (!result) return;
     close();
-    onRun(result.command.id);
+    result.run();
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
@@ -94,15 +120,15 @@ export function CommandPalette({ onRun, onClose }: CommandPaletteProps) {
       />
       <div id={listId} role="listbox" className="max-h-[50vh] overflow-y-auto py-1">
         {results.map((result, index) => {
-          const accelerator = shortcutOf(result.command, shortcuts);
+          const { accelerator } = result;
           return (
             <div
-              key={result.command.id}
+              key={result.id}
               id={`${listId}-${index}`}
               role="option"
               aria-selected={index === current}
               aria-keyshortcuts={accelerator ? ariaKeyShortcut(accelerator) : undefined}
-              data-command={result.command.id}
+              data-command={result.id}
               onMouseDown={(event) => event.preventDefault()}
               onMouseMove={() => index !== current && setSelected(index)}
               tabIndex={-1}
