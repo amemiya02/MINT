@@ -358,7 +358,11 @@ async fn read_directory(app: AppHandle, path: PathBuf) -> Result<Vec<folder::Ent
 }
 
 #[tauri::command]
-async fn ensure_document(app: AppHandle, path: PathBuf, initial_text: String) -> Result<(), String> {
+async fn ensure_document(
+    app: AppHandle,
+    path: PathBuf,
+    initial_text: String,
+) -> Result<(), String> {
     blocking(move || {
         granted(&app.state::<Grants>(), &path)?;
         fs::ensure_document(&path, initial_text.as_bytes()).map_err(|e| e.to_string())
