@@ -60,6 +60,8 @@ export interface WritingTasksPlatform {
   create(task: SavedWritingTask): Promise<void>;
   update(task: SavedWritingTask, expectedUpdatedAt: number): Promise<void>;
   remove(id: string): Promise<void>;
+  createTemporary(id: string): Promise<void>;
+  removeTemporary(id: string): Promise<void>;
 }
 
 export interface SavedReviewLink {
@@ -68,10 +70,12 @@ export interface SavedReviewLink {
   readonly title: string;
 }
 
+export type WritingTaskOpenResult = boolean | "temporary";
+
 export interface WritingTaskOpenRequest {
   readonly task: SavedWritingTask;
   readonly returnToTab: number | undefined;
-  readonly complete: (opened: boolean) => void;
+  readonly complete: (result: WritingTaskOpenResult) => void;
 }
 
 export function hasProposedEdits(task: SavedWritingTask) {
@@ -81,6 +85,7 @@ export function hasProposedEdits(task: SavedWritingTask) {
 interface OpenWritingReview {
   readonly tabId: number;
   readonly busy: boolean;
+  readonly temporary: boolean;
   focus(returnToTab?: number): void;
   remove(): void;
 }
