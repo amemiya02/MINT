@@ -11,11 +11,15 @@ import {
   useState,
 } from "react";
 import { useT } from "../i18n/index.ts";
-import { isWithin, parentPath } from "../paths.ts";
+import { documentExtensions, isWithin, parentPath, relativePath } from "../paths.ts";
 import type { Platform } from "../platform/platform.ts";
+import { useDialect } from "../settings/useDialect.ts";
+import { useSettings } from "../settings/useSettings.ts";
 import { useTabStore } from "../tabs/context.ts";
 import { useModalDialog } from "../window/useModalDialog.ts";
 import { FocusedWritingReview, type ReviewEntry } from "./FocusedWritingReview.tsx";
+import { FolderWritingReview } from "./FolderWritingReview.tsx";
+import { isFolderDocumentPath, planFolderChanges } from "./folder-changes.ts";
 import {
   type MaterialPlan,
   MaterialPlanPreview,
@@ -96,6 +100,7 @@ interface Origin extends WritingSelection {
 
 interface Task {
   readonly request: WritingRequest;
+  readonly folderPaths?: readonly string[];
   readonly documentBaseline?: string;
   readonly plan?: MaterialPlan;
   readonly action: Action;
@@ -114,6 +119,7 @@ interface Attempt {
   readonly partial: string;
   readonly approved: readonly NamedMaterial[];
   readonly newDecisions?: number;
+  readonly folderChangeCount?: number;
   readonly capacityRejected?: boolean;
 }
 
@@ -444,6 +450,11 @@ function Composer({
     origin.folder ? "folder" : origin.text ? "selection" : "document",
   );
   const [actionOverride, setActionOverride] = useState<Action | null>(null);
+  const [folderPaths, setFolderPaths] = useState<readonly string[]>();
+  const [folderListingFailed, setFolderListingFailed] = useState(false);
+  const [folderTargets, setFolderTargets] = useState<ReadonlySet<string>>(new Set());
+  const wikiFolders = useSettings().settings.wikilinkFolders;
+  const dialect = useDialect(!!origin.folder && wikiFolders.includes(origin.folder));
   const [includeDraft, setIncludeDraft] = useState(false);
   const [allowedFolder, setAllowedFolder] = useState<string | null>(null);
   const searchFolder =
@@ -480,6 +491,7 @@ function Composer({
     | "agentTaskCopyUnavailable"
     | "missingSelection"
     | "visionRequired"
+    | "folderRead"
     | null
   >(null);
   const input = useRef<HTMLInputElement>(null);
@@ -517,11 +529,19 @@ function Composer({
   const sendDraft = scope === "document" || (scope === "selection" && includeDraft);
   const canEditDocument =
     scope === "document" && recipient?.kind === "agent" && recipient.access === "taskCopy";
-  const canEdit = (scope === "selection" && !!origin.text) || canEditDocument;
+  const canEditFolder =
+    scope === "folder" && recipient?.kind === "agent" && recipient.access === "taskCopy";
+  const canEdit = (scope === "selection" && !!origin.text) || canEditDocument || canEditFolder;
   const explicitDirect = /(?:^|[,，]\s*)(?:apply directly|直接改)[.!。！]?\s*$/i.test(instruction);
   const action = !canEdit
     ? "comment"
-    : (actionOverride ?? (explicitDirect ? "direct" : turns.length ? "comment" : "preview"));
+    : (actionOverride ??
+      (explicitDirect && !canEditFolder
+        ? "direct"
+        : turns.length && !canEditFolder
+          ? "comment"
+          : "preview"));
+  const folderCopy = canEditFolder && action === "preview" ? origin.folder : undefined;
 
   const currentDraft = sendDraft
     ? { name, text: canEditDocument && action !== "comment" ? draft : draft.replace(/^\uFEFF/, "") }
@@ -542,8 +562,25 @@ function Composer({
     entries: named.entries,
     folderSearch: !!searchFolder,
     editing: action !== "comment",
-    wholeDraftEdit: canEditDocument && action !== "comment",
+    wholeDraftEdit: (canEditDocument && action !== "comment") || !!folderCopy,
   });
+
+  useEffect(() => {
+    if (!origin.folder) return;
+    const root = origin.folder;
+    let current = true;
+    void platform.listFolderFiles(root, documentExtensions).then(
+      (paths) => {
+        if (current) setFolderPaths(paths);
+      },
+      () => {
+        if (current) setFolderListingFailed(true);
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [origin.folder, platform]);
 
   const snapshot = useCallback(
     (taskTitle: string): SavedWritingTask => {
@@ -1163,10 +1200,31 @@ function Composer({
       named.loading ||
       named.unconfirmed ||
       (named.hasImages && !vision?.verified) ||
-      (scope === "folder" && !searchFolder) ||
+      (scope === "folder" && (folderCopy ? !folderPaths : !searchFolder)) ||
       checkingDisk.current
     )
       return;
+    let folderDocuments: WritingRequest["folderDocuments"];
+    if (folderCopy && folderPaths) {
+      checkingDisk.current = true;
+      try {
+        folderDocuments = await Promise.all(
+          folderPaths
+            .filter((path) => folderTargets.has(path))
+            .map(async (path) => {
+              const tab = store.getState().tabs.find((tab) => tab.path === path);
+              const text = (tab && store.getText(tab.id)) ?? (await platform.readTextFile(path));
+              return { path: relativePath(folderCopy, path), text };
+            }),
+        );
+      } catch {
+        setError("folderRead");
+        return;
+      } finally {
+        checkingDisk.current = false;
+      }
+      if (!mounted.current) return;
+    }
     if (restored && action !== "comment" && scope === "selection") {
       const { from, to } = origin.range.current();
       if (
@@ -1188,13 +1246,15 @@ function Composer({
       : [];
     const task: Task = {
       plan: capacity.plan,
+      folderPaths: folderDocuments && folderPaths,
       documentBaseline: canEditDocument && action !== "comment" ? draft : undefined,
       request: {
         instruction: instruction.trim(),
         selectedText: capacity.plan.selectedText,
         taskContext: capacity.plan.contexts[0],
         history: history.length ? history : undefined,
-        responseFormat: action === "comment" ? undefined : "replacement",
+        responseFormat: action === "comment" || folderDocuments ? undefined : "replacement",
+        folderDocuments,
       },
       action,
       scope,
@@ -1221,6 +1281,11 @@ function Composer({
     tool?: WritingToolPlan,
   ) {
     if (controller.current || checkingDisk.current) return false;
+    if (
+      task.request.folderDocuments &&
+      (connection.kind !== "agent" || connection.access !== "taskCopy")
+    )
+      return false;
     if (
       hasTaskImages(...(task.plan?.contexts ?? [task.request.taskContext])) &&
       !visionFor(connection)?.verified
@@ -1249,6 +1314,7 @@ function Composer({
     let approved: NamedMaterial[] = [];
     let status: AttemptStatus;
     let finalReplacement: string | undefined;
+    let folderChanges: Turn["folderChanges"];
     let ignoredChanges: boolean | undefined;
     let capacityRejected = false;
     setRetryId("");
@@ -1332,6 +1398,20 @@ function Composer({
       text = result.text;
       ignoredChanges = result.ignoredChanges;
       status = signal.aborted ? "stopped" : replyStatus(result);
+      if (
+        status === "complete" &&
+        origin.folder &&
+        task.request.folderDocuments &&
+        task.folderPaths
+      ) {
+        folderChanges = planFolderChanges(
+          origin.folder,
+          task.request.folderDocuments,
+          result.fileChanges ?? [],
+          task.folderPaths,
+          dialect,
+        );
+      }
       if (editing && status === "complete") finalReplacement = replacementFromReply(result);
     } catch (problem) {
       status = failureStatus(problem, signal);
@@ -1419,6 +1499,7 @@ function Composer({
           reply: rewrite ? "" : status === "complete" ? (replacement ?? text) : (replacement ?? ""),
           direct: task.action === "direct",
           ignoredChanges,
+          folderChanges,
           suggestions,
           status,
           partial,
@@ -1430,7 +1511,9 @@ function Composer({
       approved,
       status,
       partial: "",
-      newDecisions: suggestions?.filter(({ status }) => status === "preview").length,
+      newDecisions: (suggestions ?? folderChanges)?.filter(({ status }) => status === "preview")
+        .length,
+      folderChangeCount: folderChanges?.filter(({ status }) => status !== "outside").length,
       capacityRejected,
     });
     controller.current = null;
@@ -1457,14 +1540,16 @@ function Composer({
     [task, replacement, origin.text],
   );
   const distinct = task ? new Set([...task.seen, ...currentEdits.map(editKey)]).size : 0;
-  const count = task?.rewrite ? Number(distinct > 0) : distinct;
+  const count = attempt?.folderChangeCount ?? (task?.rewrite ? Number(distinct > 0) : distinct);
   const stop = () => controller.current?.abort();
   const status = attempt?.status;
   const sendingTo = attempt?.recipient;
   const pendingApproval = materialRequests.pending ?? toolApproval.pending;
   const decisions = turns.reduce(
     (total, turn) =>
-      total + (turn.suggestions?.filter(({ status }) => status === "preview").length ?? 0),
+      total +
+      ((turn.suggestions ?? turn.folderChanges)?.filter(({ status }) => status === "preview")
+        .length ?? 0),
     Number(!!pendingApproval),
   );
   const materials = task
@@ -1541,7 +1626,15 @@ function Composer({
 
   const canRetry = attempt && !busy && !attempt.capacityRejected && attempt.status !== "complete";
   const sameConnection = canRetry && recipients.find(({ id }) => id === attempt.recipientId);
-  const otherConnection = canRetry && recipients.find(({ id }) => id === retryId);
+  const retryRecipients = canRetry
+    ? recipients.filter(
+        (candidate) =>
+          candidate.id !== attempt.recipientId &&
+          (!attempt.task.request.folderDocuments ||
+            (candidate.kind === "agent" && candidate.access === "taskCopy")),
+      )
+    : [];
+  const otherConnection = retryRecipients.find(({ id }) => id === retryId);
   const retryHasImages =
     !!canRetry &&
     hasTaskImages(...(attempt.task.plan?.contexts ?? [attempt.task.request.taskContext]));
@@ -1823,11 +1916,13 @@ function Composer({
           folder={attempt.task.searchFolder}
         />
       )}
-      {messages.some((turn) => turn.suggestions?.length) && (
+      {messages.some((turn) => turn.suggestions?.length || turn.folderChanges?.length) && (
         <div className="flex flex-wrap items-center gap-2">
-          <button type="button" className={buttonClass} onClick={() => openFocusedReview()}>
-            {t("writing.review.title")}
-          </button>
+          {messages.some((turn) => turn.suggestions?.length) && (
+            <button type="button" className={buttonClass} onClick={() => openFocusedReview()}>
+              {t("writing.review.title")}
+            </button>
+          )}
           <label className="flex items-center gap-1">
             <input
               type="checkbox"
@@ -1858,6 +1953,29 @@ function Composer({
               )}
               {sidebar && renderSentContext(turn.context, turn.searchFolder)}
               <WritingToolOutcome outcome={turn.toolOutcome} />
+              {turn.folderChanges && origin.folder && (
+                <FolderWritingReview
+                  root={origin.folder}
+                  changes={turn.folderChanges}
+                  platform={platform}
+                  source={showSource}
+                  busy={busy}
+                  decide={(position, status) =>
+                    setTurns((previous) =>
+                      previous.map((item, turnIndex) =>
+                        turnIndex === index
+                          ? {
+                              ...item,
+                              folderChanges: item.folderChanges?.map((change, fileIndex) =>
+                                fileIndex === position ? { ...change, status } : change,
+                              ),
+                            }
+                          : item,
+                      ),
+                    )
+                  }
+                />
+              )}
               {suggestions?.length ? (
                 suggestions.map((suggestion, position) => {
                   const status = reviewStatus(suggestion, draft);
@@ -1953,7 +2071,12 @@ function Composer({
                 />
               )}
               {turn.ignoredChanges && <p role="status">{t("agent.taskCopyIgnored")}</p>}
-              {!!turn.reply && renderReplyExcerpt(turn.reply, suggestions !== undefined)}
+              {!!turn.reply &&
+                (turn.folderChanges ? (
+                  <p className="whitespace-pre-wrap wrap-anywhere">{turn.reply}</p>
+                ) : (
+                  renderReplyExcerpt(turn.reply, suggestions !== undefined)
+                ))}
             </article>
           );
         })}
@@ -2006,7 +2129,7 @@ function Composer({
               .filter(Boolean)
               .join(" · ")}
           </p>
-          {recipients.some(({ id }) => id !== attempt.recipientId) && (
+          {retryRecipients.length > 0 && (
             <>
               <label className="grid gap-1">
                 {t("writing.task.retryConnection")}
@@ -2016,13 +2139,11 @@ function Composer({
                   onChange={(event) => setRetryId(event.target.value)}
                 >
                   <option value="">{t("writing.chooseRecipient")}</option>
-                  {recipients
-                    .filter(({ id }) => id !== attempt.recipientId)
-                    .map((candidate) => (
-                      <option key={candidate.id} value={candidate.id}>
-                        {labelFor(candidate)}
-                      </option>
-                    ))}
+                  {retryRecipients.map((candidate) => (
+                    <option key={candidate.id} value={candidate.id}>
+                      {labelFor(candidate)}
+                    </option>
+                  ))}
                 </select>
               </label>
               {attempt.task.plan && otherConnection && (
@@ -2097,7 +2218,13 @@ function Composer({
                   onChange={(event) => setActionOverride(event.target.value as Action)}
                 >
                   {actions.map((id) => (
-                    <option key={id} value={id} disabled={!canEdit && id !== "comment"}>
+                    <option
+                      key={id}
+                      value={id}
+                      disabled={
+                        (!canEdit && id !== "comment") || (canEditFolder && id === "direct")
+                      }
+                    >
                       {t(`writing.${id}`)}
                     </option>
                   ))}
@@ -2125,6 +2252,10 @@ function Composer({
                   title={recipient && labelFor(recipient)}
                   onChange={(event) => {
                     setRecipientId(event.target.value);
+                    if (origin.folder) {
+                      setActionOverride(null);
+                      setFolderTargets(new Set());
+                    }
                     setAllowedFolder(null);
                     setIncludeHistory(false);
                     toolPicker.clear();
@@ -2151,6 +2282,32 @@ function Composer({
               </p>
             )}
             {loadFailed && <p role="alert">{t("writing.connectionsFailed")}</p>}
+            {folderCopy && (
+              <fieldset className="space-y-1">
+                <legend>{t("writing.folder.include")}</legend>
+                <p className="text-xs text-(--mint-muted)">{t("writing.folder.copyDetails")}</p>
+                <div className="max-h-40 overflow-auto">
+                  {folderPaths
+                    ?.filter((path) => isFolderDocumentPath(relativePath(folderCopy, path)))
+                    .map((path) => (
+                      <label key={path} className="flex items-start gap-2 wrap-anywhere">
+                        <input
+                          type="checkbox"
+                          checked={folderTargets.has(path)}
+                          onChange={(event) => {
+                            const targets = new Set(folderTargets);
+                            if (event.target.checked) targets.add(path);
+                            else targets.delete(path);
+                            setFolderTargets(targets);
+                          }}
+                        />
+                        {relativePath(folderCopy, path)}
+                      </label>
+                    ))}
+                </div>
+                {folderListingFailed && <p role="alert">{t("writing.folderRead")}</p>}
+              </fieldset>
+            )}
             {!title && (
               <label className="flex items-center gap-2 text-xs">
                 <input
@@ -2199,7 +2356,7 @@ function Composer({
                   named.loading ||
                   named.unconfirmed ||
                   (named.hasImages && !vision?.verified) ||
-                  (scope === "folder" && !searchFolder)
+                  (scope === "folder" && (folderCopy ? !folderPaths : !searchFolder))
                 }
               >
                 {toolPicker.plan?.exact

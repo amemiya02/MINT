@@ -4,6 +4,93 @@ use std::io::{self, Write};
 use std::path::Path;
 use tempfile::{Builder, NamedTempFile, TempPath};
 
+pub(crate) fn valid_folder_path(path: &str) -> bool {
+    path.split('/').all(|part| {
+        !part.is_empty()
+            && !part.starts_with('.')
+            && !part.ends_with(['.', ' '])
+            && !part
+                .chars()
+                .any(|c| c.is_control() || "<>:\"\\|?*".contains(c))
+    })
+}
+
+pub(crate) fn valid_folder_document(path: &str) -> bool {
+    valid_folder_path(path)
+        && Path::new(path)
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| {
+                ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown")
+            })
+}
+
+/// Resolve against the granted root and reject symlink aliases in either path.
+pub(crate) fn check_folder_path(root: &Path, path: &Path, resolved: &Path) -> io::Result<()> {
+    let relative = path.strip_prefix(root).ok().and_then(Path::to_str);
+    let canonical_root = fs::canonicalize(root)?;
+    let outside =
+        || io::Error::other("document is outside the working folder or uses a symbolic link");
+    let relative = relative
+        .filter(|relative| valid_folder_document(&relative.replace(std::path::MAIN_SEPARATOR, "/")))
+        .ok_or_else(outside)?;
+    if !resolved.starts_with(&canonical_root) {
+        return Err(outside());
+    }
+    let mut entry = canonical_root;
+    for component in Path::new(relative).components() {
+        entry.push(component);
+        match fs::symlink_metadata(&entry) {
+            Ok(info) if info.is_symlink() => return Err(outside()),
+            Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// Create destination folders for a reviewed operation and remove unused ones on failure.
+pub(crate) fn with_destination(
+    to: &Path,
+    apply: impl FnOnce() -> io::Result<()>,
+) -> io::Result<()> {
+    let mut missing = Vec::new();
+    let mut directory = parent(to)?;
+    while !directory.exists() {
+        missing.push(directory);
+        directory = parent(directory)?;
+    }
+    let mut created = Vec::new();
+    let result = (|| {
+        for directory in missing.into_iter().rev() {
+            match fs::create_dir(directory) {
+                Ok(()) => created.push(directory),
+                Err(e)
+                    if e.kind() == io::ErrorKind::AlreadyExists
+                        && fs::symlink_metadata(directory).is_ok_and(|m| m.is_dir()) => {}
+                Err(e) => return Err(e),
+            }
+        }
+        apply()
+    })();
+    if result.is_err() {
+        for directory in created.into_iter().rev() {
+            let _ = fs::remove_dir(directory);
+        }
+    }
+    result
+}
+
+pub(crate) fn create(to: &Path, text: &[u8]) -> io::Result<()> {
+    let directory = parent(to)?;
+    let mut temp = NamedTempFile::new_in(directory)?;
+    temp.write_all(text)?;
+    temp.as_file().sync_all()?;
+    temp.persist_noclobber(to).map_err(|e| e.error)?;
+    crate::fs::sync_dir(directory);
+    Ok(())
+}
+
 fn parent(path: &Path) -> io::Result<&Path> {
     path.parent()
         .ok_or_else(|| io::Error::other("missing parent"))

@@ -46,6 +46,8 @@ pub struct WritingRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     task_copy: Option<task_copy::Mode>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    folder_documents: Option<Vec<task_copy::Document>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     selected_text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     annotation_batch: Option<Vec<WritingAnnotation>>,
@@ -141,6 +143,8 @@ pub struct WritingReply {
     task_copy: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     ignored_changes: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file_changes: Option<Vec<task_copy::Change>>,
 }
 
 #[derive(Serialize)]
@@ -406,8 +410,18 @@ pub(crate) async fn send_external_agent(
         if task_copy && !task_copy::SUPPORTED {
             return Err(SANDBOX_UNAVAILABLE.to_owned());
         }
-        if !task_copy && request.task_copy.is_some() {
+        if !task_copy && (request.task_copy.is_some() || request.folder_documents.is_some()) {
             return Err(ACCESS_REQUIRED.to_owned());
+        }
+        if request.folder_documents.is_some()
+            && (request.task_copy.is_some()
+                || request.selected_text.is_some()
+                || request
+                    .task_context
+                    .as_ref()
+                    .is_some_and(|context| context.current_draft.is_some()))
+        {
+            return Err(FAILED.to_owned());
         }
         let scratch = crate::writing_tasks::agent_scratch(&app, task_id.as_deref(), task_copy)
             .map_err(|_| FAILED.to_owned())?;
@@ -486,12 +500,11 @@ fn run_codex(
             &spool,
             stopped,
         )?;
-        match request.task_copy {
-            Some(mode) => {
-                let (copy, input) = task_copy::TaskCopy::stage(&workspace, request, mode)?;
-                (Some(copy), input)
-            }
-            None => (None, input),
+        if request.task_copy.is_some() || request.folder_documents.is_some() {
+            let (copy, input) = task_copy::TaskCopy::stage(&workspace, request)?;
+            (Some(copy), input)
+        } else {
+            (None, input)
         }
     } else {
         (None, input)
@@ -563,13 +576,14 @@ fn run_codex(
         stop_child(&mut child, file_access);
     }
     let text = result?;
-    let (task_copy, ignored) = match copy {
+    let (task_copy, file_changes, ignored) = match copy {
         Some(copy) => copy.result()?,
-        None => (None, false),
+        None => (None, None, false),
     };
     Ok(WritingReply {
         text,
         task_copy,
+        file_changes,
         ignored_changes: ignored.then_some(true),
     })
 }
