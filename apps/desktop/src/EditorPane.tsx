@@ -2,13 +2,13 @@ import {
   type CodeBlockRenderer,
   createEditor,
   type DocumentLink,
+  type EditorDialect,
   type EditorSettings,
   type LinkTarget,
   type MintEditor,
   type SharedDocument,
   type WordCount,
 } from "@mint/editor";
-import type { Dialect } from "@mint/markdown";
 import { useEffect, useRef } from "react";
 import type { ImageHost } from "./assets/image-host.ts";
 import { editorPhrases } from "./editor-phrases.ts";
@@ -34,7 +34,7 @@ interface EditorPaneProps {
   /** The document's word count, reported while the pane is active: on activation and shortly after edits. */
   readonly onWordCount: (count: WordCount) => void;
   /** The syntax to recognise; a change applies to the open editor at once. */
-  readonly dialect: Dialect;
+  readonly dialect: EditorDialect;
 }
 
 /** How long typing must pause before the word count is refreshed; counting reads the whole document. */

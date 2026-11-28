@@ -2,8 +2,9 @@ import type { CodeBlockRenderer, DocumentLink, LinkTarget, WordCount } from "@mi
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createImageHost, type ImageSaveFailure } from "../assets/image-host.ts";
 import { EditorPane } from "../EditorPane.tsx";
+import { resolveDocumentLink } from "../folder/wikilinks.ts";
 import { useT } from "../i18n/index.ts";
-import { isAbsolutePath, resolveFrom } from "../paths.ts";
+import { isAbsolutePath } from "../paths.ts";
 import type { Platform } from "../platform/platform.ts";
 import { useDialect } from "../settings/useDialect.ts";
 import { useSettingsStore } from "../settings/useSettings.ts";
@@ -17,6 +18,8 @@ import { LinkPreview } from "./LinkPreview.tsx";
 /** Every open tab keeps its editor mounted, so undo history and selection survive switching. */
 export function TabPanel({
   tab,
+  wikilinkFolder,
+  onLinkError,
   codeBlockRenderers,
   active,
   visible,
@@ -28,6 +31,8 @@ export function TabPanel({
   onWordCount,
 }: {
   readonly tab: Tab;
+  readonly wikilinkFolder: string | null;
+  readonly onLinkError: (message: string) => void;
   readonly codeBlockRenderers: readonly CodeBlockRenderer[];
   readonly active: boolean;
   readonly visible: boolean;
@@ -63,7 +68,8 @@ export function TabPanel({
   );
   const currentPath = useRef(path);
   currentPath.current = path;
-  const dialect = useDialect();
+  const dialect = useDialect(wikilinkFolder !== null);
+  const t = useT();
   const settings = useSettingsStore();
   const [imageFailure, setImageFailure] = useState<ImageSaveFailure | null>(null);
   const [imageHost] = useState(() =>
@@ -75,19 +81,23 @@ export function TabPanel({
     ),
   );
   const onOpenLink = useCallback(
-    (link: LinkTarget) => {
+    async (link: LinkTarget) => {
       if (link.kind === "external") {
         void platform.openExternal(link.url);
       } else if (!link.path && link.fragment) {
         store.revealHeading(id, link.fragment);
       } else {
-        const target = path ? resolveFrom(path, link.path) : link.path;
-        if (isAbsolutePath(target)) {
-          void store.openDocument(target, link.fragment ? { fragment: link.fragment } : undefined);
+        const result = await resolveDocumentLink(platform, wikilinkFolder, path, link, t);
+        if ("error" in result) onLinkError(result.error);
+        else if (result.path && isAbsolutePath(result.path)) {
+          void store.openDocument(
+            result.path,
+            link.fragment ? { fragment: link.fragment } : undefined,
+          );
         }
       }
     },
-    [platform, store, path, id],
+    [platform, store, path, id, wikilinkFolder, onLinkError, t],
   );
   return (
     <div
@@ -105,6 +115,7 @@ export function TabPanel({
       {preview && active && (
         <LinkPreview
           key={JSON.stringify(preview)}
+          wikilinkFolder={wikilinkFolder}
           source={tab}
           link={preview}
           platform={platform}

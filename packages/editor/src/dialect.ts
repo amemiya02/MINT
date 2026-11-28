@@ -12,6 +12,12 @@ import {
 import { footnoteSyntax } from "./footnote-syntax.ts";
 import { FrontMatter } from "./front-matter.ts";
 import { MathSyntax } from "./math-syntax.ts";
+import { wikilinkSyntax } from "./wikilink-syntax.ts";
+
+/** Folder-scoped document references are a reading feature of the editor. */
+export interface EditorDialect extends Dialect {
+  readonly wikilinks?: boolean;
+}
 
 type Switches = Omit<Dialect, "extended"> & ExtendedSyntax;
 
@@ -32,15 +38,17 @@ const parserExtensions: { readonly [K in keyof Switches]: readonly MarkdownConfi
 };
 
 /** The Lezer extensions a dialect enables. */
-export function dialectParserExtensions(dialect: Dialect): MarkdownConfig[] {
+export function dialectParserExtensions(dialect: EditorDialect): MarkdownConfig[] {
   const switches: Switches = { ...dialect, ...dialect.extended };
-  return (Object.keys(parserExtensions) as (keyof Switches)[]).flatMap((key) =>
+  const extensions = (Object.keys(parserExtensions) as (keyof Switches)[]).flatMap((key) =>
     switches[key] ? parserExtensions[key] : [],
   );
+  if (dialect.wikilinks) extensions.push(wikilinkSyntax);
+  return extensions;
 }
 
 /** Markdown language support configured for exactly the syntax in `dialect`. */
-export function markdownSupport(dialect: Dialect): Extension {
+export function markdownSupport(dialect: EditorDialect): Extension {
   return markdown({
     base: commonmarkLanguage,
     // Fenced code is highlighted by its language; grammars load on first use.

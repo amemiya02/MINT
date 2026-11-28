@@ -15,6 +15,7 @@ import {
 import { useSettings, useSettingsStore } from "./useSettings.ts";
 
 interface SettingsDialogProps {
+  readonly folder: string | null;
   readonly onClose: () => void;
   /** Open settings.json as a document. */
   readonly onOpenFile: (path: string) => void;
@@ -23,7 +24,12 @@ interface SettingsDialogProps {
 }
 
 /** The settings window: one control per entry of `settingsSchema`. */
-export function SettingsDialog({ onClose, onOpenFile, onRecordingShortcut }: SettingsDialogProps) {
+export function SettingsDialog({
+  folder,
+  onClose,
+  onOpenFile,
+  onRecordingShortcut,
+}: SettingsDialogProps) {
   const t = useT();
   const { path } = useSettings();
   const { close, props: dialogProps } = useModalDialog(onClose);
@@ -53,7 +59,7 @@ export function SettingsDialog({ onClose, onOpenFile, onRecordingShortcut }: Set
           settingsSchema[key].kind === "shortcuts" ? (
             <ShortcutsSettings key={key} onRecording={onRecordingShortcut} />
           ) : (
-            <SettingControl key={key} settingKey={key} />
+            <SettingControl key={key} settingKey={key} folder={folder} />
           ),
         )}
       </div>
@@ -80,7 +86,13 @@ const fieldClass =
   "rounded-md border border-(--mint-border) bg-(--mint-bg) px-2 py-1 text-sm focus-visible:outline-2 focus-visible:outline-(--mint-accent)";
 
 /** The control for one setting, chosen by its kind. */
-function SettingControl({ settingKey }: { readonly settingKey: SettingKey }) {
+function SettingControl({
+  settingKey,
+  folder,
+}: {
+  readonly settingKey: SettingKey;
+  readonly folder: string | null;
+}) {
   const t = useT();
   const store = useSettingsStore();
   const { settings } = useSettings();
@@ -109,6 +121,22 @@ function SettingControl({ settingKey }: { readonly settingKey: SettingKey }) {
         </select>
       );
       break;
+    case "folderToggle": {
+      if (!folder) return null;
+      const folders = value as readonly string[];
+      control = (
+        <input
+          id={id}
+          type="checkbox"
+          checked={folders.includes(folder)}
+          onChange={(e) =>
+            set(e.target.checked ? [...folders, folder] : folders.filter((path) => path !== folder))
+          }
+          className="size-4 accent-(--mint-accent)"
+        />
+      );
+      break;
+    }
     case "toggle":
       control = (
         <input
@@ -154,7 +182,7 @@ function SettingControl({ settingKey }: { readonly settingKey: SettingKey }) {
     <div className="flex flex-col gap-1">
       <div className="flex items-center justify-between gap-4">
         <label htmlFor={id} className="text-sm">
-          {t(definition.label)}
+          {t(definition.label, { folder: folder ?? "" })}
         </label>
         {control}
       </div>

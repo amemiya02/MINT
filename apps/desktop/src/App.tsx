@@ -19,7 +19,7 @@ import { useRecent } from "./folder/recent.ts";
 import { NavigationRail, Sidebar, type SidebarTool } from "./folder/Sidebar.tsx";
 import { HistoryDialog } from "./history/HistoryDialog.tsx";
 import { type Translate, useT } from "./i18n/index.ts";
-import { documentExtensions } from "./paths.ts";
+import { documentExtensions, isWithin } from "./paths.ts";
 import type { DocumentEdit, Platform } from "./platform/platform.ts";
 import { insertTemplate } from "./plugins/host.ts";
 import { PluginEntries, pluginName, useInstallations } from "./plugins/Plugins.tsx";
@@ -111,7 +111,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     folderSearch,
     setFolderSearch,
   } = useOverlays();
-  const { shortcuts } = useSettings().settings;
+  const { shortcuts, wikilinkFolders } = useSettings().settings;
   const active = tabs.find((tab) => tab.id === activeId) ?? null;
   const [historyPath, setHistoryPath] = useState<string | null>(null);
   const [toolbarPositions, setToolbarPositions] = useState<Record<Pane, ToolbarPosition>>({
@@ -126,6 +126,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   const updates = useUpdates(platform);
   const [tree, setTree] = useState<FolderTree | null>(null);
   const folder = tree?.root ?? null;
+  const wikilinkFolder = folder && wikilinkFolders.includes(folder) ? folder : null;
   const openFolderState = useRef<{ request: number; tree?: FolderTree }>({ request: 0 });
   useEffect(
     () => () => {
@@ -467,6 +468,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
             key={JSON.stringify([folder, activePath])}
             platform={platform}
             tree={tree}
+            wikilinks={wikilinkFolder !== null}
             targetPath={activePath}
             onOpen={(link) =>
               void store.openDocument(link.sourcePath, { sourceFrom: link.from, sourceTo: link.to })
@@ -533,6 +535,12 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
               <TabPanel
                 key={tab.id}
                 tab={tab}
+                wikilinkFolder={
+                  wikilinkFolder && tab.path && isWithin(tab.path, wikilinkFolder)
+                    ? wikilinkFolder
+                    : null
+                }
+                onLinkError={setShellError}
                 codeBlockRenderers={codeBlockRenderers}
                 active={tab.id === activeId}
                 visible={selected[tab.pane] === tab.id}
@@ -627,6 +635,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
       )}
       {settingsOpen && (
         <SettingsDialog
+          folder={folder}
           onClose={() => {
             setSettingsOpen(false);
             setRecordingShortcut(false);

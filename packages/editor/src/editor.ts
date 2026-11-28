@@ -15,8 +15,8 @@ import {
   keymap,
   rectangularSelection,
 } from "@codemirror/view";
-import { type Dialect, defaultDialect, renderHtml } from "@mint/markdown";
-import { markdownSupport } from "./dialect.ts";
+import { defaultDialect, renderHtml } from "@mint/markdown";
+import { type EditorDialect, markdownSupport } from "./dialect.ts";
 import {
   fileText,
   fromFileOffset,
@@ -126,7 +126,7 @@ export interface EditorOptions {
   readonly document?: SharedDocument;
   /** Full file text, exactly as decoded from disk (a leading U+FEFF BOM and any line endings are kept). */
   readonly text: string;
-  readonly dialect?: Dialect;
+  readonly dialect?: EditorDialect;
   readonly host?: HostAdapter;
   /** Initial mode; defaults to `livePreview`. */
   readonly mode?: EditorMode;
@@ -224,7 +224,7 @@ export interface MintEditor {
    * Parse and render with another dialect from now on (e.g. an extended
    * syntax switched on in the settings). Text and selection are unchanged.
    */
-  setDialect(dialect: Dialect): void;
+  setDialect(dialect: EditorDialect): void;
   /** Run a named command. Returns whether it did anything. */
   execute<C extends EditorCommand>(command: C, ...args: EditorCommands[C]): boolean;
   /** Listen for text, selection, mode, outline and scroll changes. Returns an unsubscribe function. */
@@ -242,7 +242,7 @@ export interface MintEditor {
 const hostKeys = new Set(["Mod-/", "Mod-i", "Shift-Mod-k"]);
 
 /** Everything that depends on the dialect: the parser and the renderers of optional syntax. */
-function dialectExtensions(dialect: Dialect): Extension {
+function dialectExtensions(dialect: EditorDialect): Extension {
   return [
     markdownSupport(dialect),
     richPaste(dialect),

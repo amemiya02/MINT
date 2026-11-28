@@ -1,3 +1,4 @@
+export type { EditorDialect } from "./dialect.ts";
 export type {
   EditorCommand,
   EditorCommands,
