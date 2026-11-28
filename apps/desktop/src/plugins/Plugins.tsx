@@ -23,6 +23,7 @@ import {
   update,
   writingStatistics,
   writingTemplates,
+  zotero,
 } from "./host.ts";
 
 export function useInstallations() {
@@ -56,6 +57,7 @@ export function pluginName(m: PluginManifest, t: Translate) {
 
 function permission(action: Permission, t: Translate) {
   if (action === "folder.status.write") return t("kanban.permission");
+  if (action === "zotero.read") return t("zotero.permission");
   if (action === "archive.import") return t("notion.permission");
   if (action === "document.write") return t("plugin.write");
   return t(action === "folder.read" ? "plugin.folderRead" : "plugin.read");
@@ -88,6 +90,7 @@ export function PluginSettings() {
     timingDiagrams,
     notionImporter,
     epubExport,
+    zotero,
     latexExport,
   ].filter((m) => !installed.some((i) => i.manifest.id === m.id));
   return (

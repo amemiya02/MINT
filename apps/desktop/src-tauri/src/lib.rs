@@ -17,6 +17,7 @@ mod settings;
 mod themes;
 mod updates;
 mod walk;
+mod zotero;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -664,6 +665,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            zotero::list_zotero_items,
             printing::print_pages,
             read_text_file,
             write_text_file,

@@ -11,6 +11,7 @@ import type {
   RecoverySnapshot,
   SettingsFile,
   SettingsValues,
+  ZoteroItem,
 } from "./platform.ts";
 
 /** Where the in-memory platform keeps settings.json (seed it through `files`). */
@@ -42,6 +43,7 @@ export interface MemoryPlatformOptions {
   readonly appData?: Readonly<Record<string, string>>;
   /** Answers the question dialog gives, in order; once used up it answers `cancel`. */
   readonly questionDialogResults?: readonly ("yes" | "no" | "cancel")[];
+  readonly zoteroItems?: readonly ZoteroItem[];
   readonly locale?: string;
   /** Text on the system clipboard; `null` means it holds no text (reading it fails). */
   readonly clipboardText?: string | null;
@@ -262,6 +264,13 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
   }
 
   return {
+    async listZoteroItems(start) {
+      if (!options.zoteroItems) throw new Error("unavailable");
+      return {
+        items: options.zoteroItems.slice(start, start + 50),
+        next: options.zoteroItems.length > start + 50,
+      };
+    },
     locale: options.locale ?? navigator.language,
     files,
     binaryFiles,
