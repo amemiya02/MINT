@@ -1649,6 +1649,115 @@ test("automatic proofreading sends only the active passage and undo restores the
   }
 });
 
+test("read-only document review receives native model findings and preserves manuscript bytes", async () => {
+  const path = join(dir, "annotation-review.md");
+  const original = "\uFEFFOpening paragraph.  \r\n\r\nSource notes.\n";
+  await writeFile(path, original);
+  const requests: { url?: string; authorization?: string; body: string }[] = [];
+  const endpoint = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(chunk);
+    requests.push({
+      url: request.url,
+      authorization: request.headers.authorization,
+      body: Buffer.concat(chunks).toString("utf8"),
+    });
+    response.writeHead(200, { "Content-Type": "application/json" }).end(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                findings: [
+                  {
+                    quote: "Source notes.",
+                    note: "Name the source.",
+                    replacement: "Do not write.",
+                  },
+                ],
+              }),
+            },
+            finish_reason: "stop",
+          },
+        ],
+      }),
+    );
+  });
+  await new Promise<void>((resolve, reject) => {
+    endpoint.once("error", reject);
+    endpoint.listen(0, "127.0.0.1", resolve);
+  });
+  const address = endpoint.address();
+  assert.ok(address && typeof address !== "string");
+  const secret = "native-annotation-review-fixture-key";
+  try {
+    await restart([path]);
+    await openSettings();
+    await click("Model connections");
+    await shows("Sample prompt");
+    for (const [label, value] of [
+      ["Connection name", "Native annotation review fixture"],
+      ["API address", `http://127.0.0.1:${address.port}/v1`],
+      ["Model name", "native-annotation-reviewer"],
+      ["API key", secret],
+    ]) {
+      const input = await command<Record<string, string>>("POST", `/session/${session}/element`, {
+        using: "xpath",
+        value: `//dialog[@open]//label[normalize-space(.)='${label}']/input`,
+      });
+      await command("POST", `/session/${session}/element/${input[elementKey]}/value`, {
+        text: value,
+      });
+    }
+    await clickSettingsButton("Use for this launch");
+    await click("Close");
+    await clickPath("//footer//button[normalize-space(.)='Annotations']");
+    await click("Review Document (Read Only)…");
+    await waitForView(
+      "the read-only review recipient",
+      `const option = [...document.querySelectorAll('aside[aria-label="Annotations"] select option')]
+        .find(item => item.textContent.startsWith("Native annotation review fixture · "));
+        if (!option) return false;
+        option.parentElement.value = option.value;
+        option.parentElement.dispatchEvent(new Event("change", { bubbles: true }));
+        return true;`,
+    );
+    assert.equal(requests.length, 0);
+    await clickPath(
+      "//aside[@aria-label='Annotations']//button[@type='submit' and not(@disabled) and contains(.,'Comment only') and contains(.,'Native annotation review fixture')]",
+    );
+    await waitForView(
+      "the native finding to appear as an annotation",
+      `return document.querySelector('aside[aria-label="Annotations"] section[aria-label="Pending"]')?.innerText.includes("Name the source.");`,
+    );
+    assert.equal(requests.length, 1);
+    const [request] = requests;
+    assert.equal(request?.url, "/v1/chat/completions");
+    assert.equal(request?.authorization, `Bearer ${secret}`);
+    const body = JSON.parse(request?.body ?? "");
+    assert.equal(body.model, "native-annotation-reviewer");
+    const sent = JSON.parse(body.messages.at(-1).content);
+    assert.deepEqual(Object.keys(sent).sort(), ["instruction", "selectedText"]);
+    assert.equal(sent.selectedText, original.slice(1));
+    await clickPath(
+      "//aside[@aria-label='Annotations']//button[normalize-space(.)='Go to target']",
+    );
+    await waitForView(
+      "the original native excerpt to be selected",
+      `return getSelection()?.toString() === "Source notes.";`,
+    );
+    await nativeShortcut("ctrl+s");
+    await waitForView(
+      "the reviewed manuscript to remain saved",
+      "return document.querySelector('footer button[aria-label=\"Version History\"]')?.textContent === 'Saved';",
+    );
+    assert.deepEqual(await readFile(path), Buffer.from(original));
+  } finally {
+    endpoint.closeAllConnections();
+    await new Promise<void>((resolve) => endpoint.close(() => resolve()));
+  }
+});
+
 test("a native model reply stays editable and untitled until the author chooses a Save As path", async () => {
   const folder = await mkdtemp(join(homedir(), "mint-ai-draft-"));
   const sources = join(folder, "sources");
@@ -2100,13 +2209,16 @@ test("external Agent consent gates a real CLI process and keeps the manuscript o
 const fs = require("node:fs");
 const args = process.argv.slice(2);
 const readOnly = args.includes("--sandbox") && args[args.indexOf("--sandbox") + 1] === "read-only";
-const prompt = fs.readFileSync(0, "utf8");
+const prompt = JSON.parse(fs.readFileSync(0, "utf8"));
 const readable = fs.readFileSync(${JSON.stringify(draft)}, "utf8");
 fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify({
-  args, prompt: JSON.parse(prompt), cwd: process.cwd(), entries: fs.readdirSync(process.cwd()), readable,
+  args, prompt, cwd: process.cwd(), entries: fs.readdirSync(process.cwd()), readable,
 }) + "\\n");
 if (!readOnly) fs.writeFileSync(${JSON.stringify(writeTarget)}, "configured access ran");
-console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "Fixture Agent reply." } }));
+const text = prompt.annotationBatch
+  ? JSON.stringify({ results: prompt.annotationBatch.map(({ id }) => ({ id, replacement: "Brief sentence." })) })
+  : "Fixture Agent reply.";
+console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text } }));
 console.log(JSON.stringify({ type: "turn.completed" }));
 `,
     { mode: 0o755 },
@@ -2246,6 +2358,53 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   ).catch(explain);
 
   await clickPath("//aside[@aria-label='Writing Assistant']//button[normalize-space(.)='Close']");
+  await clickPath("//main//div[@role='textbox']");
+  await keyActions([...chord(keys.control, keys.end), ...chord(keys.shift, keys.home)]);
+  await clickPath("//footer//button[normalize-space(.)='Add annotation']");
+  await clickPath("//dialog[@open][@aria-label='Add annotation']//textarea");
+  await keyActions(typing("Shorten this sentence."));
+  await click("Save annotation");
+  await click("Send annotations for review");
+  await waitForView(
+    "the batch review action selector",
+    "const option = document.querySelector('aside[aria-label=\"Annotations\"] option[value=\"direct\"]'); if (!option) return false; option.parentElement.value = option.value; option.parentElement.dispatchEvent(new Event('change', { bubbles: true })); return true;",
+  );
+  await clickPath(
+    "//aside[@aria-label='Annotations']//button[@type='submit' and not(@disabled) and contains(.,'Apply directly') and contains(.,'Codex')]",
+  );
+  await waitForView(
+    "the native Agent’s annotation edit to apply",
+    "return document.querySelector('section[aria-label=\"Annotation review results\"]')?.innerText.includes('1 edit applied');",
+  );
+  const annotationRun = JSON.parse((await readFile(calls, "utf8")).trim().split("\n").at(-1) ?? "");
+  assert.deepEqual(Object.keys(annotationRun.prompt).sort(), ["annotationBatch", "instruction"]);
+  assert.equal(annotationRun.prompt.annotationBatch.length, 1);
+  const [{ id, ...annotation }] = annotationRun.prompt.annotationBatch;
+  assert.equal(typeof id, "string");
+  assert.deepEqual(annotation, {
+    kind: "text",
+    excerpt: "On-disk sentence.",
+    note: "Shorten this sentence.",
+    editable: true,
+  });
+  assert.equal(annotationRun.args[annotationRun.args.indexOf("--sandbox") + 1], "read-only");
+  assert.deepEqual(annotationRun.entries, []);
+  assert.equal(annotationRun.readable, initial);
+  await nativeShortcut("ctrl+s");
+  await until(
+    "the annotation edit to reach disk",
+    async () =>
+      (await readFile(draft, "utf8")) === initial.replace("On-disk sentence.", "Brief sentence.") ||
+      null,
+  ).catch(explain);
+  await clickPath("//main//div[@role='textbox']");
+  await keyActions(chord(keys.control, "z"));
+  await nativeShortcut("ctrl+s");
+  await until(
+    "undo to restore the exact annotation review baseline",
+    async () => (await readFile(draft, "utf8")) === initial || null,
+  ).catch(explain);
+
   await openSettings();
   await click("External Agents");
 
@@ -2263,7 +2422,7 @@ console.log(JSON.stringify({ type: "turn.completed" }));
     invokeNative("send_external_agent", { path, revision, access: "configured", request }),
     /agentAccessRequired/,
   );
-  assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, 3);
+  assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, 4);
   await assert.rejects(readFile(writeTarget), { code: "ENOENT" });
 
   await click("Try example");

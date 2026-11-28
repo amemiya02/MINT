@@ -13,6 +13,7 @@ import { ExternalAgentDialog } from "./ai/ExternalAgentPanel.tsx";
 import { inlineCompletionSender } from "./ai/inline-completion.ts";
 import { ReplyExcerpt } from "./ai/ReplyExcerpt.tsx";
 import { captureWritingSelection, type WritingSelection } from "./ai/writing-selection.ts";
+import type { AnnotationReviewKind } from "./annotations/AnnotationReview.tsx";
 import { AnnotationDialog, AnnotationPanel } from "./annotations/Annotations.tsx";
 import { createAnnotationStorage } from "./annotations/annotation-storage.ts";
 import { createAutosave } from "./autosave/autosave.ts";
@@ -152,6 +153,13 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   useEffect(() => () => agentSelection?.origin.range.release(), [agentSelection]);
   const [historyPath, setHistoryPath] = useState<string | null>(null);
   const [annotationsOpen, setAnnotationsOpen] = useState(false);
+  const [annotationReviews, setAnnotationReviews] = useState<
+    Readonly<Partial<Record<number, AnnotationReviewKind>>>
+  >({});
+  function openAnnotationReview(documentId: number, kind: AnnotationReviewKind) {
+    setAnnotationsOpen(true);
+    setAnnotationReviews((previous) => ({ ...previous, [documentId]: kind }));
+  }
   const [annotationError, setAnnotationError] = useState<{ path: string; reason: string } | null>(
     null,
   );
@@ -451,6 +459,9 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
       }));
     },
     "edit.addAnnotation": addAnnotation,
+    "edit.reviewDocument": () => {
+      if (active) openAnnotationReview(active.documentId, "document");
+    },
     "view.annotations": () => {
       if (active) setAnnotationsOpen((open) => !open);
     },
@@ -779,16 +790,33 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
               />
             )}
           </div>
-          {active && annotationsOpen && (
-            <AnnotationPanel
-              annotations={active.document.annotations}
-              onClose={() => {
-                setAnnotationsOpen(false);
-                store.editor(active.id)?.focus();
-              }}
-              onReveal={(item) => store.editor(active.id)?.revealAnnotation(item)}
-            />
-          )}
+          {tabs
+            .filter(
+              (tab, index) =>
+                tabs.findIndex((view) => view.documentId === tab.documentId) === index,
+            )
+            .map((tab) => (
+              <AnnotationPanel
+                key={tab.documentId}
+                annotations={tab.document.annotations}
+                documentId={tab.documentId}
+                name={tabName(t, tab)}
+                platform={platform}
+                store={store}
+                settingsOpen={settingsOpen}
+                reviewKind={annotationReviews[tab.documentId]}
+                onReview={(kind) => openAnnotationReview(tab.documentId, kind)}
+                visible={annotationsOpen && active?.documentId === tab.documentId}
+                onSettings={() => setSettingsOpen(true)}
+                onClose={() => {
+                  setAnnotationsOpen(false);
+                  if (active) store.editor(active.id)?.focus();
+                }}
+                onReveal={(item) => {
+                  if (active) store.editor(active.id)?.revealAnnotation(item);
+                }}
+              />
+            ))}
         </div>
       </div>
       {active && canPresentSlides(plugins) && (

@@ -158,6 +158,12 @@ export const commands = [
     group: "annotations",
   },
   {
+    id: "edit.reviewDocument",
+    title: "command.edit.reviewDocument",
+    menu: "edit",
+    group: "annotations",
+  },
+  {
     id: "view.annotations",
     title: "command.view.annotations",
     menu: "view",
