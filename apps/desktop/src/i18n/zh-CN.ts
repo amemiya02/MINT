@@ -274,8 +274,7 @@ export const zhCN: Messages = {
   "export.pdf.font": "字号（磅）",
   "export.pdf.preview": "分页预览",
   "export.pdf.pages": "共 {count} 页",
-  "export.pdf.hint":
-    "在打印对话框中选择“存储为 PDF”（macOS）或“打印到文件”（Linux）。",
+  "export.pdf.hint": "在打印对话框中选择“存储为 PDF”（macOS）或“打印到文件”（Linux）。",
 
   "theme.issue.missing": "在 {path} 中找不到主题“{name}”，正在使用内置主题。",
   "theme.issue.unreadable": "无法读取主题“{name}”（{reason}），正在使用内置主题。",
