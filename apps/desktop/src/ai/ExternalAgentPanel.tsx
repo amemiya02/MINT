@@ -10,6 +10,12 @@ import {
 } from "./external-agent.ts";
 import { MaterialRequestNotice, useMaterialRequests } from "./MaterialRequest.tsx";
 import { TaskContextChecklist, useNamedMaterials } from "./TaskContext.tsx";
+import {
+  largeWritingSelection,
+  useWritingCallLimit,
+  WritingCallPause,
+  WritingCallPlan,
+} from "./WritingCallLimit.tsx";
 import { useWritingTask } from "./WritingTasks.tsx";
 import {
   useWritingToolPicker,
@@ -180,11 +186,13 @@ function ExternalAgentPanel({
   const [instruction, setInstruction] = useState("");
   const named = useNamedMaterials();
   const materialRequests = useMaterialRequests(materialsPlatform?.sendMcpRequest);
+  const callLimit = useWritingCallLimit();
   const requested = materialRequests.pending;
   const [pending, setPending] = useState<{
     id: string;
     request: WritingRequest;
     tool?: WritingToolPlan;
+    callLimit?: number;
   } | null>(null);
   const picker = useWritingToolPicker(materialsPlatform?.sendMcpRequest);
   const toolApproval = materialRequests.externalTool;
@@ -206,9 +214,15 @@ function ExternalAgentPanel({
     agent: ExternalAgent;
     access: AgentAccess;
     request: WritingRequest;
+    callLimit?: number;
   } | null>(null);
   const mounted = useRef(true);
-  const taskStatus = pending || requested || toolPending ? "approval" : attempt?.status;
+  const pause = materialRequests.paused;
+  const taskStatus = pause
+    ? "paused"
+    : pending || requested || toolPending
+      ? "approval"
+      : attempt?.status;
   if (target) target.engaged.current = !!taskStatus && taskStatus !== "complete";
   const taskRecipient = pending ? agent?.path : attempt?.recipient;
   const taskRequest = pending?.request ?? lastRequest.current?.request;
@@ -242,7 +256,7 @@ function ExternalAgentPanel({
             material: taskMaterial,
             status: taskStatus,
             count: 0,
-            decisions: Number(!!(pending || requested || toolPending)),
+            decisions: Number(!!(pending || requested || toolPending || pause)),
             background: !target.visible,
             notice: pending
               ? { id: pending.id, decisions: 1 }
@@ -250,10 +264,19 @@ function ExternalAgentPanel({
                 ? { id: `${attempt.id}:${requested.id}`, detail: requested.name, decisions: 1 }
                 : toolPending
                   ? { id: toolPending.id, detail: toolPending.name, decisions: 1 }
-                  : attempt?.status === "complete"
-                    ? { id: attempt.id }
-                    : undefined,
-            stop: taskStatus === "working" || taskStatus === "approval" ? stop : undefined,
+                  : pause && attempt
+                    ? {
+                        id: `${attempt.id}:call:${pause.calls}`,
+                        detail: pause.recipient,
+                        decisions: 1,
+                      }
+                    : attempt?.status === "complete"
+                      ? { id: attempt.id }
+                      : undefined,
+            stop:
+              taskStatus === "working" || taskStatus === "approval" || taskStatus === "paused"
+                ? stop
+                : undefined,
             forget: () => {
               setAttempt(null);
               setReply("");
@@ -264,6 +287,7 @@ function ExternalAgentPanel({
     [
       attempt,
       instruction,
+      pause,
       pending,
       requested,
       stop,
@@ -288,6 +312,12 @@ function ExternalAgentPanel({
   const sendButton = useRef<HTMLButtonElement>(null);
   const sampleInstruction = t("agent.sampleInstruction");
   const material = selection ?? t("agent.sampleText");
+  const selectedContext: WritingRequest["taskContext"] = named.entries.length
+    ? { materials: named.entries.map(({ material }) => material) }
+    : undefined;
+  const showCallPlan =
+    !!materialsPlatform &&
+    (!!selectedContext || !!picker.plan || material.length >= largeWritingSelection);
 
   const select = useCallback(
     (next: ExternalAgent | null, requestedAccess = next?.preferredAccess) => {
@@ -366,13 +396,14 @@ function ExternalAgentPanel({
     request: WritingRequest,
     approve: boolean,
     tool?: WritingToolPlan,
+    limit?: number,
   ) {
     if (controller.current) return;
     setPending(null);
     setReply("");
     setStreaming("");
     picker.clear();
-    lastRequest.current = { agent: current, access, request };
+    lastRequest.current = { agent: current, access, request, callLimit: limit };
     const running = target ? new AbortController() : null;
     const signal = running?.signal;
     const entry = { id: crypto.randomUUID(), title: request.instruction, recipient: current.path };
@@ -380,6 +411,22 @@ function ExternalAgentPanel({
     if (running) setAttempt({ ...entry, status: "working" });
     void run(async () => {
       let text = "";
+      let context = request.taskContext;
+      let atCallLimit = false;
+      const recipient = t("writing.recipient.agent", { path: current.path });
+      function record(reply: string, status: AttemptStatus) {
+        target?.record(entry.id, {
+          instruction: request.instruction,
+          material: request.selectedText,
+          context,
+          reply,
+          recipient,
+          toolOutcome: toolApproval.result(),
+          recipientId: `agent:${current.path}`,
+          direct: false,
+          status,
+        });
+      }
       try {
         const connection = approve ? await platform.approve(current, access) : current;
         if (!mounted.current) return;
@@ -394,12 +441,11 @@ function ExternalAgentPanel({
         }
         if (signal?.aborted) throw "stopped";
         const sender = externalAgentSender(platform, connection, access);
-        const recipient = t("writing.recipient.agent", { path: current.path });
-        let context = request.taskContext;
         const result = materialsPlatform
           ? await materialRequests.send(sender, request, recipient, null, {
               signal,
               tool,
+              callLimit: limit,
               onContext(sent) {
                 context = sent;
               },
@@ -407,6 +453,14 @@ function ExternalAgentPanel({
                 if (signal?.aborted) return;
                 text = progress;
                 setStreaming(text);
+              },
+              onPause(completed) {
+                text = completed;
+                atCallLimit = true;
+                setStreaming("");
+              },
+              onResume() {
+                atCallLimit = false;
               },
             })
           : await sender(request);
@@ -431,23 +485,14 @@ function ExternalAgentPanel({
         setSaved(connections);
         onConnectionsChanged?.(connections);
         setReply(result.taskCopy ?? result.text);
-        target?.record(entry.id, {
-          instruction: request.instruction,
-          material: request.selectedText,
-          context,
-          reply: result.text,
-          recipient,
-          toolOutcome: toolApproval.result(),
-          recipientId: `agent:${current.path}`,
-          direct: false,
-          status: outcome,
-        });
+        record(result.text, outcome);
       } catch (problem) {
         if (!mounted.current) return;
         if (!signal) throw problem;
         const outcome = failureStatus(problem, signal);
         setAttempt({ ...entry, status: outcome });
         retainPartial(text);
+        if (atCallLimit && (text || toolApproval.result())) record(text, outcome);
         if (outcome === "failed") throw problem;
       } finally {
         controller.current = null;
@@ -541,7 +586,14 @@ function ExternalAgentPanel({
             className="flex flex-col gap-2 border-t border-(--mint-border) pt-3"
             onSubmit={(event) => {
               event.preventDefault();
-              if (busy || picker.incomplete || named.loading || named.unconfirmed) return;
+              if (
+                busy ||
+                picker.incomplete ||
+                named.loading ||
+                named.unconfirmed ||
+                (showCallPlan && callLimit.invalid)
+              )
+                return;
               const request = {
                 instruction: selection === undefined ? sampleInstruction : instruction.trim(),
                 selectedText: material,
@@ -549,18 +601,22 @@ function ExternalAgentPanel({
                   access === "taskCopy" && selection === undefined
                     ? ("replacement" as const)
                     : undefined,
-                taskContext: named.entries.length
-                  ? { materials: named.entries.map(({ material }) => material) }
-                  : undefined,
+                taskContext: selectedContext,
               };
               if (!request.instruction) return;
-              if (agent.approved.includes(access)) send(agent, request, false, picker.plan);
+              const limit = showCallPlan ? callLimit.limit : undefined;
+              if (agent.approved.includes(access)) send(agent, request, false, picker.plan, limit);
               else {
                 setStatus(null);
                 setError(null);
                 setReply("");
-                lastRequest.current = { agent, access, request };
-                setPending({ id: crypto.randomUUID(), request, tool: picker.plan });
+                lastRequest.current = { agent, access, request, callLimit: limit };
+                setPending({
+                  id: crypto.randomUUID(),
+                  request,
+                  tool: picker.plan,
+                  callLimit: limit,
+                });
               }
             }}
           >
@@ -619,6 +675,14 @@ function ExternalAgentPanel({
               </label>
             )}
             {materialsPlatform && <WritingToolPicker picker={picker} />}
+            {showCallPlan && (
+              <WritingCallPlan
+                recipient={t("writing.recipient.agent", { path: agent.path })}
+                requests={[{ selectedText: material, taskContext: selectedContext }]}
+                limit={callLimit}
+                toolEndpoint={picker.plan?.endpoint}
+              />
+            )}
             <div>
               <button
                 type="submit"
@@ -629,6 +693,7 @@ function ExternalAgentPanel({
                   picker.incomplete ||
                   named.loading ||
                   named.unconfirmed ||
+                  (showCallPlan && callLimit.invalid) ||
                   (selection !== undefined && !instruction.trim())
                 }
               >
@@ -684,13 +749,14 @@ function ExternalAgentPanel({
             <button
               type="button"
               className={buttonClass}
-              onClick={() => send(agent, pending.request, true, pending.tool)}
+              onClick={() => send(agent, pending.request, true, pending.tool, pending.callLimit)}
             >
               {t("agent.allowSend")}
             </button>
           </div>
         </fieldset>
       )}
+      {pause && <WritingCallPause pause={pause} />}
       {toolPending && <WritingToolNotice pending={toolPending} onDecision={toolApproval.decide} />}
       <WritingToolOutcome outcome={toolApproval.outcome} />
       {requested && materialsPlatform && (
@@ -701,11 +767,12 @@ function ExternalAgentPanel({
           onDecision={materialRequests.decide}
         />
       )}
-      {target && (taskStatus === "approval" || taskStatus === "working") && (
-        <button type="button" className={buttonClass} onClick={stop}>
-          {t("writing.task.stop")}
-        </button>
-      )}
+      {target &&
+        (taskStatus === "approval" || taskStatus === "working" || taskStatus === "paused") && (
+          <button type="button" className={buttonClass} onClick={stop}>
+            {t("writing.task.stop")}
+          </button>
+        )}
       {attempt && !busy && !pending && attempt.status !== "complete" && (
         <p role="status">{t(`writing.task.${attempt.status}`)}</p>
       )}
@@ -714,8 +781,14 @@ function ExternalAgentPanel({
           type="button"
           className={buttonClass}
           onClick={() => {
-            if (agent.approved.includes(access)) send(agent, retry.request, false);
-            else setPending({ id: crypto.randomUUID(), request: retry.request });
+            if (agent.approved.includes(access))
+              send(agent, retry.request, false, undefined, retry.callLimit);
+            else
+              setPending({
+                id: crypto.randomUUID(),
+                request: retry.request,
+                callLimit: retry.callLimit,
+              });
           }}
         >
           {t("writing.task.retry")}

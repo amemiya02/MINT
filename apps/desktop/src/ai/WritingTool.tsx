@@ -90,6 +90,7 @@ export function useWritingToolApproval() {
       recipient: string,
       onApproval: () => void,
       onResume: () => void,
+      beforeCall: () => Promise<void>,
     ): WritingSender {
       const { tool, exact, endpoint } = plan;
       const definition = { ...tool, annotations: undefined, exactArguments: exact };
@@ -152,6 +153,7 @@ export function useWritingToolApproval() {
           if (allowed) {
             const approvedArgs = exact ?? args;
             authorizedArgs = JSON.stringify(approvedArgs, null, 2);
+            await beforeCall();
             try {
               const result = await callMcpTool(transport, endpoint, tool, approvedArgs, signal);
               toolOutcome = { status: result.isError ? "failed" : "done", result };

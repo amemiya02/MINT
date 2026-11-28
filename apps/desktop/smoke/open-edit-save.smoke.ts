@@ -3164,6 +3164,7 @@ test("native MCP calls modify only the explicitly authorized target", async () =
     inputSchema: { type: "object", properties: { entry: { type: "string" } } },
   };
   const calls: { name: string; arguments: { entry: string } }[] = [];
+  const modelCalls: string[] = [];
   const outcomes: string[] = [];
   let protocolErrors = 0;
   const endpoint = createServer(async (request, response) => {
@@ -3173,6 +3174,7 @@ test("native MCP calls modify only the explicitly authorized target", async () =
       if (request.url === "/v1/chat/completions") {
         const prompt: string = JSON.parse(body).messages.at(-1).content;
         const scenario = ["Deny", "Outside", "Approve"].find((name) => prompt.includes(name));
+        if (scenario) modelCalls.push(scenario);
         const outcome = /MCP tool outcome \(source data\): (\{.*\})\. Continue/.exec(prompt)?.[1];
         if (outcome) outcomes.push(JSON.parse(outcome).status);
         const text = outcome
@@ -3185,7 +3187,10 @@ test("native MCP calls modify only the explicitly authorized target", async () =
             });
         response.writeHead(200, { "Content-Type": "application/json" });
         response.end(
-          JSON.stringify({ choices: [{ message: { content: text }, finish_reason: "stop" }] }),
+          JSON.stringify({
+            choices: [{ message: { content: text }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 39, completion_tokens: 6, total_tokens: 45 },
+          }),
         );
         return;
       }
@@ -3284,6 +3289,19 @@ test("native MCP calls modify only the explicitly authorized target", async () =
         );
         await keyActions(typing('{"entry":"trail"}'));
       }
+      if (scenario === "Approve") {
+        await waitForView(
+          "the loopback model and MCP endpoint in the call plan",
+          `const plan = [...document.querySelectorAll('form fieldset')].find(
+            field => field.querySelector(':scope > legend')?.textContent === 'Task call plan'
+          );
+          return plan?.innerText.includes('${base}/v1/chat/completions') &&
+            plan.innerText.includes('${base}/mcp') &&
+            plan.innerText.includes('1 planned writing call');`,
+        );
+        await clickPath("//form//label[normalize-space(.)='Task call limit']/input");
+        await keyActions(typing("1"));
+      }
       await clickPath(
         "//form//button[starts-with(normalize-space(.),'Generate draft') and not(@disabled)]",
       );
@@ -3299,6 +3317,28 @@ test("native MCP calls modify only the explicitly authorized target", async () =
         );
         assert.deepEqual(calls, []);
         await click("Deny tool call");
+      }
+      if (scenario === "Approve") {
+        const paused = (count: number, recipient: string) =>
+          waitForView(
+            `call ${count + 1} to wait for the author before reaching ${recipient}`,
+            `const pause = [...document.querySelectorAll('form fieldset')].find(
+              field => field.querySelector(':scope > legend')?.textContent === 'Task paused at call limit'
+            );
+            return pause?.innerText.includes('Calls used: ${count}') &&
+              pause.innerText.includes('Next recipient: ${recipient}') &&
+              pause.innerText.includes('45 tokens reported across 1 writing call');`,
+          );
+        await paused(1, `${base}/mcp`);
+        assert.deepEqual(calls, []);
+        assert.equal(await readFile(target, "utf8"), "Original public entry.");
+        assert.equal(modelCalls.filter((name) => name === "Approve").length, 1);
+        await click("Allow one more call");
+        await paused(2, `${base}/v1/chat/completions`);
+        assert.deepEqual(calls, [{ name: tool.name, arguments: { entry: "trail" } }]);
+        assert.equal(await readFile(target, "utf8"), changed);
+        assert.equal(modelCalls.filter((name) => name === "Approve").length, 1);
+        await click("Allow one more call");
       }
       await waitForView(
         `the completed ${scenario} draft`,
@@ -3316,6 +3356,7 @@ test("native MCP calls modify only the explicitly authorized target", async () =
       );
     }
     assert.deepEqual(outcomes, ["denied", "outside", "done"]);
+    assert.deepEqual(modelCalls, ["Deny", "Deny", "Outside", "Outside", "Approve", "Approve"]);
     assert.equal(protocolErrors, 0);
   } finally {
     await new Promise<void>((resolve) => endpoint.close(() => resolve()));

@@ -202,6 +202,13 @@ test("read-only document review annotates the live draft without editing it", as
   ).toBeVisible({ timeout: 3000 });
   await page.keyboard.press("Enter");
   const panel = page.getByRole("complementary", { name: "Annotations" });
+  const plan = panel.getByRole("group", { name: "Task call plan" });
+  await expect(plan).toContainText(
+    `${Buffer.byteLength(liveDraft.slice(1))} UTF-8 bytes of material`,
+  );
+  await expect(plan).toContainText("1 planned writing call");
+  await plan.getByLabel("Task call limit").fill("1");
+  expect(sent).toBeUndefined();
   await panel
     .getByRole("button", { name: /Comment only · Current document · Review fixture/ })
     .click();

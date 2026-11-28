@@ -22,6 +22,13 @@ import {
   type SourcePassage,
 } from "./source-passages.ts";
 import { materialDropHandlers, TaskContextChecklist, useNamedMaterials } from "./TaskContext.tsx";
+import {
+  useWritingCallLimit,
+  WritingCallPause,
+  WritingCallPlan,
+  WritingReportedUsage,
+  WritingRetryEstimate,
+} from "./WritingCallLimit.tsx";
 import { useWritingTask, WritingTaskMaterials } from "./WritingTasks.tsx";
 import {
   useWritingToolPicker,
@@ -35,6 +42,7 @@ import {
   failureStatus,
   isMaterialCapacityError,
   replyStatus,
+  writingAttemptBusy,
   writingMaterialNames,
 } from "./writing-attempt.ts";
 import {
@@ -72,6 +80,7 @@ interface DraftTask {
   readonly request: WritingRequest;
   readonly plan: MaterialPlan;
   readonly folder: string | null;
+  readonly callLimit?: number;
 }
 
 interface DraftAttempt {
@@ -82,6 +91,7 @@ interface DraftAttempt {
   readonly partial: string;
   readonly approved: readonly NamedMaterial[];
   readonly capacityRejected?: boolean;
+  readonly savedAtLimit?: boolean;
 }
 
 export function DraftComposer({
@@ -114,7 +124,9 @@ export function DraftComposer({
   const mounted = useRef(true);
   const [collapsed, setCollapsed] = useState(false);
   const [attempt, setAttempt] = useState<DraftAttempt | null>(null);
-  const [partials, setPartials] = useState<readonly { id: string; text: string }[]>([]);
+  const [partials, setPartials] = useState<
+    readonly { id: string; text: string; finished?: boolean }[]
+  >([]);
   const [retryId, setRetryId] = useState("");
   const [instruction, setInstruction] = useState("");
   const [address, setAddress] = useState("");
@@ -123,7 +135,7 @@ export function DraftComposer({
   const [recipients, setRecipients] = useState<readonly WritingRecipient[] | null>(null);
   const [choice, setChoice] = useState<string | null>(null);
   const { settings } = useSettings();
-  const busy = attempt?.status === "working" || attempt?.status === "approval";
+  const busy = writingAttemptBusy(attempt?.status);
   const [error, setError] = useState<MessageKey | null>(null);
   const [unapplied, setUnapplied] = useState("");
   const [applied, setApplied] = useState<{
@@ -139,6 +151,7 @@ export function DraftComposer({
   const [allowedFolder, setAllowedFolder] = useState<string | null>(null);
   const searchFolder = allowedFolder === folder ? folder : null;
   const materialRequests = useMaterialRequests(platform.sendMcpRequest);
+  const callLimit = useWritingCallLimit();
   const toolPicker = useWritingToolPicker(platform.sendMcpRequest);
   const toolApproval = materialRequests.externalTool;
   const defaultConnection = settings.defaultWritingConnection;
@@ -163,6 +176,7 @@ export function DraftComposer({
     entries: named.entries,
     folderSearch: !!searchFolder,
   });
+  const showCallPlan = named.entries.length > 0 || !!searchFolder || !!toolPicker.plan;
 
   useEffect(() => {
     mounted.current = true;
@@ -215,6 +229,7 @@ export function DraftComposer({
     recipients !== null &&
     !!instruction.trim() &&
     !toolPicker.incomplete &&
+    (!showCallPlan || !callLimit.invalid) &&
     !named.loading &&
     !named.unconfirmed &&
     (!named.hasImages || vision?.verified === true) &&
@@ -260,6 +275,7 @@ export function DraftComposer({
           responseFormat: "draft",
         },
         folder: searchFolder,
+        callLimit: showCallPlan ? callLimit.limit : undefined,
       },
       connection,
       toolPicker.plan,
@@ -287,6 +303,34 @@ export function DraftComposer({
     let readingSources = false;
     let status: AttemptStatus;
     let capacityRejected = false;
+    let atCallLimit = false;
+    function saveResult(
+      text: string,
+      status: AttemptStatus,
+      direct: boolean,
+      ignoredChanges?: boolean,
+    ) {
+      recordWritingResult(platform.writingTasks, store, {
+        tabId,
+        id: task.id,
+        turn: {
+          instruction: task.title,
+          reply: text,
+          context: sentContext,
+          searchFolder: task.folder ?? undefined,
+          recipient: connection.label,
+          recipientId: connection.id,
+          direct,
+          ignoredChanges,
+          toolOutcome: toolApproval.result(),
+          sourcePassages: passages.length ? passages : undefined,
+          status,
+        },
+        onError: () => {
+          if (mounted.current) setSaveFailed(true);
+        },
+      });
+    }
     setError(null);
     setRetryId("");
     setAttempt({ ...entry, approved, partial, status: "working" });
@@ -305,6 +349,7 @@ export function DraftComposer({
         {
           signal,
           plan: task.plan,
+          callLimit: task.callLimit,
           tool,
           onContext(context) {
             sentContext = context;
@@ -329,8 +374,14 @@ export function DraftComposer({
             partial = text;
             setAttempt({ ...entry, approved, partial, status: "approval" });
           },
+          onPause(text) {
+            partial = text;
+            atCallLimit = true;
+            setAttempt({ ...entry, approved, partial, status: "paused" });
+          },
           onResume(decision, text) {
             partial = text;
+            atCallLimit = false;
             if (decision?.outcome === "allowed") approved = [...approved, decision.material];
             if (!signal.aborted) setAttempt({ ...entry, approved, partial, status: "working" });
           },
@@ -344,26 +395,7 @@ export function DraftComposer({
         retryConnection.current = null;
         setKey("");
         const inserted = onDraft(reply.text);
-        recordWritingResult(platform.writingTasks, store, {
-          tabId,
-          id: task.id,
-          turn: {
-            instruction: task.title,
-            reply: reply.text,
-            context: sentContext,
-            searchFolder: task.folder ?? undefined,
-            recipient: connection.label,
-            recipientId: connection.id,
-            direct: inserted,
-            ignoredChanges: reply.ignoredChanges,
-            toolOutcome: toolApproval.result(),
-            sourcePassages: passages.length ? passages : undefined,
-            status,
-          },
-          onError: () => {
-            if (mounted.current) setSaveFailed(true);
-          },
-        });
+        saveResult(reply.text, status, inserted, reply.ignoredChanges);
         if (inserted) {
           setApplied({ text: reply.text, passages, context: sentContext, connection });
           setAttempt({ ...entry, approved, status, partial: "" });
@@ -395,14 +427,17 @@ export function DraftComposer({
       }
     }
     if (!mounted.current) return;
+    const savedAtLimit = atCallLimit && (!!partial || !!toolApproval.result());
+    if (savedAtLimit) saveResult(partial, status, false);
     if (partial) {
-      const reply = { id: crypto.randomUUID(), text: partial };
+      const reply = { id: crypto.randomUUID(), text: partial, finished: atCallLimit };
       setPartials((previous) => [...previous, reply]);
     }
-    setAttempt({ ...entry, approved, status, partial: "", capacityRejected });
+    setAttempt({ ...entry, approved, status, partial: "", capacityRejected, savedAtLimit });
     controller.current = null;
   }
 
+  const pause = materialRequests.paused;
   const pending = materialRequests.pending ?? toolApproval.pending;
   const report = useMemo(
     () =>
@@ -420,13 +455,15 @@ export function DraftComposer({
         ].join(" · "),
         status: attempt.status,
         count: 0,
-        decisions: Number(!!pending || !!unapplied),
+        decisions: Number(!!pending || !!pause || !!unapplied),
         background: !active || collapsed,
         notice: pending
           ? { id: `${attempt.id}:approval:${pending.id}`, detail: pending.name, decisions: 1 }
-          : attempt.status === "complete"
-            ? { id: attempt.id, decisions: Number(!!unapplied) }
-            : undefined,
+          : pause
+            ? { id: `${attempt.id}:call:${pause.calls}`, detail: pause.recipient, decisions: 1 }
+            : attempt.status === "complete"
+              ? { id: attempt.id, decisions: Number(!!unapplied) }
+              : undefined,
         stop: busy ? () => controller.current?.abort() : undefined,
         forget: () => {
           setAttempt(null);
@@ -448,6 +485,7 @@ export function DraftComposer({
       collapsed,
       name,
       onClose,
+      pause,
       pending,
       store,
       t,
@@ -473,6 +511,11 @@ export function DraftComposer({
   const alternate = alternatives.find(({ id }) => id === retryId);
   const retryHasImages = hasTaskImages(...(retry?.task.plan.contexts ?? []));
   const alternateVision = checkVision(alternate?.visionTarget);
+  function retryDraft(connection: DraftConnection) {
+    if (!retry) return;
+    const task = retry.savedAtLimit ? { ...retry.task, id: crypto.randomUUID() } : retry.task;
+    void runDraft(task, connection);
+  }
 
   if (applied)
     return (
@@ -522,6 +565,10 @@ export function DraftComposer({
           </section>
         )}
         <WritingToolOutcome outcome={toolApproval.outcome} />
+        {(attempt?.task.plan.contexts.some(Boolean) ||
+          (materialRequests.usage?.reportedCalls ?? 0) > 1) && (
+          <WritingReportedUsage usage={materialRequests.usage} />
+        )}
         {saveFailed && <p role="alert">{t("writing.tasks.saveFailed")}</p>}
       </>
     );
@@ -553,7 +600,11 @@ export function DraftComposer({
           {t("settings.close")}
         </button>
       </div>
-      <fieldset hidden={!!pending} disabled={busy || !!unapplied} className="space-y-2">
+      <fieldset
+        hidden={!!pending || !!materialRequests.paused}
+        disabled={busy || !!unapplied}
+        className="space-y-2"
+      >
         <label className="block">
           {t("draft.instruction")}
           <input
@@ -647,6 +698,14 @@ export function DraftComposer({
         />
         {capacity.controls}
         <WritingToolPicker picker={toolPicker} />
+        {recipient && capacity.plan && showCallPlan && (
+          <WritingCallPlan
+            recipient={recipient}
+            requests={capacity.plan.contexts.map((taskContext) => ({ taskContext }))}
+            limit={callLimit}
+            toolEndpoint={toolPicker.plan?.endpoint}
+          />
+        )}
         {agent && (
           <details className="space-y-1 text-xs text-(--mint-muted)">
             <summary>{t(`agent.${agent.access}`)}</summary>
@@ -662,6 +721,7 @@ export function DraftComposer({
             : t("draft.generate")}
         </button>
       </fieldset>
+      {pause && <WritingCallPause pause={pause} usage={materialRequests.usage} />}
       {toolApproval.pending && (
         <WritingToolNotice pending={toolApproval.pending} onDecision={toolApproval.decide} />
       )}
@@ -675,7 +735,7 @@ export function DraftComposer({
           onDecision={materialRequests.decide}
         />
       ) : (
-        busy && !pending && <p role="status">{t("draft.generating")}</p>
+        busy && !pending && !materialRequests.paused && <p role="status">{t("draft.generating")}</p>
       )}
       {attempt && (
         <WritingTaskMaterials
@@ -692,13 +752,10 @@ export function DraftComposer({
       {retry && (
         <div className="space-y-2">
           <p role="status">{t(`writing.task.${retry.status}`)}</p>
-          <button
-            type="button"
-            className={button}
-            onClick={() => void runDraft(retry.task, retry.connection)}
-          >
+          <button type="button" className={button} onClick={() => retryDraft(retry.connection)}>
             {t("writing.task.retry")}
           </button>
+          <WritingRetryEstimate usage={materialRequests.usage} />
           {alternatives.length > 0 && (
             <>
               <label>
@@ -727,7 +784,7 @@ export function DraftComposer({
                 type="button"
                 className={button}
                 disabled={!alternate || (retryHasImages && !alternateVision?.verified)}
-                onClick={() => alternate && void runDraft(retry.task, alternate)}
+                onClick={() => alternate && retryDraft(alternate)}
               >
                 {t("writing.task.retryOther")}
               </button>
@@ -735,20 +792,29 @@ export function DraftComposer({
           )}
         </div>
       )}
-      {(partials.length > 0 || attempt?.partial) && (
-        <section aria-label={t("writing.task.partial")} className="space-y-2">
-          {partials.map(({ id, text }) => (
-            <pre key={id} className="max-h-32 overflow-auto whitespace-pre-wrap wrap-anywhere">
-              {text}
-            </pre>
-          ))}
-          {attempt?.partial && (
-            <pre className="max-h-32 overflow-auto whitespace-pre-wrap wrap-anywhere">
-              {attempt.partial}
-            </pre>
-          )}
-        </section>
-      )}
+      {[true, false].map((finished) => {
+        const results = partials.filter((reply) => !!reply.finished === finished);
+        const progress = !finished && !pause ? attempt?.partial : undefined;
+        if (!results.length && !progress) return null;
+        return (
+          <section
+            key={String(finished)}
+            aria-label={t(finished ? "writing.calls.retained" : "writing.task.partial")}
+            className="space-y-2"
+          >
+            {results.map(({ id, text }) => (
+              <pre key={id} className="max-h-32 overflow-auto whitespace-pre-wrap wrap-anywhere">
+                {text}
+              </pre>
+            ))}
+            {progress && (
+              <pre className="max-h-32 overflow-auto whitespace-pre-wrap wrap-anywhere">
+                {progress}
+              </pre>
+            )}
+          </section>
+        );
+      })}
       {error && <p role="alert">{t(error)}</p>}
       {saveFailed && <p role="alert">{t("writing.tasks.saveFailed")}</p>}
       {unapplied && (
