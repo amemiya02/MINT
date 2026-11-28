@@ -79,13 +79,26 @@ export function LinkPreview({
           {link.path || tabName(t, source)}
           {link.fragment && `#${link.fragment}`}
         </span>
-        <button
-          type="button"
-          className="rounded px-2 py-1 hover:bg-(--mint-hover) focus-visible:outline-2 focus-visible:outline-(--mint-accent)"
-          onClick={close}
-        >
-          {t("preview.close")}
-        </button>
+        <div className="flex shrink-0 gap-1">
+          <button
+            type="button"
+            className="rounded px-2 py-1 hover:bg-(--mint-hover) focus-visible:outline-2 focus-visible:outline-(--mint-accent)"
+            onClick={close}
+          >
+            {t("preview.close")}
+          </button>
+          <button
+            type="button"
+            disabled={status !== "ready"}
+            className="rounded px-2 py-1 hover:bg-(--mint-hover) focus-visible:outline-2 focus-visible:outline-(--mint-accent) disabled:opacity-50"
+            onClick={() => {
+              close();
+              store.openInOtherPane(source.id, { path, fragment: link.fragment });
+            }}
+          >
+            {t("command.view.openInOtherPane")}
+          </button>
+        </div>
       </header>
       <section
         aria-label={name}

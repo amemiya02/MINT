@@ -1,39 +1,20 @@
 import type { WordCount } from "@mint/editor";
 
-/** A declarative MINT document view. Packages select host operations and never execute script. */
-interface ManifestBase {
+export type Permission = "document.read" | "document.write" | "folder.read";
+
+/** Packages declare the host operations they use. */
+export interface PluginManifest {
   apiVersion: 1;
   id: string;
   name: string;
+  permissions: Permission[];
+  statistics?: (keyof WordCount)[];
+  templates?: { name: string; text: string }[];
+  sidebar?: "tags";
+  diagram?: "timing";
 }
 
-interface StatisticsManifest extends ManifestBase {
-  permissions: ["document.read"];
-  statistics: (keyof WordCount)[];
-}
-
-interface TemplatesManifest extends ManifestBase {
-  permissions: ["document.write"];
-  templates: { name: string; text: string }[];
-}
-
-interface SidebarManifest extends ManifestBase {
-  permissions: ["folder.read"];
-  sidebar: "tags";
-}
-
-interface DiagramManifest extends ManifestBase {
-  permissions: ["document.read"];
-  diagram: "timing";
-}
-
-export type PluginManifest =
-  | StatisticsManifest
-  | TemplatesManifest
-  | SidebarManifest
-  | DiagramManifest;
-
-export const timingDiagrams: DiagramManifest = {
+export const timingDiagrams: PluginManifest = {
   apiVersion: 1,
   id: "mint.timing-diagrams",
   name: "Digital timing diagrams",
@@ -41,7 +22,7 @@ export const timingDiagrams: DiagramManifest = {
   diagram: "timing",
 };
 
-export const tagBrowser: SidebarManifest = {
+export const tagBrowser: PluginManifest = {
   apiVersion: 1,
   id: "mint.tag-browser",
   name: "Tag browser",
@@ -49,7 +30,7 @@ export const tagBrowser: SidebarManifest = {
   sidebar: "tags",
 };
 
-export const writingTemplates: TemplatesManifest = {
+export const writingTemplates: PluginManifest = {
   apiVersion: 1,
   id: "mint.writing-templates",
   name: "Writing templates",
@@ -60,7 +41,7 @@ export const writingTemplates: TemplatesManifest = {
   ],
 };
 
-export const writingStatistics: StatisticsManifest = {
+export const writingStatistics: PluginManifest = {
   apiVersion: 1,
   id: "mint.writing-statistics",
   name: "Writing statistics",
@@ -71,13 +52,13 @@ export const writingStatistics: StatisticsManifest = {
 interface Installation {
   manifest: PluginManifest;
   enabled: boolean;
-  granted: boolean;
+  grants: Permission[];
 }
 
 const prefix = "mint.plugin.v1.";
 const metrics = new Set(["words", "characters", "readingMinutes"]);
 
-function isTemplate(value: unknown): value is TemplatesManifest["templates"][number] {
+function isTemplate(value: unknown): value is NonNullable<PluginManifest["templates"]>[number] {
   if (!value || typeof value !== "object") return false;
   return (
     "name" in value &&
@@ -91,9 +72,7 @@ function isTemplate(value: unknown): value is TemplatesManifest["templates"][num
 
 export function isManifest(value: unknown): value is PluginManifest {
   if (!value || typeof value !== "object") return false;
-  const m = value as Partial<
-    ManifestBase & { permissions: unknown[]; statistics: unknown[]; templates: unknown[] }
-  >;
+  const m = value as Record<string, unknown>;
   if (
     m.apiVersion !== 1 ||
     typeof m.id !== "string" ||
@@ -102,43 +81,41 @@ export function isManifest(value: unknown): value is PluginManifest {
     !m.name.trim() ||
     m.name.length > 120 ||
     !Array.isArray(m.permissions) ||
-    m.permissions.length !== 1
+    m.permissions.length === 0
   )
     return false;
+  const required = new Set<Permission>();
   if ("diagram" in m) {
-    return (
-      m.diagram === "timing" &&
-      m.permissions[0] === "document.read" &&
-      !("sidebar" in m) &&
-      !("statistics" in m) &&
-      !("templates" in m)
-    );
+    if (m.diagram !== "timing") return false;
+    required.add("document.read");
   }
   if ("sidebar" in m) {
-    return (
-      m.sidebar === "tags" &&
-      m.permissions[0] === "folder.read" &&
-      !("statistics" in m) &&
-      !("templates" in m)
-    );
+    if (m.sidebar !== "tags") return false;
+    required.add("folder.read");
   }
-  if (m.permissions[0] === "document.write") {
-    return (
-      !("statistics" in m) &&
-      Array.isArray(m.templates) &&
-      m.templates.length > 0 &&
-      m.templates.every(isTemplate) &&
-      new Set(m.templates.map((item) => item.name)).size === m.templates.length
-    );
+  if ("statistics" in m) {
+    if (
+      !Array.isArray(m.statistics) ||
+      !m.statistics.length ||
+      new Set(m.statistics).size !== m.statistics.length ||
+      !m.statistics.every((metric) => metrics.has(metric))
+    )
+      return false;
+    required.add("document.read");
   }
+  if ("templates" in m) {
+    if (
+      !Array.isArray(m.templates) ||
+      !m.templates.length ||
+      !m.templates.every(isTemplate) ||
+      new Set(m.templates.map((item) => item.name)).size !== m.templates.length
+    )
+      return false;
+    required.add("document.write");
+  }
+  const permissions = m.permissions;
   return (
-    m.permissions[0] === "document.read" &&
-    !("templates" in m) &&
-    Array.isArray(m.statistics) &&
-    m.statistics.length > 0 &&
-    m.statistics.length <= metrics.size &&
-    new Set(m.statistics).size === m.statistics.length &&
-    m.statistics.every((metric) => typeof metric === "string" && metrics.has(metric))
+    permissions.length === required.size && [...required].every((p) => permissions.includes(p))
   );
 }
 
@@ -149,10 +126,19 @@ function installed(id: string): Installation | null {
       item &&
       isManifest(item.manifest) &&
       item.manifest.id === id &&
-      typeof item.enabled === "boolean" &&
-      typeof item.granted === "boolean"
-    )
-      return item;
+      typeof item.enabled === "boolean"
+    ) {
+      const { manifest, enabled } = item;
+      if (Array.isArray(item.grants))
+        return {
+          manifest,
+          enabled,
+          grants: manifest.permissions.filter((p: Permission) => item.grants.includes(p)),
+        };
+      // Older packages had exactly one operation, controlled by a boolean grant.
+      if (typeof item.granted === "boolean" && manifest.permissions.length === 1)
+        return { manifest, enabled, grants: item.granted ? manifest.permissions : [] };
+    }
   } catch {
     /* An unreadable installation has no capabilities. */
   }
@@ -174,12 +160,36 @@ function persist(item: Installation) {
 export function install(manifest: PluginManifest, granted: boolean) {
   if (!isManifest(manifest) || installed(manifest.id))
     throw new Error("Invalid or installed plugin");
-  persist({ manifest, enabled: true, granted });
+  persist({ manifest, enabled: true, grants: granted ? manifest.permissions : [] });
 }
 
-export function change(id: string, change: { enabled: boolean } | { granted: boolean }) {
+export function addedPermissions(current: PluginManifest, next: PluginManifest) {
+  return next.permissions.filter((p) => !current.permissions.includes(p));
+}
+
+export function update(manifest: PluginManifest, approved: Permission[] = []) {
+  const item = installed(manifest.id);
+  if (!item || !isManifest(manifest)) throw new Error("Invalid plugin update");
+  const added = addedPermissions(item.manifest, manifest);
+  if (added.some((p) => !approved.includes(p)))
+    throw new Error("Update requires permission review");
+  const grants = manifest.permissions.filter((p) => item.grants.includes(p) || added.includes(p));
+  persist({ manifest, enabled: item.enabled, grants });
+}
+
+export function change(
+  id: string,
+  change: { enabled: boolean } | { permission: Permission; granted: boolean },
+) {
   const item = installed(id);
-  if (item) persist({ ...item, ...change });
+  if (!item) return;
+  if ("enabled" in change) persist({ ...item, enabled: change.enabled });
+  else {
+    const grants = item.manifest.permissions.filter((p) =>
+      p === change.permission ? change.granted : item.grants.includes(p),
+    );
+    persist({ ...item, grants });
+  }
 }
 
 export function uninstall(id: string) {
@@ -189,7 +199,7 @@ export function uninstall(id: string) {
 
 export function readStatistics(id: string, readDocument: () => WordCount | null) {
   const item = installed(id);
-  if (!item?.enabled || !item.granted || !("statistics" in item.manifest))
+  if (!item?.enabled || !item.grants.includes("document.read") || !item.manifest.statistics)
     return { status: "denied" } as const;
   const counts = readDocument();
   if (!counts) return { status: "empty" } as const;
@@ -202,7 +212,8 @@ export function readStatistics(id: string, readDocument: () => WordCount | null)
 /** Resolve the live grant and installed template again when the writer runs its command. */
 export function insertTemplate(id: string, name: string, insert: (text: string) => boolean) {
   const item = installed(id);
-  if (!item?.enabled || !item.granted || !("templates" in item.manifest)) return "denied";
+  if (!item?.enabled || !item.grants.includes("document.write") || !item.manifest.templates)
+    return "denied";
   const template = item.manifest.templates.find((t) => t.name === name);
   if (!template) return "denied";
   return insert(template.text) ? "ok" : "empty";
@@ -210,5 +221,7 @@ export function insertTemplate(id: string, name: string, insert: (text: string) 
 
 export function canReadFolder(id: string): boolean {
   const item = installed(id);
-  return Boolean(item?.enabled && item.granted && "sidebar" in item.manifest);
+  return Boolean(
+    item?.enabled && item.grants.includes("folder.read") && "sidebar" in item.manifest,
+  );
 }
