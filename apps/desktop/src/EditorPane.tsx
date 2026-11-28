@@ -3,6 +3,7 @@ import {
   type EditorSettings,
   type LinkTarget,
   type MintEditor,
+  type SharedDocument,
   type WordCount,
 } from "@mint/editor";
 import type { Dialect } from "@mint/markdown";
@@ -15,10 +16,11 @@ import { useSettings } from "./settings/useSettings.ts";
 interface EditorPaneProps {
   /** Initial file text. The editor is recreated only when the pane is remounted (use a `key`). */
   readonly text: string;
+  readonly document: SharedDocument;
   /** Whether the pane is the one on screen; it takes focus when it becomes active. */
   readonly active: boolean;
   readonly onReady: (editor: MintEditor | null) => void;
-  readonly onChange: () => void;
+  readonly onChange: (fromHistory: boolean) => void;
   readonly onModeChange: () => void;
   /** The user ⌘-clicked a link. */
   readonly onOpenLink: (link: LinkTarget) => void;
@@ -37,6 +39,7 @@ const wordCountDelay = 150;
 /** Mounts the framework-agnostic editor core into React. */
 export function EditorPane({
   text,
+  document,
   active,
   onReady,
   onChange,
@@ -90,6 +93,7 @@ export function EditorPane({
     const instance = createEditor({
       parent: parent.current,
       text,
+      document,
       dialect: callbacks.current.dialect,
       phrases: phrases.current,
       settings: callbacks.current.editorSettings,
@@ -103,7 +107,7 @@ export function EditorPane({
     let countTimer: ReturnType<typeof setTimeout> | undefined;
     const unsubscribe = instance.subscribe((event) => {
       if (event.type === "change") {
-        callbacks.current.onChange();
+        if (!event.remote) callbacks.current.onChange(event.fromHistory ?? false);
         clearTimeout(countTimer);
         countTimer = setTimeout(() => {
           if (callbacks.current.active) callbacks.current.onWordCount(instance.getWordCount());
@@ -121,7 +125,7 @@ export function EditorPane({
       editor.current = null;
       instance.destroy();
     };
-  }, [text]);
+  }, [text, document]);
 
   useEffect(() => {
     if (!active || !editor.current) return;

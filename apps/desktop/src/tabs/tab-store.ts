@@ -1,4 +1,4 @@
-import type { MintEditor } from "@mint/editor";
+import { type MintEditor, SharedDocument } from "@mint/editor";
 import { matchingHeadings } from "@mint/markdown";
 import { isWithin, rebasePath } from "../paths.ts";
 import type { Platform } from "../platform/platform.ts";
@@ -8,6 +8,8 @@ export type Pane = "primary" | "reference";
 /** One open document in this window. */
 export interface Tab {
   readonly id: number;
+  readonly documentId: number;
+  readonly document: SharedDocument;
   readonly pane: Pane;
   /** Where the document is saved; `null` for an untitled document that has not been saved yet. */
   readonly path: string | null;
@@ -127,7 +129,7 @@ export interface TabStore {
   /** Called by a tab's editor view as it mounts (`editor`) and unmounts (`null`). */
   attachEditor(id: number, editor: MintEditor | null): void;
   /** Called by a tab's editor view on every text change. */
-  markChanged(id: number): void;
+  markChanged(id: number, fromHistory?: boolean): void;
 }
 
 export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOptions): TabStore {
@@ -168,7 +170,7 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
       tabs = tabs.map((tab) => ({ ...tab, pane: "primary" }));
     }
     const activeId = next.activeId === undefined ? state.activeId : next.activeId;
-    const selected = { ...state.selected };
+    const selected = { ...(next.selected ?? state.selected) };
     for (const pane of ["primary", "reference"] as const) {
       const members = tabs.filter((tab) => tab.pane === pane);
       selected[pane] =
@@ -181,8 +183,21 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
     for (const listener of listeners) listener();
   }
 
+  function documentTab(id: number) {
+    return state.tabs.find((t) => t.documentId === id);
+  }
+
+  function documentEditor(id: number) {
+    const tab = state.tabs.find((t) => t.documentId === id && editors.has(t.id));
+    return tab ? editors.get(tab.id) : undefined;
+  }
+
+  function documentId(id: number) {
+    return state.tabs.find((t) => t.id === id)?.documentId ?? id;
+  }
+
   function updateTab(id: number, patch: Partial<Tab>) {
-    set({ tabs: state.tabs.map((t) => (t.id === id ? { ...t, ...patch } : t)) });
+    set({ tabs: state.tabs.map((t) => (t.documentId === id ? { ...t, ...patch } : t)) });
   }
 
   function activePane(): Pane {
@@ -244,6 +259,8 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
         return;
       }
       const tab: Tab = {
+        documentId: nextId,
+        document: new SharedDocument(),
         id: nextId++,
         pane: activePane(),
         path,
@@ -296,7 +313,7 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
 
   /** Put the disk text into the tab's editor; the selection stays near the text around it. */
   function loadDiskText(id: number, diskText: string) {
-    const editor = editors.get(id);
+    const editor = documentEditor(id);
     if (!editor) return;
     if (editor.getText() !== diskText) {
       reloading = id;
@@ -315,7 +332,7 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
       recheck.add(id);
       return;
     }
-    const tab = state.tabs.find((t) => t.id === id);
+    const tab = documentTab(id);
     if (!tab || tab.path === null) return;
     const epoch = saveEpochs.get(id);
     let diskText: string | null;
@@ -324,7 +341,7 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
     } catch {
       diskText = null;
     }
-    const current = state.tabs.find((t) => t.id === id);
+    const current = documentTab(id);
     if (!current || current.path !== tab.path) return;
     if (saveEpochs.get(id) !== epoch || savesInFlight.has(id)) {
       // A save overlapped the read: what was read may already be stale.
@@ -345,7 +362,7 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
 
     if (!hasOwnEdits(id)) {
       loadDiskText(id, diskText);
-    } else if (editors.get(id)?.getText() === diskText) {
+    } else if (documentEditor(id)?.getText() === diskText) {
       markClean(id, diskText);
     } else {
       updateTab(id, { external: { kind: "conflict", diskText } });
@@ -354,13 +371,13 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
 
   /** Snapshot this request now. A queued Save follows the path established by the preceding Save As. */
   function save(id: number, choosePath: boolean): Promise<boolean> {
-    const editor = editors.get(id);
+    const editor = documentEditor(id);
     if (!editor) return Promise.resolve(false);
     const text = editor.getText();
     const version = versions.get(id) ?? 0;
 
     async function write() {
-      const tab = state.tabs.find((t) => t.id === id);
+      const tab = documentTab(id);
       if (!tab) return false;
       const path = choosePath || tab.path === null ? await askSavePath(tab) : tab.path;
       if (path === null || !versions.has(id)) return false;
@@ -436,6 +453,8 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
 
     newDocument() {
       const tab: Tab = {
+        documentId: nextId,
+        document: new SharedDocument(),
         id: nextId++,
         pane: activePane(),
         path: null,
@@ -459,6 +478,8 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
       }
       const untitled = path === null ? nextUntitled++ : null;
       const tab: Tab = {
+        documentId: nextId,
+        document: new SharedDocument(),
         id: nextId++,
         pane: activePane(),
         path,
@@ -479,8 +500,7 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
       void platform
         .readTextFile(path)
         .then((diskText) => {
-          if (!diskTexts.has(id) && state.tabs.some((t) => t.id === id))
-            diskTexts.set(id, diskText);
+          if (!diskTexts.has(id) && documentTab(id)) diskTexts.set(id, diskText);
         })
         .catch((e: unknown) => {
           // Without a baseline, the next change on disk is compared with nothing and reported as a conflict.
@@ -494,13 +514,27 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
     },
     openInOtherPane(id) {
       const tab = state.tabs.find((item) => item.id === id);
-      if (!tab || state.tabs.length < 2) return;
+      if (!tab) return;
       const pane = tab.pane === "primary" ? "reference" : "primary";
+      const other = state.tabs.find(
+        (item) => item.documentId === tab.documentId && item.pane === pane,
+      );
+      if (other) {
+        store.activate(other.id);
+        editors.get(other.id)?.focus();
+        return;
+      }
+      const view: Tab = {
+        ...tab,
+        id: nextId++,
+        pane,
+      };
+      const neighbour = state.tabs.findLast((item) => item.pane === tab.pane && item.id !== id);
       set({
-        tabs: state.tabs.map((item) => (item.id === id ? { ...item, pane } : item)),
-        activeId: id,
+        tabs: [...state.tabs, view],
+        activeId: view.id,
+        selected: { ...state.selected, [tab.pane]: neighbour?.id ?? id },
       });
-      editors.get(id)?.focus();
     },
     focusOtherPane() {
       const id = state.selected[activePane() === "primary" ? "reference" : "primary"];
@@ -512,7 +546,11 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
     closeReferencePane() {
       const id = state.selected.primary;
       if (id === null || state.selected.reference === null) return;
-      set({ tabs: state.tabs.map((tab) => ({ ...tab, pane: "primary" })), activeId: id });
+      const primary = new Set(
+        state.tabs.filter((t) => t.pane === "primary").map((t) => t.documentId),
+      );
+      const tabs = state.tabs.filter((t) => t.pane === "primary" || !primary.has(t.documentId));
+      set({ tabs: tabs.map((tab) => ({ ...tab, pane: "primary" })), activeId: id });
       editors.get(id)?.focus();
     },
     activateNext: () => step(1),
@@ -521,7 +559,8 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
     async close(id) {
       const tab = state.tabs.find((t) => t.id === id);
       if (!tab) return true;
-      if (tab.dirty) {
+      const lastView = !state.tabs.some((t) => t.id !== id && t.documentId === tab.documentId);
+      if (lastView && tab.dirty) {
         set({ activeId: id });
         const choice = await askUnsaved(tab);
         if (choice === "cancel") return false;
@@ -541,12 +580,14 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
           state.selected[tab.pane === "primary" ? "reference" : "primary"];
       }
       editors.delete(id);
-      versions.delete(id);
-      cleanVersions.delete(id);
-      diskTexts.delete(id);
-      saveEpochs.delete(id);
-      recheck.delete(id);
-      unwatch(id);
+      if (lastView) {
+        versions.delete(tab.documentId);
+        cleanVersions.delete(tab.documentId);
+        diskTexts.delete(tab.documentId);
+        saveEpochs.delete(tab.documentId);
+        recheck.delete(tab.documentId);
+        unwatch(tab.documentId);
+      }
       pendingSelections.delete(id);
       set({ tabs, activeId });
       return true;
@@ -559,26 +600,26 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
       return true;
     },
 
-    save: (id) => save(id, false),
-    saveAs: (id) => save(id, true),
+    save: (id) => save(documentId(id), false),
+    saveAs: (id) => save(documentId(id), true),
 
-    getText: (id) => editors.get(id)?.getText() ?? null,
+    getText: (id) => documentEditor(documentId(id))?.getText() ?? null,
 
     resolveConflict(id, choice) {
       const tab = state.tabs.find((t) => t.id === id);
       if (tab?.external?.kind !== "conflict") return;
       const { diskText } = tab.external;
       if (choice === "loadDisk") {
-        loadDiskText(id, diskText);
+        loadDiskText(tab.documentId, diskText);
       } else {
         // The next save overwrites the disk; until then this disk text is known.
-        diskTexts.set(id, diskText);
-        updateTab(id, { external: null });
+        diskTexts.set(tab.documentId, diskText);
+        updateTab(tab.documentId, { external: null });
       }
     },
 
     dismissExternal(id) {
-      updateTab(id, { external: null });
+      updateTab(documentId(id), { external: null });
     },
 
     pathRenamed(from, to) {
@@ -588,9 +629,9 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
           t.path === null ? t : { ...t, path: rebasePath(t.path, from, to) },
         ),
       });
-      for (const tab of state.tabs) {
+      for (const tab of new Map(state.tabs.map((t) => [t.documentId, t])).values()) {
         if (tab.path !== null && before.find((t) => t.id === tab.id)?.path !== tab.path) {
-          watch(tab.id, tab.path);
+          watch(tab.documentId, tab.path);
         }
       }
     },
@@ -613,10 +654,18 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
       if (select) reveal(id, editor, select);
     },
 
-    markChanged(id) {
+    markChanged(viewId, fromHistory = false) {
+      const id = documentId(viewId);
       if (reloading === id) return;
       versions.set(id, (versions.get(id) ?? 0) + 1);
-      if (!state.tabs.find((t) => t.id === id)?.dirty) updateTab(id, { dirty: true });
+      const tab = documentTab(id);
+      const clean =
+        fromHistory &&
+        diskTexts.has(id) &&
+        tab?.external?.kind !== "missing" &&
+        editors.get(viewId)?.getText() === diskTexts.get(id);
+      if (clean) cleanVersions.set(id, versions.get(id) ?? 0);
+      if (tab && tab.dirty === clean) updateTab(id, { dirty: !clean });
     },
   };
   return store;

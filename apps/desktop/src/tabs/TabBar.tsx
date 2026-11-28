@@ -10,6 +10,12 @@ export function TabBar({ pane }: { readonly pane: Pane }) {
   const store = useTabStore();
   const { tabs, selected } = useTabsState();
 
+  async function close(id: number) {
+    if (!(await store.close(id))) return;
+    const { activeId } = store.getState();
+    if (activeId !== null) store.editor(activeId)?.focus();
+  }
+
   return (
     <div
       role="tablist"
@@ -40,7 +46,7 @@ export function TabBar({ pane }: { readonly pane: Pane }) {
                   store.editor(tab.id)?.focus();
                 }}
                 onAuxClick={(e) => {
-                  if (e.button === 1) void store.close(tab.id);
+                  if (e.button === 1) void close(tab.id);
                 }}
                 className="max-w-56 truncate py-1.5 pl-3 pr-1 focus-visible:outline-2 focus-visible:outline-(--mint-accent)"
               >
@@ -49,21 +55,20 @@ export function TabBar({ pane }: { readonly pane: Pane }) {
               <span className="w-3 text-center text-(--mint-accent)" aria-hidden={!tab.dirty}>
                 {tab.dirty && <span title={t("status.unsaved")}>●</span>}
               </span>
-              {tabs.length > 1 && (
-                <button
-                  type="button"
-                  aria-label={t("tabs.otherPane", { name })}
-                  title={t("tabs.otherPane", { name })}
-                  onClick={() => store.openInOtherPane(tab.id)}
-                  className="px-1 text-(--mint-muted) hover:bg-(--mint-border)"
-                >
-                  ⇄
-                </button>
-              )}
+
+              <button
+                type="button"
+                aria-label={t("tabs.otherPane", { name })}
+                title={t("tabs.otherPane", { name })}
+                onClick={() => store.openInOtherPane(tab.id)}
+                className="px-1 text-(--mint-muted) hover:bg-(--mint-border)"
+              >
+                ⇄
+              </button>
               <button
                 type="button"
                 aria-label={t("tabs.close", { name })}
-                onClick={() => void store.close(tab.id)}
+                onClick={() => void close(tab.id)}
                 className="mx-1 rounded px-1 leading-none text-(--mint-muted) hover:bg-(--mint-border) hover:text-(--mint-fg) focus-visible:outline-2 focus-visible:outline-(--mint-accent)"
               >
                 ×

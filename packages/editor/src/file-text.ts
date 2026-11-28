@@ -202,3 +202,8 @@ function mapBreaks(breaks: readonly string[], fallback: string, tr: Transaction)
   }
   return next;
 }
+
+/** File metadata that must accompany a document change in every view. */
+export function sharedFileEffects(tr: Transaction) {
+  return tr.effects.filter((effect) => effect.is(resetEndings) || effect.is(restoreBreaks));
+}
