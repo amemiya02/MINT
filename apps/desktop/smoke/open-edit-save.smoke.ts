@@ -277,6 +277,116 @@ const shows = (text: string) =>
     }).then((found) => (found ? true : null)),
   ).catch(explain);
 
+test("recognizing and previewing a native folder's wikilinks preserves its files", async () => {
+  assert.ok(application);
+  const folder = await mkdtemp(join(dir, "wikilinks-"));
+  const source = join(folder, "draft.md");
+  const target = join(folder, "Report.md");
+  const draft = Buffer.from("\uFEFF# Draft\r\n\r\nSee [[Report#Results|evidence]].  \r\n");
+  const report = Buffer.from("# Report\n\n## Results\n\nA flock of herons.\n");
+  await writeFile(source, draft);
+  await writeFile(target, report);
+  await restart([folder, source]);
+  await until("the folder and draft to open", () =>
+    command<boolean>("POST", `/session/${session}/execute/sync`, {
+      script: `return document.querySelector('[role=tab][aria-selected=true]')?.title === arguments[0] &&
+        !!document.querySelector('[role=treeitem][aria-label="Report.md"]');`,
+      args: [source],
+    }).then((ready) => ready || null),
+  ).catch(explain);
+  const toggleSetting = async (enabled: boolean) => {
+    await nativeShortcut("ctrl+comma");
+    await shows(`Recognize wikilinks in ${folder}`);
+    const settingsPath = await command<string>("POST", `/session/${session}/execute/sync`, {
+      script: "return document.querySelector('dialog[open] span[title$=\"settings.json\"]')?.title",
+      args: [],
+    });
+    const checkbox = await command<Record<string, string>>("POST", `/session/${session}/element`, {
+      using: "xpath",
+      value: `//input[@id=//label[normalize-space(.)='Recognize wikilinks in ${folder}']/@for]`,
+    });
+    await command("POST", `/session/${session}/element/${checkbox[elementKey]}/click`, {});
+    await until(
+      "the folder setting to reach disk",
+      async () =>
+        JSON.parse(await readFile(settingsPath, "utf8")).wikilinkFolders?.includes(folder) ===
+          enabled || null,
+    ).catch(explain);
+    await click("Close");
+  };
+  await toggleSetting(true);
+  // Place the caret on the visible alias and use the same Preview Link shortcut as the UI.
+  const alias = await until("the wikilink label", async () => {
+    const item = await command<Record<string, string>>("POST", `/session/${session}/element`, {
+      using: "xpath",
+      value: "//span[normalize-space(.)='evidence']",
+    });
+    return item[elementKey] ?? null;
+  }).catch(explain);
+  await command("POST", `/session/${session}/element/${alias}/click`, {});
+  await nativeShortcut("ctrl+alt+Return");
+  await shows("A flock of herons.");
+  await click("Close");
+  await toggleSetting(false);
+  assert.deepEqual(await readFile(source), draft);
+  assert.deepEqual(await readFile(target), report);
+  assert.deepEqual((await readdir(folder)).sort(), ["Report.md", "draft.md"]);
+});
+
+test("reopen a bookmark after a native restart and remove it without touching the working folder", async () => {
+  assert.ok(application);
+  const folder = await mkdtemp(join(dir, "bookmarks-"));
+  const path = join(folder, "reference.md");
+  const original = Buffer.from("\uFEFF# Reference\r\n\r\nField notes.  \r\n");
+  await writeFile(path, original);
+  const checkFolder = async () => {
+    assert.deepEqual(await readFile(path), original);
+    assert.deepEqual(await readdir(folder), ["reference.md"]);
+  };
+  const waitForDocument = () =>
+    until("the bookmarked manuscript to open", () =>
+      command<boolean>("POST", `/session/${session}/execute/sync`, {
+        script: `return document.querySelector('[role=tab][aria-selected=true]')?.title === arguments[0]
+          && document.querySelector('[role=tabpanel]:not([hidden]) .cm-content')?.textContent.includes('Field notes.');`,
+        args: [path],
+      }).then((open) => open || null),
+    ).catch(explain);
+  const waitForBookmark = (present: boolean) =>
+    until(present ? "bookmark added" : "bookmark removed", () =>
+      command<boolean>("POST", `/session/${session}/execute/sync`, {
+        script: `const panel = document.querySelector('aside[aria-label="Bookmarks"]');
+          return !!panel && Array.from(panel.querySelectorAll('button')).some(
+            button => button.getAttribute('aria-label') === arguments[0]) === arguments[1];`,
+        args: [path, present],
+      }).then((ready) => ready || null),
+    ).catch(explain);
+
+  await restart([folder, path]);
+  await until("the bookmarked document’s folder to open", () =>
+    command<boolean>("POST", `/session/${session}/execute/sync`, {
+      script: `return !!document.querySelector('[role="treeitem"][aria-label="reference.md"]');`,
+      args: [],
+    }).then((open) => open || null),
+  ).catch(explain);
+  await waitForDocument();
+  await click("Bookmarks", "aria-label");
+  await click("Bookmark current document");
+  await waitForBookmark(true);
+  await checkFolder();
+
+  await restart([]);
+  await click("Bookmarks", "aria-label");
+  await click(path, "aria-label");
+  await waitForDocument();
+  await click(`Remove bookmark for ${path}`, "aria-label");
+  await waitForBookmark(false);
+  await checkFolder();
+
+  await restart([]);
+  await click("Bookmarks", "aria-label");
+  await waitForBookmark(false);
+});
+
 test("the native statistics view refuses a denied read and allows an explicit grant", async () => {
   await nativeShortcut("ctrl+n");
   await until("the new document to receive focus", async () => {
@@ -376,115 +486,4 @@ test("declining a plugin update keeps its native read grant and withholds its wr
   await nativeShortcut("ctrl+comma");
   await click("Uninstall");
   await click("Close");
-});
-
-test("recognizing and previewing a native folder's wikilinks preserves its files", async () => {
-  assert.ok(application);
-  const folder = await mkdtemp(join(dir, "wikilinks-"));
-  const source = join(folder, "draft.md");
-  const target = join(folder, "Report.md");
-  const draft = Buffer.from("\uFEFF# Draft\r\n\r\nSee [[Report#Results|evidence]].  \r\n");
-  const report = Buffer.from("# Report\n\n## Results\n\nA flock of herons.\n");
-  await writeFile(source, draft);
-  await writeFile(target, report);
-  // The single-instance handler forwards both paths to the existing window.
-  await exec(application, [folder, source], { timeout: 15_000 });
-  await until("the folder and draft to open", () =>
-    command<boolean>("POST", `/session/${session}/execute/sync`, {
-      script: `return document.querySelector('[role=tab][aria-selected=true]')?.title === arguments[0] &&
-        !!document.querySelector('[role=treeitem][aria-label="Report.md"]');`,
-      args: [source],
-    }).then((ready) => ready || null),
-  ).catch(explain);
-  const toggleSetting = async (enabled: boolean) => {
-    await nativeShortcut("ctrl+comma");
-    await shows(`Recognize wikilinks in ${folder}`);
-    const settingsPath = await command<string>("POST", `/session/${session}/execute/sync`, {
-      script: "return document.querySelector('dialog[open] span[title$=\"settings.json\"]')?.title",
-      args: [],
-    });
-    const checkbox = await command<Record<string, string>>("POST", `/session/${session}/element`, {
-      using: "xpath",
-      value: `//input[@id=//label[normalize-space(.)='Recognize wikilinks in ${folder}']/@for]`,
-    });
-    await command("POST", `/session/${session}/element/${checkbox[elementKey]}/click`, {});
-    await until(
-      "the folder setting to reach disk",
-      async () =>
-        JSON.parse(await readFile(settingsPath, "utf8")).wikilinkFolders?.includes(folder) ===
-          enabled || null,
-    ).catch(explain);
-    await click("Close");
-  };
-  await toggleSetting(true);
-  // Place the caret on the visible alias and use the same Preview Link shortcut as the UI.
-  const alias = await until("the wikilink label", async () => {
-    const item = await command<Record<string, string>>("POST", `/session/${session}/element`, {
-      using: "xpath",
-      value: "//span[normalize-space(.)='evidence']",
-    });
-    return item[elementKey] ?? null;
-  }).catch(explain);
-  await command("POST", `/session/${session}/element/${alias}/click`, {});
-  await nativeShortcut("ctrl+alt+Return");
-  await shows("A flock of herons.");
-  await click("Close");
-  await toggleSetting(false);
-  assert.deepEqual(await readFile(source), draft);
-  assert.deepEqual(await readFile(target), report);
-  assert.deepEqual((await readdir(folder)).sort(), ["Report.md", "draft.md"]);
-});
-
-test("reopen a bookmark after a native restart and remove it without touching the working folder", async () => {
-  assert.ok(application);
-  const folder = await mkdtemp(join(dir, "bookmarks-"));
-  const path = join(folder, "reference.md");
-  const original = Buffer.from("\uFEFF# Reference\r\n\r\nField notes.  \r\n");
-  await writeFile(path, original);
-  const checkFolder = async () => {
-    assert.deepEqual(await readFile(path), original);
-    assert.deepEqual(await readdir(folder), ["reference.md"]);
-  };
-  const waitForDocument = () =>
-    until("the bookmarked manuscript to open", () =>
-      command<boolean>("POST", `/session/${session}/execute/sync`, {
-        script: `return document.querySelector('[role=tab][aria-selected=true]')?.title === arguments[0]
-          && document.querySelector('[role=tabpanel]:not([hidden]) .cm-content')?.textContent.includes('Field notes.');`,
-        args: [path],
-      }).then((open) => open || null),
-    ).catch(explain);
-  const waitForBookmark = (present: boolean) =>
-    until(present ? "bookmark added" : "bookmark removed", () =>
-      command<boolean>("POST", `/session/${session}/execute/sync`, {
-        script: `const panel = document.querySelector('aside[aria-label="Bookmarks"]');
-          return !!panel && Array.from(panel.querySelectorAll('button')).some(
-            button => button.getAttribute('aria-label') === arguments[0]) === arguments[1];`,
-        args: [path, present],
-      }).then((ready) => ready || null),
-    ).catch(explain);
-
-  await exec(application, [folder, path], { timeout: 15_000 });
-  await until("the bookmarked document’s folder to open", () =>
-    command<boolean>("POST", `/session/${session}/execute/sync`, {
-      script: `return !!document.querySelector('[role="treeitem"][aria-label="reference.md"]');`,
-      args: [],
-    }).then((open) => open || null),
-  ).catch(explain);
-  await waitForDocument();
-  await click("Bookmarks", "aria-label");
-  await click("Bookmark current document");
-  await waitForBookmark(true);
-  await checkFolder();
-
-  await restart([]);
-  await click("Bookmarks", "aria-label");
-  await click(path, "aria-label");
-  await waitForDocument();
-  await click(`Remove bookmark for ${path}`, "aria-label");
-  await waitForBookmark(false);
-  await checkFolder();
-
-  await restart([]);
-  await click("Bookmarks", "aria-label");
-  await waitForBookmark(false);
 });
