@@ -51,6 +51,7 @@ import {
 import { focusMode } from "./focus-mode.ts";
 import { type FormattingCommands, formattingCommands } from "./formatting.ts";
 import { type ImageFile, imageFileInsertion } from "./image-files.ts";
+import { inlineCompletion, type RequestInlineCompletion } from "./inline-completion.ts";
 import { type DocumentLink, type LinkTarget, linkAt, linkOpening } from "./links.ts";
 import { codeBlocks, setCodeBlockLanguage } from "./live-preview/code-blocks.ts";
 import { type CodeBlockRenderer, fencedRenderers } from "./live-preview/fenced-renderers.ts";
@@ -196,6 +197,8 @@ export type EditorCommand = keyof EditorCommands;
 export type EditorEvent =
   | { readonly type: "change"; readonly remote?: boolean; readonly fromHistory?: boolean }
   | { readonly type: "selection" }
+  /** An input method finished composing, even if its final text was already visible. */
+  | { readonly type: "compositionEnd" }
   | { readonly type: "mode" }
   /** The headings returned by {@link MintEditor.getOutline} changed. */
   | { readonly type: "outline" }
@@ -222,6 +225,8 @@ export interface MintEditor {
   revealAnnotation(annotation: Annotation): void;
   /** Every selection range (several when there are several cursors), in document order. */
   getSelections(): TextSelection[];
+  /** Follow a range through edits, including edits from a second view. Boundary insertions stay outside it. */
+  trackRange(range: TextRange): { current(): TextRange; release(): void };
   /** Put a cursor or selection at each range; there must be at least one. The last range is the main one. */
   setSelections(ranges: readonly { readonly anchor: number; readonly head?: number }[]): void;
   /** Replace the host-provided fenced block previews in this view. */
@@ -230,6 +235,8 @@ export interface MintEditor {
   getSettings(): EditorSettings;
   /** Change some settings; the others keep their value. Takes effect at once. */
   updateSettings(settings: Partial<EditorSettings>): void;
+  /** Use this view for inline writing suggestions, or clear the feature and any pending suggestion. */
+  setInlineCompletion(request: RequestInlineCompletion | null): void;
   /** The outline: every heading in document order, with its level, text and position. */
   getOutline(): readonly OutlineHeading[];
   /** Words, characters and reading time of the document as rendered. Counts the whole text on every call. */
@@ -260,7 +267,7 @@ export interface MintEditor {
   setDialect(dialect: EditorDialect): void;
   /** Run a named command. Returns whether it did anything. */
   execute<C extends EditorCommand>(command: C, ...args: EditorCommands[C]): boolean;
-  /** Listen for text, selection, mode, outline and scroll changes. Returns an unsubscribe function. */
+  /** Listen for editor events. Returns an unsubscribe function. */
   subscribe(listener: (event: EditorEvent) => void): () => void;
   focus(): void;
   destroy(): void;
@@ -290,11 +297,13 @@ function dialectExtensions(dialect: EditorDialect): Extension {
 
 export function createEditor(options: EditorOptions): MintEditor {
   const listeners = new Set<(event: EditorEvent) => void>();
+  const trackedRanges = new Set<{ from: number; to: number }>();
   const parsed = options.document?.currentDocument() ?? parseFileText(options.text);
   const host = options.host ?? {};
   const fences = new Compartment();
   const preview = new Compartment();
   const syntax = new Compartment();
+  const completion = new Compartment();
   let mode: EditorMode = options.mode ?? "livePreview";
   let lastOutline: readonly OutlineHeading[] = [];
   let settings: EditorSettings = { ...defaultSettings, ...options.settings };
@@ -313,6 +322,7 @@ export function createEditor(options: EditorOptions): MintEditor {
       extensions: [
         parsed.extension,
         options.phrases ? EditorState.phrases.of(options.phrases) : [],
+        completion.of([]),
         preferences.extension,
         history(),
         options.document?.initialHistory() ?? [],
@@ -350,8 +360,17 @@ export function createEditor(options: EditorOptions): MintEditor {
         typewriter.of(typewriterExtension()),
         linkOpening(host.openLink, host.previewLink),
         EditorView.lineWrapping,
-        EditorView.domEventObservers({ scroll: () => emit({ type: "scroll" }) }),
+        EditorView.domEventObservers({
+          scroll: () => emit({ type: "scroll" }),
+          compositionend: () => emit({ type: "compositionEnd" }),
+        }),
         EditorView.updateListener.of((update) => {
+          if (update.docChanged) {
+            for (const range of trackedRanges) {
+              range.from = update.changes.mapPos(range.from, 1);
+              range.to = Math.max(range.from, update.changes.mapPos(range.to, -1));
+            }
+          }
           if (update.docChanged || update.transactions.some((t) => sharedFileEffects(t).length > 0))
             emit(
               update.transactions.some((tr) => tr.annotation(Transaction.remote))
@@ -437,7 +456,8 @@ export function createEditor(options: EditorOptions): MintEditor {
         annotations: isolateHistory.of("full"),
       });
     },
-    getProofreadingPassage: () => prosePassageAtCursor(view.state),
+    getProofreadingPassage: () =>
+      view.compositionStarted ? null : prosePassageAtCursor(view.state),
     getSelection() {
       const { anchor, head } = view.state.selection.main;
       return { anchor: toFileOffset(view.state, anchor), head: toFileOffset(view.state, head) };
@@ -470,6 +490,20 @@ export function createEditor(options: EditorOptions): MintEditor {
         anchor: toFileOffset(view.state, anchor),
         head: toFileOffset(view.state, head),
       }));
+    },
+    trackRange({ from, to }) {
+      const range = {
+        from: fromFileOffset(view.state, from),
+        to: fromFileOffset(view.state, to),
+      };
+      trackedRanges.add(range);
+      return {
+        current: () => ({
+          from: toFileOffset(view.state, range.from),
+          to: toFileOffset(view.state, range.to),
+        }),
+        release: () => trackedRanges.delete(range),
+      };
     },
     setSelections(ranges) {
       const selection = EditorSelection.create(
@@ -538,6 +572,9 @@ export function createEditor(options: EditorOptions): MintEditor {
       };
     },
     getFindStatus: () => findStatus(view.state),
+    setInlineCompletion(request) {
+      view.dispatch({ effects: completion.reconfigure(request ? inlineCompletion(request) : []) });
+    },
     setDialect(dialect) {
       view.dispatch({ effects: syntax.reconfigure(dialectExtensions(dialect)) });
     },
@@ -554,6 +591,7 @@ export function createEditor(options: EditorOptions): MintEditor {
     destroy: () => {
       options.document?.detach(view);
       listeners.clear();
+      trackedRanges.clear();
       view.destroy();
     },
   };

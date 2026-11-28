@@ -1,6 +1,7 @@
 import { useEffect, useId, useState } from "react";
 import { ExternalAgentSettings } from "../ai/ExternalAgentPanel.tsx";
-import { ModelConnections } from "../ai/ModelConnections.tsx";
+import { ModelConnections, useModelConnections } from "../ai/ModelConnections.tsx";
+import type { SavedModelConnection } from "../ai/model.ts";
 import { useT } from "../i18n/index.ts";
 import type { Platform } from "../platform/platform.ts";
 import { PluginSettings } from "../plugins/Plugins.tsx";
@@ -37,6 +38,7 @@ export function SettingsDialog({
 }: SettingsDialogProps) {
   const t = useT();
   const { path } = useSettings();
+  const models = useModelConnections(platform);
   const { close, props: dialogProps } = useModalDialog(onClose);
   const titleId = useId();
 
@@ -59,14 +61,19 @@ export function SettingsDialog({
         </button>
       </div>
       <div className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto px-5 py-4">
-        <ModelConnections platform={platform} />
+        <ModelConnections platform={platform} models={models} />
         <ExternalAgentSettings platform={platform.externalAgent} />
         <PluginSettings platform={platform} />
         {(Object.keys(settingsSchema) as SettingKey[]).map((key) =>
           settingsSchema[key].kind === "shortcuts" ? (
             <ShortcutsSettings key={key} onRecording={onRecordingShortcut} />
           ) : (
-            <SettingControl key={key} settingKey={key} folder={folder} />
+            <SettingControl
+              key={key}
+              settingKey={key}
+              folder={folder}
+              models={models.connections}
+            />
           ),
         )}
       </div>
@@ -96,9 +103,11 @@ const fieldClass =
 function SettingControl({
   settingKey,
   folder,
+  models,
 }: {
   readonly settingKey: SettingKey;
   readonly folder: string | null;
+  readonly models: readonly SavedModelConnection[] | null;
 }) {
   const t = useT();
   const store = useSettingsStore();
@@ -111,6 +120,7 @@ function SettingControl({
   const set = (next: unknown) => void store.set(settingKey, next as never);
 
   let control: React.ReactNode;
+  let help: React.ReactNode;
   switch (definition.kind) {
     case "choice":
       control = (
@@ -173,14 +183,52 @@ function SettingControl({
       );
       break;
     case "text":
-      // The Model connections section owns this selector and its live list of saved models.
-      if (definition.optionsFrom === "modelConnections") return null;
-      control =
-        definition.optionsFrom === "themes" ? (
-          <ThemeSelect id={id} value={String(value)} onChange={set} />
-        ) : (
+      if (definition.optionsFrom === "themes") {
+        control = <ThemeSelect id={id} value={String(value)} onChange={set} />;
+      } else if (definition.optionsFrom === "models") {
+        const selected = models?.find((model) => model.id === value);
+        const proofreading = settingKey === "proofreadingModel";
+        control = (
+          <select
+            id={id}
+            aria-describedby={`${id}-hint`}
+            className={`${fieldClass} max-w-[55%] truncate`}
+            disabled={!models}
+            value={String(value)}
+            onChange={(event) => set(event.target.value)}
+          >
+            <option value="">
+              {t(
+                proofreading ? "settings.proofreadingModel.none" : "settings.inlineCompletion.off",
+              )}
+            </option>
+            {models?.map((model) => (
+              <option key={model.id} value={model.id} title={model.address}>
+                {model.name}
+              </option>
+            ))}
+            {Boolean(value) && !selected && (
+              <option value={String(value)} disabled>
+                {t("settings.modelUnavailable")}
+              </option>
+            )}
+          </select>
+        );
+        help = (
+          <p id={`${id}-hint`} className="text-xs text-(--mint-muted) wrap-anywhere">
+            {t(proofreading ? "settings.proofreadingModel.hint" : "settings.inlineCompletion.hint")}
+            {selected && (
+              <span className="block">
+                {t("settings.modelRecipient", { address: selected.address })}
+              </span>
+            )}
+          </p>
+        );
+      } else {
+        control = (
           <TextField id={id} definition={definition} value={String(value)} onChange={set} />
         );
+      }
       break;
     case "shortcuts":
       // A list of its own (see ShortcutsSettings), not a single control.
@@ -196,9 +244,7 @@ function SettingControl({
         {control}
       </div>
       {definition.kind === "text" && definition.optionsFrom === "themes" && <ThemeFolderHint />}
-      {settingKey === "proofreading" && (
-        <p className="text-xs text-(--mint-muted)">{t("settings.proofreadingHint")}</p>
-      )}
+      {help}
     </div>
   );
 }

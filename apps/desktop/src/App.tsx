@@ -1,7 +1,16 @@
 import type { AnnotationTarget, WordCount } from "@mint/editor";
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 import { DraftComposer } from "./ai/DraftComposer.tsx";
 import { ExternalAgentDialog } from "./ai/ExternalAgentPanel.tsx";
+import { inlineCompletionSender } from "./ai/inline-completion.ts";
 import { AnnotationDialog, AnnotationPanel } from "./annotations/Annotations.tsx";
 import { createAnnotationStorage } from "./annotations/annotation-storage.ts";
 import { createAutosave } from "./autosave/autosave.ts";
@@ -128,9 +137,12 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     folderSearch,
     setFolderSearch,
   } = useOverlays();
-  const { shortcuts, wikilinkFolders } = useSettings().settings;
+  const { shortcuts, wikilinkFolders, inlineCompletionModel } = useSettings().settings;
   const active = tabs.find((tab) => tab.id === activeId) ?? null;
   const [draftTabs, setDraftTabs] = useState<ReadonlySet<number>>(() => new Set());
+  const [writingRequest, setWritingRequest] = useState<{ tabId: number; sequence: number } | null>(
+    null,
+  );
   const [agentSelection, setAgentSelection] = useState<{ tabId: number; text: string } | null>(
     null,
   );
@@ -221,6 +233,18 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   }
   // Editors attach after their tab mounts; re-render so the outline finds the active one.
   const [, editorsChanged] = useReducer((n: number) => n + 1, 0);
+  const activeEditor = activeId === null ? null : store.editor(activeId);
+  useLayoutEffect(() => {
+    if (!activeEditor || !inlineCompletionModel) return;
+    const send = inlineCompletionSender(platform.sendModelMessage, inlineCompletionModel);
+    activeEditor.setInlineCompletion((context) =>
+      store.getState().activeId === activeId &&
+      settings.getSnapshot().settings.inlineCompletionModel === inlineCompletionModel
+        ? send(context)
+        : Promise.resolve(null),
+    );
+    return () => activeEditor.setInlineCompletion(null);
+  }, [activeEditor, activeId, inlineCompletionModel, platform, settings, store]);
   /** Errors from folder actions and other shell commands; document errors live in the tab store. */
   const [shellError, setShellError] = useState<string | null>(null);
   const dialect = useDialect();
@@ -410,6 +434,18 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     "edit.find": () => showFind("find"),
     "edit.replace": () => showFind("replace"),
     "edit.searchFolder": () => setFolderSearch((request) => (request ?? 0) + 1),
+    "edit.askAI": () => {
+      const selection = activeId === null ? undefined : store.editor(activeId)?.getSelection();
+      if (activeId === null || !selection || selection.anchor === selection.head) {
+        setShellError(t("writing.needSelection"));
+        return;
+      }
+      setShellError(null);
+      setWritingRequest((previous) => ({
+        tabId: activeId,
+        sequence: (previous?.sequence ?? 0) + 1,
+      }));
+    },
     "edit.addAnnotation": addAnnotation,
     "view.annotations": () => {
       if (active) setAnnotationsOpen((open) => !open);
@@ -675,11 +711,14 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
                   visible={selected[tab.pane] === tab.id}
                   toolbarPosition={toolbarPositions[tab.pane]}
                   platform={platform}
+                  askWriting={writingRequest?.tabId === tab.id ? writingRequest.sequence : null}
+                  settingsOpen={settingsOpen}
+                  onAskWriting={() => run.current("edit.askAI")}
+                  onOpenSettings={() => run.current("app.settings")}
                   onModeChange={modeChanged}
                   onEditorChange={editorsChanged}
                   onEdited={onEdited}
                   onWordCount={setWordCount}
-                  proofreadingPaused={settingsOpen}
                   drafting={
                     draftTabs.has(tab.id) ? (
                       <DraftComposer

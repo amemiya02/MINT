@@ -1,4 +1,4 @@
-import type { WritingReply, WritingSender } from "./writing-sender.ts";
+import { replacementInstruction, type WritingReply, type WritingSender } from "./writing-sender.ts";
 
 export interface ModelConnection {
   readonly address: string;
@@ -49,20 +49,23 @@ export function modelWritingSender(
   connection: ModelTarget,
   options?: ModelOptions,
 ): WritingSender<ModelReply> {
-  return ({ instruction, selectedText }) =>
-    send(
-      connection,
-      [
-        {
-          role: "user",
-          content:
-            selectedText === undefined
-              ? instruction
-              : JSON.stringify({ instruction, selectedText }),
-        },
-      ],
-      options,
-    );
+  return ({ instruction, selectedText, history, responseFormat }) => {
+    const messages: ModelMessage[] = [];
+    if (responseFormat === "replacement")
+      messages.push({ role: "system", content: replacementInstruction });
+    for (const turn of history ?? []) {
+      messages.push(
+        { role: "user", content: turn.instruction },
+        { role: "assistant", content: turn.reply },
+      );
+    }
+    messages.push({
+      role: "user",
+      content:
+        selectedText === undefined ? instruction : JSON.stringify({ instruction, selectedText }),
+    });
+    return send(connection, messages, options);
+  };
 }
 
 interface CompletionInput {
