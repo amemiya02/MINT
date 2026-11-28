@@ -14,9 +14,10 @@ export interface WritingTask {
   readonly status: AttemptStatus;
   readonly count: number;
   readonly decisions?: number;
-  readonly notice?: { readonly id: string; readonly detail?: string };
+  readonly notice?: { readonly id: string; readonly detail?: string; readonly decisions?: number };
   readonly background?: boolean;
   readonly stop?: () => void;
+  readonly forget?: () => void;
   readonly reveal: () => void;
 }
 
@@ -96,11 +97,11 @@ export function WritingTaskNotices({
               {task.folder ? t("writing.tasks.folder", { folder: task.folder }) : task.name} ·{" "}
               {t(`writing.task.${task.status}`)}
             </p>
-            {(notice.detail || !!task.decisions) && (
+            {(notice.detail || !!notice.decisions) && (
               <p className="text-xs text-(--mint-muted)">
                 {[
                   notice.detail,
-                  task.decisions ? writingTaskDecisionLabel(t, task.decisions) : null,
+                  notice.decisions ? writingTaskDecisionLabel(t, notice.decisions) : null,
                 ]
                   .filter(Boolean)
                   .join(" · ")}

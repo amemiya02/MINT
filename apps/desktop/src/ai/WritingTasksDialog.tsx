@@ -7,6 +7,7 @@ import {
   openWritingReviews,
   type SavedWritingTask,
   type WritingTasksPlatform,
+  writeTaskCheckpoint,
   writingTaskWrites,
 } from "./writing-tasks.ts";
 
@@ -63,7 +64,8 @@ export function WritingTasksDialog({
       .filter((task) => {
         if (all) return true;
         const review = reviews.get(task.id);
-        return !task.folder && (path !== null || (!!review && currentTabIds.has(review.tabId)));
+        const tabId = liveTasks.get(task.id)?.tabId ?? review?.tabId;
+        return !task.folder && (path !== null || (tabId !== undefined && currentTabIds.has(tabId)));
       })
       .map((task) => [task.id, task]),
   );
@@ -94,7 +96,7 @@ export function WritingTasksDialog({
     setDeleting(true);
     setDeleteFailed(false);
     try {
-      await tasks.remove(id);
+      await writeTaskCheckpoint(tasks, () => tasks.remove(id));
       setEntries(entries.filter((entry) => entry.id !== id));
       setConfirm(null);
       onDelete(id);

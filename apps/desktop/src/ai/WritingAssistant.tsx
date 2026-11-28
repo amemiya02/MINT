@@ -42,6 +42,7 @@ import {
   type SavedTurn,
   type SavedWritingTask,
   writeTaskCheckpoint,
+  writingTaskWrites,
 } from "./writing-tasks.ts";
 
 const buttonClass =
@@ -80,6 +81,7 @@ interface Attempt {
   readonly status: AttemptStatus;
   readonly partial: string;
   readonly approved: readonly NamedMaterial[];
+  readonly newDecisions?: number;
 }
 
 interface Turn extends Omit<SavedTurn, "suggestions"> {
@@ -131,7 +133,7 @@ interface Props {
   readonly folder: string | null;
   readonly askRequest: { readonly folder?: string } | null;
   readonly taskRestore: { readonly task: SavedWritingTask } | null;
-  readonly taskDeletion: number;
+  readonly taskListRevision: number;
   readonly settingsOpen: boolean;
   readonly onAsk: () => void;
   readonly onTasks: () => void;
@@ -153,7 +155,7 @@ export function WritingAssistant({
   folder,
   askRequest,
   taskRestore,
-  taskDeletion,
+  taskListRevision,
   settingsOpen,
   onAsk,
   onTasks,
@@ -174,19 +176,21 @@ export function WritingAssistant({
   const lastAsk = useRef<typeof askRequest>(null);
   const lastRestore = useRef<typeof taskRestore>(null);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: Deleting a task invalidates this document's saved task list.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Changes to task records invalidate this document's saved task list.
   useEffect(() => {
     let current = true;
-    void platform.writingTasks.list(path).then(
-      (tasks) => {
-        if (current) setHasSavedTasks(tasks.length > 0);
-      },
-      () => {},
-    );
+    void writingTaskWrites(platform.writingTasks)
+      .then(() => platform.writingTasks.list(path))
+      .then(
+        (tasks) => {
+          if (current) setHasSavedTasks(tasks.length > 0);
+        },
+        () => {},
+      );
     return () => {
       current = false;
     };
-  }, [platform, path, taskDeletion]);
+  }, [platform, path, taskListRevision]);
 
   useEffect(() => {
     if (!editor) return;
@@ -1042,7 +1046,13 @@ function Composer({
           partial,
         },
       ]);
-    setAttempt({ ...entry, approved, status, partial: "" });
+    setAttempt({
+      ...entry,
+      approved,
+      status,
+      partial: "",
+      newDecisions: suggestions?.filter(({ status }) => status === "preview").length,
+    });
     controller.current = null;
     taskRunning.current = false;
     return status === "complete";
@@ -1093,9 +1103,13 @@ function Composer({
             decisions,
             background: !active || !placement,
             notice: pendingApproval
-              ? { id: `${attempt.id}:approval:${pendingApproval.id}`, detail: pendingApproval.name }
+              ? {
+                  id: `${attempt.id}:approval:${pendingApproval.id}`,
+                  detail: pendingApproval.name,
+                  decisions: 1,
+                }
               : status === "complete"
-                ? { id: attempt.id }
+                ? { id: attempt.id, decisions: attempt.newDecisions }
                 : undefined,
             stop:
               status === "working" || status === "approval"
@@ -1255,7 +1269,7 @@ function Composer({
         </span>
         <div className="flex gap-2">
           {title && (
-            <button type="button" className={buttonClass} disabled={busy} onClick={onTasks}>
+            <button type="button" className={buttonClass} onClick={onTasks}>
               {t("writing.tasks")}
             </button>
           )}

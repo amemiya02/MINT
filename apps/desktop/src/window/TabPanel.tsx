@@ -32,7 +32,7 @@ export function TabPanel({
   folder,
   askWriting,
   writingTaskRestore,
-  writingTaskDeletion,
+  writingTaskListRevision,
   settingsOpen,
   onAskWriting,
   onWritingTasks,
@@ -54,7 +54,7 @@ export function TabPanel({
   readonly folder: string | null;
   readonly askWriting: { readonly folder?: string } | null;
   readonly writingTaskRestore: { readonly task: SavedWritingTask } | null;
-  readonly writingTaskDeletion: number;
+  readonly writingTaskListRevision: number;
   readonly settingsOpen: boolean;
   readonly onAskWriting: () => void;
   readonly onWritingTasks: () => void;
@@ -184,7 +184,7 @@ export function TabPanel({
           folder={folder}
           askRequest={askWriting}
           taskRestore={writingTaskRestore}
-          taskDeletion={writingTaskDeletion}
+          taskListRevision={writingTaskListRevision}
           settingsOpen={settingsOpen}
           onAsk={onAskWriting}
           onTasks={onWritingTasks}

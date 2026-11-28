@@ -1763,7 +1763,12 @@ test("a saved writing review resumes after a native restart without contacting i
     await nativeShortcut("ctrl+w");
     await nativeShortcut("ctrl+n");
     await nativeShortcut("ctrl+shift+p");
+    await waitForView(
+      "the Command Palette to receive focus",
+      `return document.activeElement?.matches('dialog[aria-label="Command Palette"] input');`,
+    );
     await keyActions(typing("All writing tasks"));
+    await shows("All writing tasks");
     await keyActions(typing(keys.enter));
     await waitForView(
       "the closed document's task and outstanding decisions in All writing tasks",
@@ -1771,7 +1776,7 @@ test("a saved writing review resumes after a native restart without contacting i
        return [...dialog?.querySelectorAll('li') ?? []].some(row =>
          row.innerText.includes(${JSON.stringify(instruction)}) &&
          row.innerText.includes('renamed-writing-review.md') &&
-         row.innerText.includes('2 decisions needed')); `,
+         row.innerText.includes('2 decisions needed'));`,
     );
     await clickPath(
       `//dialog[@aria-label='All writing tasks']//button[normalize-space(.)='${instruction}']`,
@@ -2283,6 +2288,16 @@ test("a native model reply stays editable and untitled until the author chooses 
     await until("the author's addition in the draft", () => draftMatches(edited)).catch(explain);
     await saveWith("Save");
     assert.equal(await until("the saved draft", () => readFile(path, "utf8")), edited);
+    const saved = await until("the draft task to follow the native Save As path", async () => {
+      const tasks = await invokeNative<{ title: string; turns: { reply: string }[] }[]>(
+        "list_writing_tasks",
+        { path },
+      );
+      return tasks.find((task) => task.title === instruction) ?? null;
+    });
+    assert.equal(saved.turns[0]?.reply, generated);
+    assert.ok(!JSON.stringify(saved).includes("draft-fixture-secret"));
+    assert.equal(requests.length, 2);
   } finally {
     endpoint.closeAllConnections();
     await new Promise<void>((resolve) => endpoint.close(() => resolve()));

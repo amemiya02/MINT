@@ -12,6 +12,7 @@ import { DraftComposer } from "./ai/DraftComposer.tsx";
 import { ExternalAgentDialog } from "./ai/ExternalAgentPanel.tsx";
 import { inlineCompletionSender } from "./ai/inline-completion.ts";
 import { ReplyExcerpt } from "./ai/ReplyExcerpt.tsx";
+import { recordWritingResult, stopTrackingWritingResult } from "./ai/record-writing-result.ts";
 import {
   type WritingTask,
   WritingTaskNotices,
@@ -175,7 +176,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   const [taskRestore, setTaskRestore] = useState<{ tabId: number; task: SavedWritingTask } | null>(
     null,
   );
-  const [taskDeletion, setTaskDeletion] = useState(0);
+  const [taskListRevision, setTaskListRevision] = useState(0);
 
   async function openWritingTask(task: SavedWritingTask | WritingTask) {
     if (task.folder && task.folder !== folder) {
@@ -839,7 +840,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
                   folder={folder}
                   askWriting={writingRequest?.tabId === tab.id ? writingRequest : null}
                   writingTaskRestore={taskRestore?.tabId === tab.id ? taskRestore : null}
-                  writingTaskDeletion={taskDeletion}
+                  writingTaskListRevision={taskListRevision}
                   settingsOpen={settingsOpen}
                   onAskWriting={() => run.current("edit.askAI")}
                   onWritingTasks={() => run.current("edit.writingTasks")}
@@ -1014,8 +1015,10 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
           onClose={() => setTaskDialog(null)}
           onOpen={openWritingTask}
           onDelete={(id) => {
+            stopTrackingWritingResult(platform.writingTasks, id);
             openWritingReviews(platform.writingTasks).get(id)?.remove();
-            setTaskDeletion((revision) => revision + 1);
+            writingTasks.get(id)?.forget?.();
+            setTaskListRevision((revision) => revision + 1);
           }}
         />
       )}
@@ -1061,6 +1064,21 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
             setAgentDialogVisible(true);
           }}
           onHide={() => setAgentDialogVisible(false)}
+          onResult={(id, turn) => {
+            const { tabId, origin } = agentSelection;
+            recordWritingResult(platform.writingTasks, store, {
+              tabId,
+              id,
+              turn,
+              origin: {
+                ...origin.range.current(),
+                located: origin.range.hasBoundaries(),
+                text: origin.text,
+              },
+              onError: () => setShellError(t("writing.tasks.saveFailed")),
+            });
+            setTaskListRevision((revision) => revision + 1);
+          }}
           renderReply={(reply, close) => (
             <ReplyExcerpt
               reply={reply}

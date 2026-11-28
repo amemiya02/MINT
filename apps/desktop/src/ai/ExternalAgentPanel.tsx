@@ -10,6 +10,7 @@ import {
 import { useWritingTask } from "./WritingTasks.tsx";
 import { type AttemptStatus, failureStatus, replyStatus } from "./writing-attempt.ts";
 import type { WritingRequest } from "./writing-sender.ts";
+import type { SavedTurn } from "./writing-tasks.ts";
 
 const buttonClass =
   "rounded-md border border-(--mint-border) px-3 py-1 hover:bg-(--mint-hover) focus-visible:outline-2 focus-visible:outline-(--mint-accent) disabled:opacity-50";
@@ -51,6 +52,7 @@ interface AgentTaskTarget {
   readonly name: string;
   readonly visible: boolean;
   readonly reveal: () => void;
+  readonly record: (id: string, turn: SavedTurn) => void;
   readonly engaged: { current: boolean };
 }
 
@@ -58,6 +60,7 @@ export function ExternalAgentDialog({
   onClose,
   onHide,
   onReveal,
+  onResult,
   name,
   tabId,
   visible,
@@ -67,6 +70,7 @@ export function ExternalAgentDialog({
   readonly onClose: () => void;
   readonly onHide: () => void;
   readonly onReveal: () => void;
+  readonly onResult: (id: string, turn: SavedTurn) => void;
   readonly name: string;
   readonly tabId: number;
   readonly visible: boolean;
@@ -77,7 +81,9 @@ export function ExternalAgentDialog({
   const dialog = useRef<HTMLDialogElement>(null);
   const engaged = useRef(false);
   const reveal = useRef(onReveal);
+  const result = useRef(onResult);
   reveal.current = onReveal;
+  result.current = onResult;
   const target = useMemo(
     () => ({
       tabId,
@@ -85,6 +91,7 @@ export function ExternalAgentDialog({
       visible,
       engaged,
       reveal: () => reveal.current(),
+      record: (id: string, turn: SavedTurn) => result.current(id, turn),
     }),
     [name, tabId, visible],
   );
@@ -183,6 +190,7 @@ function ExternalAgentPanel({
     () =>
       target && taskStatus && taskRecipient
         ? {
+            id: pending?.id ?? attempt?.id,
             tabId: target.tabId,
             title: pending?.request.instruction ?? attempt?.title ?? instruction,
             name: target.name,
@@ -193,11 +201,15 @@ function ExternalAgentPanel({
             decisions: Number(!!pending),
             background: !target.visible,
             notice: pending
-              ? { id: pending.id }
+              ? { id: pending.id, decisions: 1 }
               : attempt?.status === "complete"
                 ? { id: attempt.id }
                 : undefined,
             stop: taskStatus === "working" || taskStatus === "approval" ? stop : undefined,
+            forget: () => {
+              setAttempt(null);
+              setReply("");
+            },
             reveal: target.reveal,
           }
         : null,
@@ -335,6 +347,15 @@ function ExternalAgentPanel({
         setAgent(verified);
         setSaved((list) => [verified, ...list.filter((item) => item.path !== verified.path)]);
         setReply(result.text);
+        target?.record(entry.id, {
+          instruction: request.instruction,
+          material: request.selectedText,
+          reply: result.text,
+          recipient: t("writing.recipient.agent", { path: current.path }),
+          recipientId: `agent:${current.path}`,
+          direct: false,
+          status: outcome,
+        });
       } catch (problem) {
         if (!mounted.current) return;
         if (!signal) throw problem;
