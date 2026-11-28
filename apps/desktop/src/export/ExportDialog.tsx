@@ -2,9 +2,17 @@ import { useEffect, useId, useMemo, useState } from "react";
 import { useT } from "../i18n/index.ts";
 import { baseName } from "../paths.ts";
 import type { Platform } from "../platform/platform.ts";
+import {
+  codecFor,
+  exportFormats,
+  isPluginFormat,
+  type PluginFormat,
+} from "../plugins/export-formats.ts";
+import { activeExportFormats } from "../plugins/host.ts";
 import { NotionImport } from "../plugins/NotionImport.tsx";
 import { pluginName, useInstallations } from "../plugins/Plugins.tsx";
 import type { PageLayout, PreviewWindow } from "../print/preview.ts";
+import { dialectOf } from "../settings/dialect.ts";
 import { useSettings } from "../settings/useSettings.ts";
 import { findBuiltinTheme } from "../theme/catalog.ts";
 import { ThemeOptions } from "../theme/ThemeOptions.tsx";
@@ -12,7 +20,7 @@ import { useTheme } from "../theme/useTheme.ts";
 import { useModalDialog } from "../window/useModalDialog.ts";
 import { documentHtml, type HtmlExportChoice } from "./html-export.ts";
 
-export type ExportFormat = "html" | "pdf" | "docx";
+export type ExportFormat = "html" | "pdf" | "docx" | PluginFormat;
 
 interface ExportDialogProps {
   readonly platform: Platform;
@@ -52,7 +60,9 @@ export function ExportDialog({
   const { close, props: dialogProps } = useModalDialog(onClose);
   const titleId = useId();
   const formatId = useId();
-  const importers = useInstallations().filter((i) => i.enabled && "importer" in i.manifest);
+  const installations = useInstallations();
+  const formats = activeExportFormats(installations);
+  const importers = installations.filter((i) => i.enabled && "importer" in i.manifest);
   const [selectedFormat, setFormat] = useState<string>(
     initialFormat ?? (path ? "html" : `import:${importers[0]?.manifest.id ?? ""}`),
   );
@@ -148,6 +158,32 @@ export function ExportDialog({
         close();
         return;
       }
+      if (isPluginFormat(format)) {
+        const codec = codecFor(format);
+        const target = await platform.showSaveDialog({
+          title: t("export.plugin.saveTitle", { format: codec.label }),
+          defaultPath: `${path.slice(0, path.length - baseName(path).length)}${name}.${codec.extension}`,
+          filters: [{ name: codec.label, extensions: [codec.extension] }],
+        });
+        if (target) {
+          if (target === path) throw new Error(t("export.docx.chooseAnotherFile"));
+          const requireGrant = () => {
+            if (!activeExportFormats().includes(format)) throw new Error(t("plugin.denied"));
+          };
+          requireGrant();
+          const content = await codec.encode({
+            title: name,
+            text: getText(),
+            dialect: dialectOf(settings),
+            language: document.documentElement.lang || platform.locale,
+          });
+          requireGrant();
+          if (typeof content === "string") await platform.writeTextFile(target, content);
+          else await platform.writeBinaryFile(target, content);
+        }
+        close();
+        return;
+      }
       const word = format === "docx";
       const target = await platform.showSaveDialog({
         title: t(word ? "export.docx.saveTitle" : "export.html.saveTitle"),
@@ -229,6 +265,16 @@ export function ExportDialog({
                 <option disabled={!path} value="docx">
                   DOCX
                 </option>
+                {isPluginFormat(format) && !formats.includes(format) && (
+                  <option value={format} disabled>
+                    {t("export.plugin.unavailable")}
+                  </option>
+                )}
+                {formats.map((key) => (
+                  <option disabled={!path} key={key} value={key}>
+                    {exportFormats[key].label}
+                  </option>
+                ))}
                 {importers.map(({ manifest }) => (
                   <option key={manifest.id} value={`import:${manifest.id}`}>
                     {pluginName(manifest, t)}
@@ -373,7 +419,11 @@ export function ExportDialog({
           {!importing && (
             <button
               type="submit"
-              disabled={busy || (format === "pdf" && !ready)}
+              disabled={
+                busy ||
+                (isPluginFormat(format) && !formats.includes(format)) ||
+                (format === "pdf" && !ready)
+              }
               className={`${buttonClass} border-(--mint-accent) font-medium`}
             >
               {t(
