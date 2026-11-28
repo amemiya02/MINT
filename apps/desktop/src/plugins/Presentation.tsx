@@ -27,7 +27,7 @@ function slidePages(html: string, platform: Platform, path: string | null) {
       // A filename can contain a literal percent sign.
     }
     const url = documentImageUrl(platform, path, asset);
-    if (url) image.src = url;
+    if (url) image.setAttribute("src", url);
     else image.removeAttribute("src");
   }
   // Keep the presentation in the current window when a slide contains a link.
