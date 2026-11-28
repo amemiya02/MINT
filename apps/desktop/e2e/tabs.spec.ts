@@ -215,6 +215,9 @@ test("pane commands preserve each selection and reading position and route find 
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.press("Shift+Home");
   await expect(draft.getByText("Alpha tail", { exact: true })).toBeInViewport();
+  await expect
+    .poll(() => page.evaluate(() => window.getSelection()?.toString()))
+    .toBe("Alpha tail");
   await page.keyboard.press("ControlOrMeta+O");
   const reference = page.getByRole("tabpanel", { name: "b.md" }).getByRole("textbox");
   await expect(reference).toBeFocused();
@@ -239,6 +242,9 @@ test("pane commands preserve each selection and reading position and route find 
   await command("Close reference pane");
   await expect(draft).toBeFocused();
   await expect(draft.getByText("Alpha tail", { exact: true })).toBeInViewport();
+  await expect
+    .poll(() => page.evaluate(() => window.getSelection()?.toString()))
+    .toBe("Alpha tail");
   await page.keyboard.type("replaced tail");
   await page.keyboard.press("ControlOrMeta+s");
   await expect
