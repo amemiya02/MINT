@@ -61,7 +61,7 @@ function canvasFor(width: number, height: number) {
   return { canvas, context };
 }
 
-export const materialTextLimit = 64 * 1024;
+export const materialTextLimit = 2 * 1024 * 1024;
 
 export function usableMaterialText(text: string): boolean {
   const bytes = new TextEncoder().encode(text).length;
@@ -113,4 +113,9 @@ function imageMaterial(name: string, range: MaterialRange, canvas: HTMLCanvasEle
     throw new Error("materialTooLarge");
   }
   return { name, range, format: "image", text: "", image };
+}
+
+export function sourceLines(text: string) {
+  // Keep line endings, including the final newline, in outbound excerpts.
+  return text.match(/[^\r\n]*(?:\r\n|\r|\n)|[^\r\n]+$/g) ?? [];
 }

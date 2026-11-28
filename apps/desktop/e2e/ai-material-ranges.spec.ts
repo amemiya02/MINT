@@ -94,7 +94,7 @@ test("paste an image into Ask AI and transmit only the crop to the chosen visual
   for (const [name, service] of [
     ["Text fixture", address],
     ["Vision fixture", visionAddress],
-  ]) {
+  ] as const) {
     await settings.getByLabel("Connection name").fill(name);
     await settings.getByLabel("API address").fill(service);
     await settings.getByLabel("Model name").fill("fixture");
@@ -111,7 +111,7 @@ test("paste an image into Ask AI and transmit only the crop to the chosen visual
   await ask.getByLabel("Action").selectOption({ label: "Comment only" });
   await ask.getByLabel("Instruction", { exact: true }).fill("Read the marked region.");
   let context = ask.getByRole("group", { name: "Task context to send" });
-  await context.evaluate(async (element) => {
+  await ask.getByLabel("Instruction", { exact: true }).evaluate(async (element) => {
     const canvas = document.createElement("canvas");
     canvas.width = 8;
     canvas.height = 4;
@@ -160,6 +160,9 @@ test("paste an image into Ask AI and transmit only the crop to the chosen visual
   await image.getByRole("button", { name: "Use selected material" }).click();
   await expect(context.getByText("chart.png · x 5, y 1 · 2 × 2 px · Image pixels")).toBeVisible();
   await ask.getByLabel("Instruction", { exact: true }).fill("Check the crop pixels.");
+  await ask.getByLabel("Recipient").selectOption({ label: `Text fixture · ${endpoint}` });
+  await expect(ask.getByRole("button", { name: /^Comment only · Current selection · Text fixture/ })).toBeDisabled();
+  await ask.getByLabel("Recipient").selectOption({ label: `Vision fixture · ${visionEndpoint}` });
   await ask.getByRole("button", { name: /^Comment only · Current selection · Vision fixture/ }).click();
   await expect(ask.getByText("The marked region is blue.", { exact: true })).toBeVisible();
 

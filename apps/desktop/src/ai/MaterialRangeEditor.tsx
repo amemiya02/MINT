@@ -39,7 +39,10 @@ export function MaterialRangeEditor({
   const [region, setRegion] = useState(() => initialRegion(previous?.range));
   const fallback = source.kind === "pdf" ? "extractedText" : "caption";
   const [requestedFormat, setFormat] = useState(previous?.format ?? fallback);
-  const format = requestedFormat === "image" && !vision ? fallback : requestedFormat;
+  const format =
+    requestedFormat === "summary" || (requestedFormat === "image" && !vision)
+      ? fallback
+      : requestedFormat;
   const [caption, setCaption] = useState(previous?.format === "caption" ? previous.text : "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<"invalidRange" | "noPageText" | "materialTooLarge" | null>(null);

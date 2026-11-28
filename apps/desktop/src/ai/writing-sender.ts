@@ -7,7 +7,7 @@ export interface NamedMaterial {
   readonly name: string;
   readonly text: string;
   readonly range?: MaterialRange;
-  readonly format?: "extractedText" | "caption" | "image";
+  readonly format?: "extractedText" | "caption" | "image" | "summary";
   /** A locally prepared PNG of the selected range. The original file is never part of a request. */
   readonly image?: string;
 }
@@ -43,8 +43,8 @@ export function contextMaterials(context?: TaskContext): NamedMaterial[] {
   ];
 }
 
-export function hasTaskImages(context?: TaskContext): boolean {
-  return contextMaterials(context).some(({ image }) => !!image);
+export function hasTaskImages(...contexts: readonly (TaskContext | undefined)[]): boolean {
+  return contexts.some((context) => contextMaterials(context).some(({ image }) => !!image));
 }
 
 export type MaterialDecision = {

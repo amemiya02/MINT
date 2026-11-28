@@ -1,4 +1,4 @@
-import { type ClipboardEvent, type DragEvent, useRef, useState } from "react";
+import { type ClipboardEvent, type DragEvent, useMemo, useRef, useState } from "react";
 import { useT } from "../i18n/index.ts";
 import type { Platform } from "../platform/platform.ts";
 import { materialLabel } from "./material-display.ts";
@@ -6,6 +6,7 @@ import {
   type MaterialSource,
   materialTextLimit,
   rangedSource,
+  sourceLines,
   usableMaterialText,
 } from "./material-source.ts";
 import { MaterialRangeEditor } from "./MaterialRangeEditor.tsx";
@@ -34,16 +35,20 @@ export function useNamedMaterials() {
   const nextId = useRef(0);
   const [loading, setLoading] = useState(0);
   const [error, setError] = useState(false);
-  const confirmed = [
-    ...entries,
-    ...ranges.flatMap(({ id, editing, selected }) => !editing && selected ? [{ id, material: selected }] : []),
-  ].sort((first, second) => Number(first.id) - Number(second.id));
+  const confirmed = useMemo(
+    () => [
+      ...entries,
+      ...ranges.flatMap(({ id, editing, selected }) =>
+        !editing && selected ? [{ id, material: selected }] : [],
+      ),
+    ].sort((first, second) => Number(first.id) - Number(second.id)),
+    [entries, ranges],
+  );
   const materials = confirmed.map(({ material }) => material);
   const pending = ranges.filter(({ editing }) => editing);
 
   return {
     entries: confirmed,
-    materials,
     pending,
     hasRanges: ranges.length > 0,
     hasImages: hasTaskImages({ materials }),
@@ -123,6 +128,7 @@ export function TaskContextChecklist({
   draft,
   emptyDraft,
   includeDraft,
+  handlingFull = true,
   folder,
   searchEnabled,
   onSearchChange,
@@ -135,6 +141,7 @@ export function TaskContextChecklist({
   readonly draft?: NamedMaterial;
   readonly emptyDraft?: boolean;
   readonly includeDraft?: (checked: boolean) => void;
+  readonly handlingFull?: boolean;
   readonly folder: string | null;
   readonly searchEnabled: boolean;
   readonly onSearchChange: (checked: boolean) => void;
@@ -145,7 +152,9 @@ export function TaskContextChecklist({
       className="space-y-2 rounded border border-(--mint-border) p-2 text-xs"
       {...materialDropHandlers(named)}
     >
-      <legend className="px-1">{t("writing.context")}</legend>
+      <legend className="px-1">
+        {t(handlingFull ? "writing.context" : "materials.capacity.sources")}
+      </legend>
       <dl className="space-y-1 wrap-anywhere">
         <div className="flex flex-wrap gap-x-2">
           <dt className="font-medium">{t("writing.recipient")}</dt>
@@ -171,12 +180,17 @@ export function TaskContextChecklist({
                   checked={!!draft}
                   onChange={(event) => includeDraft(event.target.checked)}
                 />
-                {t("materials.includeDraft")}
+                {t(handlingFull ? "materials.includeDraft" : "materials.capacity.includeDraft")}
               </label>
             )}
             {draft ? (
               <>
-                <span>{draft.name}</span>
+                <span>{draft.name}</span>{" "}
+                <span>
+                  {t("materials.capacity.lineCount", {
+                    count: String(sourceLines(draft.text).length),
+                  })}
+                </span>
                 <pre className={previewClass}>{draft.text}</pre>
               </>
             ) : !includeDraft ? (
@@ -191,6 +205,11 @@ export function TaskContextChecklist({
             <li key={id} className="flex items-start justify-between gap-2">
               <details className="min-w-0 flex-1">
                 <summary className="cursor-pointer wrap-anywhere">{materialLabel(material, t)}</summary>
+                {!material.image && (
+                  <p>
+                    {t("materials.capacity.lineCount", { count: String(sourceLines(material.text).length) })}
+                  </p>
+                )}
                 <MaterialPreview material={material} />
               </details>
               <div className="flex flex-wrap gap-1">
@@ -241,6 +260,7 @@ export function materialDropHandlers(named: ReturnType<typeof useNamedMaterials>
       const files = Array.from(event.clipboardData.files);
       if (!files.length || event.currentTarget.matches(":disabled")) return;
       event.preventDefault();
+      event.stopPropagation();
       void named.read(async () => files);
     },
   };

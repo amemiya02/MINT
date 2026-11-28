@@ -4,6 +4,11 @@ import type { Platform } from "../platform/platform.ts";
 import { useTabStore } from "../tabs/context.ts";
 import { ExternalAgentAccessNotice } from "./ExternalAgentPanel.tsx";
 import { type ExternalAgent, externalAgentSender } from "./external-agent.ts";
+import {
+  type MaterialPlan,
+  MaterialPlanPreview,
+  useMaterialCapacity,
+} from "./MaterialCapacity.tsx";
 import { MaterialRequestNotice, useMaterialRequests } from "./MaterialRequest.tsx";
 import { modelEndpoint, modelWritingSender, type SavedModelConnection } from "./model.ts";
 import { useModelVision, VisionControl, type VisionTarget } from "./ModelVision.tsx";
@@ -13,6 +18,7 @@ import { useWritingTask, WritingTaskMaterials } from "./WritingTasks.tsx";
 import {
   type AttemptStatus,
   failureStatus,
+  isMaterialCapacityError,
   replyStatus,
   writingMaterialNames,
 } from "./writing-attempt.ts";
@@ -34,6 +40,7 @@ interface DraftTask {
   readonly id: string;
   readonly title: string;
   readonly request: WritingRequest;
+  readonly plan: MaterialPlan;
   readonly folder: string | null;
 }
 
@@ -44,6 +51,7 @@ interface DraftAttempt {
   readonly status: AttemptStatus;
   readonly partial: string;
   readonly approved: readonly NamedMaterial[];
+  readonly capacityRejected?: boolean;
 }
 
 export function DraftComposer({
@@ -113,6 +121,12 @@ export function DraftComposer({
         : endpoint
       : undefined;
 
+  const capacity = useMaterialCapacity({
+    recipient,
+    entries: named.entries,
+    folderSearch: !!searchFolder,
+  });
+
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -181,6 +195,7 @@ export function DraftComposer({
     !named.loading &&
     !named.unconfirmed &&
     (!named.hasImages || vision?.verified === true) &&
+    !!capacity.plan &&
     (!!agent || (!!endpoint && (!!remembered || (custom && !!model.trim()))));
 
   const connections: DraftConnection[] = [
@@ -202,7 +217,7 @@ export function DraftComposer({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy || !canSend || unapplied || !recipient) return;
+    if (busy || !canSend || unapplied || !recipient || !capacity.plan) return;
     if (!canApplyDraft()) {
       setError("draft.requiresEmptyUntitled");
       return;
@@ -220,15 +235,10 @@ export function DraftComposer({
       {
         id: crypto.randomUUID(),
         title: instruction.trim(),
+        plan: capacity.plan,
         request: {
           instruction: t("draft.prompt", { instruction: instruction.trim() }),
-          taskContext:
-            named.materials.length || searchFolder
-              ? {
-                  materials: named.materials.length ? named.materials : undefined,
-                  folderSearch: searchFolder ? true : undefined,
-                }
-              : undefined,
+          taskContext: capacity.plan.contexts[0],
         },
         folder: searchFolder,
       },
@@ -238,7 +248,7 @@ export function DraftComposer({
 
   async function runDraft(task: DraftTask, connection: DraftConnection) {
     if (controller.current) return;
-    if (hasTaskImages(task.request.taskContext) && !checkVision(connection.visionTarget)?.verified) {
+    if (hasTaskImages(...task.plan.contexts) && !checkVision(connection.visionTarget)?.verified) {
       setError("materials.visionRequired");
       return;
     }
@@ -252,30 +262,33 @@ export function DraftComposer({
     let approved: NamedMaterial[] = [];
     let sentContext = task.request.taskContext;
     let status: AttemptStatus;
+    let capacityRejected = false;
     setError(null);
     setRetryId("");
     setAttempt({ ...entry, approved, partial, status: "working" });
     try {
       const reply = await materialRequests.send(
-        (outbound, options) => {
-          sentContext = outbound.taskContext;
-          return connection.send(outbound, options);
-        },
+        connection.send,
         task.request,
         connection.label,
         task.folder,
         {
           signal,
-          onDelta(delta) {
+          plan: task.plan,
+          onContext(context) {
+            sentContext = context;
+          },
+          onProgress(text) {
             if (signal.aborted) return;
-            partial += delta;
+            partial = text;
             setAttempt({ ...entry, approved, partial, status: "working" });
           },
-          onApproval() {
-            partial = "";
+          onApproval(text) {
+            partial = text;
             setAttempt({ ...entry, approved, partial, status: "approval" });
           },
-          onResume(decision) {
+          onResume(decision, text) {
+            partial = text;
             if (decision?.outcome === "allowed") approved = [...approved, decision.material];
             if (!signal.aborted) setAttempt({ ...entry, approved, partial, status: "working" });
           },
@@ -319,7 +332,9 @@ export function DraftComposer({
     } catch (error) {
       if (!mounted.current) return;
       status = failureStatus(error, signal);
-      if (status === "failed") {
+      capacityRejected = !signal.aborted && isMaterialCapacityError(error);
+      if (capacityRejected) capacity.reject(connection.label);
+      else if (status === "failed") {
         const code = error instanceof Error ? error.message : error;
         setError(
           code === "agentChanged" || code === "agentAccessRequired"
@@ -335,7 +350,7 @@ export function DraftComposer({
       const reply = { id: crypto.randomUUID(), text: partial };
       setPartials((previous) => [...previous, reply]);
     }
-    setAttempt({ ...entry, approved, status, partial: "" });
+    setAttempt({ ...entry, approved, status, partial: "", capacityRejected });
     controller.current = null;
   }
 
@@ -402,12 +417,12 @@ export function DraftComposer({
   }
 
   const retry =
-    attempt && !busy && retryConnection.current
+    attempt && !busy && !attempt.capacityRejected && retryConnection.current
       ? { ...attempt, connection: retryConnection.current }
       : null;
   const alternatives = retry ? connections.filter(({ id }) => id !== retry.connection.id) : [];
   const alternate = alternatives.find(({ id }) => id === retryId);
-  const retryHasImages = hasTaskImages(retry?.task.request.taskContext);
+  const retryHasImages = hasTaskImages(...(retry?.task.plan.contexts ?? []));
   const alternateVision = checkVision(alternate?.visionTarget);
 
   if (appliedReply)
@@ -564,10 +579,12 @@ export function DraftComposer({
           emptyDraft
           recipient={recipient}
           vision={vision}
+          handlingFull={capacity.method === "full"}
           folder={folder}
           searchEnabled={!!searchFolder}
           onSearchChange={(checked) => setAllowedFolder(checked ? folder : null)}
         />
+        {capacity.controls}
         {agent && (
           <details className="space-y-1 text-xs text-(--mint-muted)">
             <summary>
@@ -630,6 +647,9 @@ export function DraftComposer({
                   ))}
                 </select>
               </label>
+              {alternate && (
+                <MaterialPlanPreview plan={retry.task.plan} recipient={alternate.label} />
+              )}
               {retryHasImages && alternateVision && <VisionControl check={alternateVision} />}
               {retryHasImages && alternate && !alternateVision && (
                 <p role="alert">{t("materials.visionRequired")}</p>
