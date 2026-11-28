@@ -1,5 +1,5 @@
 import type { CodeBlockRenderer, DocumentLink, LinkTarget, WordCount } from "@mint/editor";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { createImageHost, type ImageSaveFailure } from "../assets/image-host.ts";
 import { EditorPane } from "../EditorPane.tsx";
 import { resolveDocumentLink } from "../folder/wikilinks.ts";
@@ -29,6 +29,7 @@ export function TabPanel({
   onEditorChange,
   onEdited,
   onWordCount,
+  drafting,
 }: {
   readonly tab: Tab;
   readonly wikilinkFolder: string | null;
@@ -43,6 +44,7 @@ export function TabPanel({
   readonly onEditorChange: () => void;
   readonly onEdited: (id: number) => void;
   readonly onWordCount: (count: WordCount) => void;
+  readonly drafting: ReactNode;
 }) {
   const store = useTabStore();
   const { id, path } = tab;
@@ -129,6 +131,7 @@ export function TabPanel({
       {imageFailure && (
         <ImageSaveNotice failure={imageFailure} onDismiss={() => setImageFailure(null)} />
       )}
+      {drafting}
       <div
         className={`flex min-h-0 min-w-0 flex-1 ${toolbarPosition === "side" ? "flex-row" : "flex-col"}`}
       >

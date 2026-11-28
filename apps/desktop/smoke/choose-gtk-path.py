@@ -89,6 +89,11 @@ def file_cell(name):
 
 
 wait_for("waiting for confirmation button", accept)
+if button_name == "Cancel":
+    click_node(wait_for("waiting for Cancel", accept))
+    wait_for("waiting for cancellation to close the chooser", lambda: chooser() is None)
+    sys.exit(0)
+
 home = wait_for("waiting for GTK Home", lambda: find_control(
     lambda node: node.name == "Home" and node.getRoleName() == "label"))
 click_node(home)

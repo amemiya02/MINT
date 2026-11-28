@@ -60,6 +60,7 @@ export const commands = [
   },
 
   { id: "file.new", title: "command.file.new", accelerator: "CmdOrCtrl+N", menu: "file" },
+  { id: "file.draftWithAi", title: "command.file.draftWithAi", menu: "file" },
   { id: "file.open", title: "command.file.open", accelerator: "CmdOrCtrl+O", menu: "file" },
   { id: "file.openFolder", title: "command.file.openFolder", menu: "file" },
   {
