@@ -133,7 +133,12 @@ async function choosePackage(button: string, path: string) {
 }
 
 /** GTK file pickers are native windows outside the WebDriver DOM. */
-async function chooseNativePath(button: string, titlePattern: string, path: string) {
+async function chooseNativePath(
+  button: string,
+  titlePattern: string,
+  path: string,
+  acceptKey: string,
+) {
   const choose = async () => {
     const id = await until(`native chooser ${titlePattern}`, async () => {
       const { stdout } = await exec("xdotool", ["search", "--onlyvisible", "--name", titlePattern]);
@@ -143,6 +148,21 @@ async function chooseNativePath(button: string, titlePattern: string, path: stri
     await exec("xdotool", ["key", "--clearmodifiers", "ctrl+l", "ctrl+a"]);
     await exec("xdotool", ["type", "--clearmodifiers", "--", path]);
     await exec("xdotool", ["key", "Return"]);
+    // GTK's location entry can navigate into a folder on Return. Confirm the
+    // dialog's Open/Save button after navigation and wait for the window to close.
+    await until(`GTK to finish choosing ${path}`, async () => {
+      const visible = await exec("xdotool", ["search", "--onlyvisible", "--name", titlePattern])
+        .then(({ stdout }) => stdout.trim().split(/\s+/).includes(id))
+        .catch((error: { code: number }) => {
+          if (error.code === 1) return false;
+          throw error;
+        });
+      if (!visible) return true;
+      await exec("xdotool", ["windowfocus", "--sync", id, "key", "--clearmodifiers", acceptKey], {
+        timeout: 5000,
+      });
+      return null;
+    });
   };
   await Promise.all([
     clickPath(`//button[not(@disabled) and normalize-space(.)='${button}']`),
@@ -338,6 +358,70 @@ test("history restores and undo autosave the exact native file", async () => {
     ).catch(explain);
   }
   assert.deepEqual(await readdir(dir), ["smoke.md"]);
+});
+
+test("import a hidden Notion attachment and embed its granted bytes in a native DOCX", async () => {
+  const folder = await mkdtemp(join(dir, "publication-"));
+  const archive = join(folder, "Notebook.zip");
+  const doc = "# Map\n\n![Field map](.attachments/map.png)\n";
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+    "base64",
+  );
+  const input = await new JSZip()
+    .file("Map.md", doc)
+    .file(".attachments/map.png", png)
+    .generateAsync({ type: "nodebuffer" });
+  await writeFile(archive, input);
+  await restart([folder]);
+  await waitForView(
+    "the archive to appear in the folder tree",
+    `return !!document.querySelector('[role=treeitem][aria-label="Notebook.zip"]');`,
+  );
+  await openSettings();
+  await clickPath("//fieldset[@aria-label='Notion import']//button[normalize-space(.)='Install']");
+  await click("Allow access");
+  await click("Close");
+  const chooseFormat = async (label: string) => {
+    await nativeShortcut("ctrl+shift+p");
+    await keyActions(typing("Import / Export"));
+    await shows("Import / Export…");
+    await keyActions(typing(keys.enter));
+    await waitForView(
+      "the format chooser to receive focus",
+      `const select = document.querySelector('dialog[open] select:has(option[value="docx"])');
+       if (!select) return false;
+       select.focus();
+       return document.activeElement === select;`,
+    );
+    await keyActions(typing(label.charAt(0).toLowerCase()));
+    await waitForView(
+      `the ${label} format to be selected`,
+      `return document.querySelector('dialog[open] select:has(option[value="docx"]) option:checked')?.label === ${JSON.stringify(label)};`,
+    );
+  };
+  await chooseFormat("Notion import");
+  await choosePackage("Notion export (.zip)", archive);
+  await chooseNativePath("Import", "^Choose the parent folder for the import$", folder, "alt+o");
+  await click("Open imported folder");
+  await clickPath("//*[@role='treeitem' and @aria-label='Map.md']");
+  const imported = join(folder, "Notebook");
+  assert.equal(await readFile(join(imported, "Map.md"), "utf8"), doc);
+  assert.deepEqual(await readFile(join(imported, ".attachments", "map.png")), png);
+  assert.deepEqual(await readFile(archive), input);
+  const denied = join(imported, "ungranted.png");
+  await symlink("/etc/hosts", denied);
+  await assert.rejects(
+    invokeNative("read_binary_file", { path: denied }),
+    /outside the documents and folders/,
+  );
+  await chooseFormat("DOCX");
+  const out = join(imported, "share.docx");
+  await chooseNativePath("Export", "^Export as DOCX$", out, "alt+s");
+  const bytes = await until("the DOCX on disk", () => readFile(out));
+  const word = await JSZip.loadAsync(bytes);
+  assert.match((await word.file("word/document.xml")?.async("string")) ?? "", /<w:drawing>/);
+  assert.deepEqual(await word.file(/^word\/media\/.+\.png$/i)[0]?.async("nodebuffer"), png);
 });
 
 test("moving a Kanban card changes only its status on disk after the writer grants access", async () => {
@@ -988,68 +1072,4 @@ test("the daily journal creates one ordinary Markdown file only after permission
   await openSettings();
   await clickPath(`${plugin}//button[normalize-space(.)='Uninstall']`);
   await click("Close");
-});
-
-test("import a hidden Notion attachment and embed its granted bytes in a native DOCX", async () => {
-  const folder = await mkdtemp(join(dir, "publication-"));
-  const archive = join(folder, "Notebook.zip");
-  const doc = "# Map\n\n![Field map](.attachments/map.png)\n";
-  const png = Buffer.from(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
-    "base64",
-  );
-  const input = await new JSZip()
-    .file("Map.md", doc)
-    .file(".attachments/map.png", png)
-    .generateAsync({ type: "nodebuffer" });
-  await writeFile(archive, input);
-  await restart([folder]);
-  await waitForView(
-    "the archive to appear in the folder tree",
-    `return !!document.querySelector('[role=treeitem][aria-label="Notebook.zip"]');`,
-  );
-  await openSettings();
-  await clickPath("//fieldset[@aria-label='Notion import']//button[normalize-space(.)='Install']");
-  await click("Allow access");
-  await click("Close");
-  const chooseFormat = async (label: string) => {
-    await nativeShortcut("ctrl+shift+p");
-    await keyActions(typing("Import / Export"));
-    await shows("Import / Export…");
-    await keyActions(typing(keys.enter));
-    await waitForView(
-      "the format chooser to receive focus",
-      `const select = document.querySelector('dialog[open] select:has(option[value="docx"])');
-       if (!select) return false;
-       select.focus();
-       return document.activeElement === select;`,
-    );
-    await keyActions(typing(label.charAt(0).toLowerCase()));
-    await waitForView(
-      `the ${label} format to be selected`,
-      `return document.querySelector('dialog[open] select:has(option[value="docx"]) option:checked')?.label === ${JSON.stringify(label)};`,
-    );
-  };
-  await chooseFormat("Notion import");
-  await choosePackage("Notion export (.zip)", archive);
-  await chooseNativePath("Import", "^Choose the parent folder for the import$", folder);
-  await click("Open imported folder");
-  await clickPath("//*[@role='treeitem' and @aria-label='Map.md']");
-  const imported = join(folder, "Notebook");
-  assert.equal(await readFile(join(imported, "Map.md"), "utf8"), doc);
-  assert.deepEqual(await readFile(join(imported, ".attachments", "map.png")), png);
-  assert.deepEqual(await readFile(archive), input);
-  const denied = join(imported, "ungranted.png");
-  await symlink("/etc/hosts", denied);
-  await assert.rejects(
-    invokeNative("read_binary_file", { path: denied }),
-    /outside the documents and folders/,
-  );
-  await chooseFormat("DOCX");
-  const out = join(imported, "share.docx");
-  await chooseNativePath("Export", "^Export as DOCX$", out);
-  const bytes = await until("the DOCX on disk", () => readFile(out));
-  const word = await JSZip.loadAsync(bytes);
-  assert.match((await word.file("word/document.xml")?.async("string")) ?? "", /<w:drawing>/);
-  assert.deepEqual(await word.file(/^word\/media\/.+\.png$/i)[0]?.async("nodebuffer"), png);
 });
