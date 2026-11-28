@@ -93,6 +93,16 @@ test("a resumed suggestion remains applicable after edits on both sides of it", 
   await expect(assistant.getByRole("group", { name: "Proposed edit 1 of 1" })).toContainText(
     "Applied",
   );
+  await assistant.getByRole("button", { name: "Revert this edit" }).click();
+  await expect(page.getByRole("tabpanel").nth(0).locator(".cm-content")).toContainText(
+    "The intro target TAIL.",
+  );
+  await expect(page.getByRole("tabpanel").nth(1).locator(".cm-content")).toContainText(
+    "The intro target TAIL.",
+  );
+  await expect(assistant.getByRole("button", { name: "Revert this edit" })).toHaveCount(0);
+  await page.locator(".cm-content").nth(1).press("ControlOrMeta+S");
+  await expect.poll(() => readFile(page, path)).toBe(changed);
 });
 
 test("a writing task resumes decisions, materials and reading position after a restart", async ({

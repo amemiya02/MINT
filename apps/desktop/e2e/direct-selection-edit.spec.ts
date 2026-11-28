@@ -1,5 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
-import { launch, readFile, settingsPath } from "./memory-platform.ts";
+import type { MemoryPlatform } from "../src/platform/memory.ts";
+import { launch, readFile, runMenuItem, settingsPath } from "./memory-platform.ts";
 
 const path = "/notes/quick-edit.md";
 const endpoint = "http://127.0.0.1:9876/v1/chat/completions";
@@ -197,3 +198,105 @@ async function autosaveConcurrentDirectEdit(page: Page, lineBreak: "\n" | "\r\n"
   await changed.getByRole("button", { name: "Revert to selected text" }).click();
   await expect.poll(() => readFile(page, path)).toBe(author);
 }
+
+test("reverting a restored task across turns preserves later manuscript edits", async ({
+  page,
+  browser,
+}) => {
+  const title = "Revise the opening.";
+  const source =
+    "\uFEFFOpening draft.\r\n\r\nMargin note.  \n\nMiddle draft.\r\n\r\nKeep this.\n\nClosing draft.";
+  const applied = source
+    .replace("Opening draft.", "Opening revision.")
+    .replace("Middle draft.", "Middle revision.")
+    .replace("Closing draft.", "Closing revision.");
+  const handEdited = applied.replace("Margin note.", "Author's Margin note.");
+  const author = handEdited.replace("Closing revision.", "Author's closing.");
+  const expected = author
+    .replace("Opening revision.", "Opening draft.")
+    .replace("Middle revision.", "Middle draft.");
+  await page.route(endpoint, (route) => {
+    const { messages } = route.request().postDataJSON();
+    const { instruction } = JSON.parse(messages.at(-1).content);
+    const replacement =
+      instruction === title
+        ? source.replace("Opening draft.", "Opening revision.")
+        : source
+            .replace("Middle draft.", "Middle revision.")
+            .replace("Closing draft.", "Closing revision.");
+    return route.fulfill({ json: replacementReply(replacement.slice(1)) });
+  });
+  await openManuscript(page, source, false);
+  const editor = page.locator(".cm-content");
+  await editor.press("ControlOrMeta+A");
+  await page.getByRole("button", { name: "Ask AI", exact: true }).click();
+  const inline = page.getByRole("region", { name: "Ask AI" });
+  const first = inline.getByRole("textbox", { name: "Instruction" });
+  await first.fill(title);
+  await first.press("Enter");
+  await inline.getByRole("button", { name: "Apply proposed edit", exact: true }).click();
+  await inline.getByRole("button", { name: "Continue in sidebar" }).click();
+  const sidebar = page.getByRole("complementary", { name: "Writing Assistant" });
+  const second = sidebar.getByRole("textbox", { name: "Instruction" });
+  await second.fill("Revise the middle and closing, apply directly");
+  await second.press("Enter");
+  await expect(editor).toContainText("Closing revision.");
+  await expect(sidebar.getByRole("group", { name: "Proposed edit 2 of 2" })).toContainText(
+    "Applied",
+  );
+  await sidebar.getByRole("button", { name: "Close", exact: true }).click();
+  await editor.getByText("Margin note.", { exact: true }).click();
+  await editor.press("Home");
+  await page.keyboard.insertText("Author's ");
+  await editor.press("ControlOrMeta+S");
+  await expect.poll(() => readFile(page, path)).toBe(handEdited);
+  const appData = await page.evaluate(() =>
+    Object.fromEntries(
+      (window as unknown as { __MINT_MEMORY_PLATFORM__: MemoryPlatform }).__MINT_MEMORY_PLATFORM__
+        .appData,
+    ),
+  );
+
+  const rebooted = await browser.newContext();
+  try {
+    const resumed = await rebooted.newPage();
+    await launch(resumed, {
+      locale: "en-US",
+      files: { [path]: author, [settingsPath]: '{"autosave":false}' },
+      openedPaths: [{ path, kind: "file" }],
+      appData,
+    });
+    await runMenuItem(resumed, "view.openInOtherPane");
+    await runMenuItem(resumed, "edit.writingTasks");
+    await resumed.getByRole("button", { name: title, exact: true }).click();
+    const review = resumed.getByRole("complementary", { name: "Writing Assistant" });
+    const revertAll = review.getByRole("button", { name: "Revert all task edits" });
+    await expect(revertAll).toBeVisible();
+    await revertAll.click();
+    const overlap = review.getByRole("group", { name: "Proposed edit 2 of 2" });
+    await expect(overlap.getByText("Author's closing.", { exact: true })).toBeVisible();
+    await expect(overlap.getByRole("button", { name: "Revert to selected text" })).toBeVisible();
+    const panes = resumed.locator(".cm-content");
+    await expect(panes).toHaveCount(2);
+    for (const pane of await panes.all()) {
+      await expect(pane).toContainText("Opening draft.");
+      await expect(pane).toContainText("Middle draft.");
+      await expect(pane).toContainText("Author's Margin note.");
+      await expect(pane).toContainText("Author's closing.");
+    }
+    expect(await readFile(resumed, path)).toBe(author);
+    await panes.last().press("ControlOrMeta+S");
+    await expect.poll(() => readFile(resumed, path)).toBe(expected);
+    await revertAll.click();
+    await panes.last().press("ControlOrMeta+S");
+    await expect.poll(() => readFile(resumed, path)).toBe(expected);
+    const keep = overlap.getByRole("button", { name: "Keep current text" });
+    await expect(keep).toBeVisible();
+    await keep.click();
+    await expect(overlap).toContainText("Kept the current text.");
+    await expect(revertAll).toHaveCount(0);
+    expect(await readFile(resumed, path)).toBe(expected);
+  } finally {
+    await rebooted.close();
+  }
+});

@@ -1460,14 +1460,10 @@ test("a native model receives only the sample or live selection and edits throug
       "only the independent direct edits to autosave with the original BOM and CRLF",
       async () => (await readFile(draft)).equals(mergedBytes) || null,
     ).catch(explain);
-    await click("View changes");
     await waitForView(
-      "the author's middle line to remain available for comparison",
-      `const conflict = document.querySelector('[aria-label="Proposed edit 2 of 3"]');
-       return conflict?.innerText.includes("Author's middle line.") &&
-         [...conflict.querySelectorAll('button')].some((button) => button.textContent.trim() === 'Apply to compared text');`,
+      "the author to retain editor focus after the direct edits",
+      "return document.activeElement?.matches('.cm-content');",
     );
-    await clickPath("//aside[@aria-label='Writing Assistant']//button[normalize-space(.)='Close']");
     await keyActions(chord(keys.control, "z"));
     await until(
       "one undo to autosave the precise author-edited baseline",
@@ -1478,6 +1474,21 @@ test("a native model receives only the sample or live selection and edits throug
       "redo to autosave the precise merged bytes",
       async () => (await readFile(draft)).equals(mergedBytes) || null,
     ).catch(explain);
+    await clickPath(
+      "//section[@aria-label='Ask AI']//button[normalize-space(.)='Undo direct edits']",
+    );
+    await until(
+      "reverting from the completion notice to autosave the precise author-edited baseline",
+      async () => (await readFile(draft)).equals(authorBytes) || null,
+    ).catch(explain);
+    await click("View changes");
+    await waitForView(
+      "the author's middle line to remain available for comparison",
+      `const conflict = document.querySelector('[aria-label="Proposed edit 2 of 3"]');
+       return conflict?.innerText.includes("Author's middle line.") &&
+         [...conflict.querySelectorAll('button')].some((button) => button.textContent.trim() === 'Apply to compared text');`,
+    );
+    await clickPath("//aside[@aria-label='Writing Assistant']//button[normalize-space(.)='Close']");
 
     const reviewSource = "**Opening line.**\r\n\r\nKeep this.  \n\nClosing line.";
     await writeFile(draft, `\uFEFF${reviewSource}`);
@@ -1739,6 +1750,32 @@ test("a saved writing review resumes after a native restart without contacting i
       await invokeNative<number[]>("list_versions", { path: renamedDraft }),
       history,
     );
+    const overlapping = changed.replace("First edit.", "Author's first edit.");
+    await writeFile(renamedDraft, overlapping);
+    await waitForView(
+      "the later author edit to load from disk",
+      `return document.querySelector('.cm-content')?.textContent.includes("Author's first edit.");`,
+    );
+    await click("Open renamed-writing-review.md in other pane", "aria-label");
+    await click("Writing tasks");
+    await click(instruction);
+    const first = "//fieldset[@aria-label='Proposed edit 1 of 4']";
+    await clickPath(`${first}//button[normalize-space(.)='Revert to selected text']`);
+    await waitForView(
+      "both native panes to show the chosen reversion and preserve the external edit",
+      `const panes = [...document.querySelectorAll('.cm-content')];
+      return panes.length === 2 && panes.every(pane =>
+        pane.textContent.includes('First draft.') && pane.textContent.includes('External third.'));`,
+    );
+    await clickPath("//aside[@aria-label='Writing Assistant']//button[normalize-space(.)='Close']");
+    await nativeShortcut("ctrl+s");
+    await until(
+      "reverting an accepted proposal from the restored task to preserve the external edit",
+      async () =>
+        (await readFile(renamedDraft, "utf8")) === changed.replace("First edit.", "First draft.") ||
+        null,
+    ).catch(explain);
+    assert.equal(requests.length, 1);
   } finally {
     try {
       if (connectionId && session)
