@@ -1147,6 +1147,110 @@ test("a model trial sends only the visible sample and shows native streaming rep
   }
 });
 
+test("a native model reply stays editable and untitled until the author chooses a Save As path", async () => {
+  const folder = await mkdtemp(join(homedir(), "mint-ai-draft-"));
+  const path = join(folder, "field-notes.md");
+  const instruction = "Draft an introduction for the field notes.";
+  const generated = "Field notes from the ridge.";
+  const requests: unknown[] = [];
+  const endpoint = createServer(async (request, response) => {
+    let input = "";
+    for await (const chunk of request) input += chunk;
+    requests.push({
+      path: request.url,
+      method: request.method,
+      authorization: request.headers.authorization,
+      body: JSON.parse(input),
+    });
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end(
+      JSON.stringify({ choices: [{ message: { content: generated }, finish_reason: "stop" }] }),
+    );
+  });
+
+  const draftMatches = (text: string) =>
+    command<boolean>("POST", `/session/${session}/execute/sync`, {
+      script: `const [text] = arguments;
+        const tab = document.querySelector('[role=tab][aria-selected=true]');
+        const editor = document.getElementById(tab?.getAttribute('aria-controls'))?.querySelector('.cm-content');
+        return tab?.textContent === 'Untitled' && editor?.textContent === text;`,
+      args: [text],
+    }).then((ready) => ready || null);
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      endpoint.once("error", reject);
+      endpoint.listen(0, "127.0.0.1", resolve);
+    });
+    const address = endpoint.address();
+    assert.ok(address && typeof address !== "string");
+    await restart([document]);
+    await until("the original manuscript to open", () =>
+      command<boolean>("POST", `/session/${session}/execute/sync`, {
+        script: "return !!document.querySelector('.cm-content')",
+        args: [],
+      }).then((ready) => ready || null),
+    ).catch(explain);
+    await nativeShortcut("ctrl+n");
+    await click("Draft with AI");
+
+    for (const [label, value] of [
+      ["API address", `http://127.0.0.1:${address.port}/v1`],
+      ["Model name", "native-draft-fixture"],
+      ["API key (optional, for this draft)", "draft-fixture-secret"],
+      ["Drafting instruction", instruction],
+    ] as const) {
+      await clickPath(`//form//label[normalize-space(.)='${label}']/input`);
+      await keyActions(typing(value));
+    }
+    await clickPath("//form//button[not(@disabled) and normalize-space(.)='Generate draft']");
+    await until("the generated Markdown in the untitled editor", () =>
+      draftMatches(generated),
+    ).catch(explain);
+    assert.deepEqual(requests, [
+      {
+        path: "/v1/chat/completions",
+        method: "POST",
+        authorization: "Bearer draft-fixture-secret",
+        body: {
+          model: "native-draft-fixture",
+          messages: [
+            {
+              role: "user",
+              content: `Write a Markdown draft following this instruction. Return only the draft text, without a surrounding code fence.\n\n${instruction}`,
+            },
+          ],
+          stream: false,
+        },
+      },
+    ]);
+
+    async function saveWith(action: "Cancel" | "Save") {
+      await Promise.all([
+        nativeShortcut("ctrl+s"),
+        exec("/usr/bin/python3", ["smoke/choose-gtk-path.py", "Save As", path, action], {
+          timeout: 60_000,
+        }),
+      ]);
+    }
+    await saveWith("Cancel");
+    await until("the draft to remain after the save is cancelled", () =>
+      draftMatches(generated),
+    ).catch(explain);
+    assert.deepEqual(await readdir(folder), []);
+    await clickPath("//*[@role='tabpanel' and not(@hidden)]//*[@contenteditable='true']");
+    await keyActions([...typing(keys.end), ...typing(" Author's addition.")]);
+    const edited = `${generated} Author's addition.`;
+    await until("the author's addition in the draft", () => draftMatches(edited)).catch(explain);
+    await saveWith("Save");
+    assert.equal(await until("the saved draft", () => readFile(path, "utf8")), edited);
+  } finally {
+    endpoint.closeAllConnections();
+    await new Promise<void>((resolve) => endpoint.close(() => resolve()));
+    await rm(folder, { recursive: true, force: true });
+  }
+});
+
 const credentialPolicy = process.env.MINT_SMOKE_CREDENTIAL_POLICY;
 test("model keys survive a restart only when remembered and disconnect removes the OS credential", {
   skip: !credentialPolicy && "requires the hosted smoke suite's isolated Secret Service",
@@ -1515,6 +1619,40 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   await click("Try example");
   await shows("Fixture Agent reply.");
   assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, 3);
+  await click("Close");
+  await nativeShortcut("ctrl+n");
+  await click("Draft with AI");
+  await until("the approved Agent to appear as a draft recipient", () =>
+    command<boolean>("POST", `/session/${session}/execute/sync`, {
+      script: `const select = document.querySelector('main form select');
+        const option = Array.from(select?.options ?? []).find(option => option.label === arguments[0]);
+        if (!option) return false;
+        select.value = option.value;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;`,
+      args: [path],
+    }).then((ready) => ready || null),
+  ).catch(explain);
+  await clickPath("//label[normalize-space(.)='Drafting instruction']/input");
+  await keyActions(typing("Draft one paragraph about the ridge."));
+  await clickPath("//button[not(@disabled) and normalize-space(.)='Generate draft']");
+  await until("the completed Agent reply in the draft editor", () =>
+    command<boolean>("POST", `/session/${session}/execute/sync`, {
+      script: `return document.querySelector('.cm-content:focus')?.textContent === 'Fixture Agent reply.'
+        && document.querySelector('[role=tab][aria-selected=true]')?.textContent === 'Untitled';`,
+      args: [],
+    }).then((ready) => ready || null),
+  ).catch(explain);
+  const draftCall = JSON.parse((await readFile(calls, "utf8")).trim().split("\n").at(-1) ?? "");
+  assert.deepEqual(draftCall.prompt, {
+    instruction:
+      "Write a Markdown draft following this instruction. Return only the draft text, without a surrounding code fence.\n\nDraft one paragraph about the ridge.",
+  });
+  assert.deepEqual(draftCall.entries, []);
+  assert.equal(await readFile(draft, "utf8"), initial);
+
+  await openSettings();
+  await click("External Agents");
   await writeFile(
     executable,
     `${await readFile(executable, "utf8")}
@@ -1523,7 +1661,7 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   );
   await click("Try example");
   await shows("Agent access changed. Review its permissions before sending.");
-  assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, 3);
+  assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, 4);
   await click("Try example");
   await click("Decline");
   await shows("Agent access declined.");
