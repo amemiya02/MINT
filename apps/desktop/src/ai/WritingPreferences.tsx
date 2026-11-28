@@ -132,11 +132,13 @@ export function AppliedWritingPreferences({
 export function WritingPreferences({
   preferences,
   openRequest,
+  onOpened,
   correction,
   disabled,
 }: {
   readonly preferences: ReturnType<typeof useWritingPreferences>;
   readonly openRequest?: object | null;
+  readonly onOpened?: () => void;
   readonly correction?: string;
   readonly disabled?: boolean;
 }) {
@@ -153,7 +155,8 @@ export function WritingPreferences({
     if (!openRequest || !editor.current) return;
     editor.current.open = true;
     topicInput.current?.focus();
-  }, [openRequest]);
+    onOpened?.();
+  }, [onOpened, openRequest]);
 
   async function remember() {
     if (!topic.trim() || !guidance.trim() || !preferences.available) return;

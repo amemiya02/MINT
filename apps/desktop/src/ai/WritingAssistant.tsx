@@ -286,6 +286,7 @@ export function WritingAssistant({
   const [restored, setRestored] = useState<RestoredReview | null>(null);
   const taskRunning = useRef(false);
   const [preferenceRequest, setPreferenceRequest] = useState<object | null>(null);
+  const clearPreferenceRequest = useCallback(() => setPreferenceRequest(null), []);
   const [placement, setPlacement] = useState<"inline" | "sidebar" | null>(null);
   const [reviewStart, setReviewStart] = useState<{ id: string; returnToTab: number } | null>(null);
   const [hasSavedTasks, setHasSavedTasks] = useState(false);
@@ -454,6 +455,7 @@ export function WritingAssistant({
           name={name}
           placement={placement}
           preferenceRequest={preferenceRequest}
+          onPreferenceOpened={clearPreferenceRequest}
           reviewStart={reviewStart?.id === origin.id ? reviewStart : null}
           setPlacement={setPlacement}
           active={active}
@@ -491,6 +493,7 @@ function Composer({
   name,
   placement,
   preferenceRequest,
+  onPreferenceOpened,
   reviewStart,
   setPlacement,
   taskRunning,
@@ -533,6 +536,7 @@ function Composer({
   readonly onBusyChange: (id: string | null) => void;
   readonly placement: "inline" | "sidebar" | null;
   readonly preferenceRequest: object | null;
+  readonly onPreferenceOpened: () => void;
   readonly reviewStart: { readonly returnToTab: number } | null;
   readonly taskRunning: { current: boolean };
   readonly setPlacement: (placement: "inline" | "sidebar" | null) => void;
@@ -920,8 +924,8 @@ function Composer({
     };
   }, [platform, settingsOpen]);
 
-  useEffect(() => {
-    if (!placement || !isActive.current || settingsOpen) return;
+  const focusComposer = useEffectEvent((restored: RestoredReview | null) => {
+    if (preferenceRequest) return;
     if (openingChanges.current) {
       heading.current?.focus();
       openingChanges.current = false;
@@ -930,6 +934,9 @@ function Composer({
     } else {
       input.current?.focus();
     }
+  });
+  useEffect(() => {
+    if (placement && isActive.current && !settingsOpen) focusComposer(restored);
   }, [placement, restored, settingsOpen]);
 
   function viewChanges() {
@@ -3010,6 +3017,7 @@ function Composer({
             <WritingPreferences
               preferences={preferences}
               openRequest={preferenceRequest}
+              onOpened={onPreferenceOpened}
               correction={skill.id ? skill.instruction : instruction || latest?.instruction}
             />
             <WritingToolPicker picker={toolPicker} />
