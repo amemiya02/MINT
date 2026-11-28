@@ -101,6 +101,8 @@ interface Task {
   readonly scope: Scope;
   readonly searchFolder: string | null;
   readonly seen: Set<string>;
+  readonly alternativeTo?: string;
+  readonly fixedRequests?: readonly WritingRequest[];
   readonly rewrite?: { index: number; position: number; current: string };
 }
 
@@ -298,11 +300,24 @@ export function WritingAssistant({
       return;
     }
     const mapper = mapReviewRanges(task.baseline, editor.getText());
+    const location = mapper.range(task.origin);
+    const range = restoreRange(editor, location);
+    const selectionMapper = mapReviewRanges(
+      task.origin.text,
+      editor.getText().slice(location.from, location.to),
+    );
     setOrigin({
       id: task.id,
       editor,
       text: task.origin.text,
-      range: restoreRange(editor, mapper.range(task.origin)),
+      range: {
+        ...range,
+        trackSubrange(part) {
+          const mapped = selectionMapper.range({ ...part, located: location.located });
+          const subrange = range.trackSubrange(mapped);
+          return { ...subrange, hasBoundaries: () => mapped.located && subrange.hasBoundaries() };
+        },
+      },
       folder: task.folder,
     });
     setRestored({ task, mapper, restoreReading: returnToTab === undefined });
@@ -452,7 +467,9 @@ function Composer({
   const [includeHistory, setIncludeHistory] = useState(true);
   const [recipients, setRecipients] = useState<readonly WritingRecipient[]>([]);
   const [recipientId, setRecipientId] = useState<string | null>(
-    restored?.task.pending?.recipientId ?? restored?.task.turns.at(-1)?.recipientId ?? null,
+    (restored?.task.pending?.alternativeTo ? undefined : restored?.task.pending?.recipientId) ??
+      restored?.task.turns.findLast((turn) => !turn.alternativeTo)?.recipientId ??
+      null,
   );
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -468,6 +485,8 @@ function Composer({
   const [saveFailed, setSaveFailed] = useState(false);
   const [attempt, setAttempt] = useState<Attempt | null>(null);
   const [retryId, setRetryId] = useState("");
+  const [baselineId, setBaselineId] = useState<string | null>(null);
+  const [comparisonId, setComparisonId] = useState<string | null>(null);
   const controller = useRef<AbortController | null>(null);
   const busy = attempt?.status === "working" || attempt?.status === "approval";
   const store = useTabStore();
@@ -484,6 +503,8 @@ function Composer({
   const mounted = useRef(true);
   const isActive = useRef(active);
   isActive.current = active;
+  const isVisible = useRef(false);
+  isVisible.current = active && !!placement;
   const checkingDisk = useRef(false);
   const trackedSuggestions = useRef(new Set<TrackedRange>());
   const [showSource, setShowSource] = useState(restored?.task.showSource ?? false);
@@ -1152,13 +1173,15 @@ function Composer({
       }
     }
     const history = includeHistory
-      ? turns.flatMap(({ status, instruction, reply, suggestions }) => [
-          ...((status ?? "complete") === "complete" && reply ? [{ instruction, reply }] : []),
-          ...(suggestions?.flatMap(
-            ({ comments }) =>
-              comments?.map(({ instruction, reply }) => ({ instruction, reply })) ?? [],
-          ) ?? []),
-        ])
+      ? turns
+          .filter(({ alternativeTo }) => !alternativeTo)
+          .flatMap(({ status, instruction, reply, suggestions }) => [
+            ...((status ?? "complete") === "complete" && reply ? [{ instruction, reply }] : []),
+            ...(suggestions?.flatMap(
+              ({ comments }) =>
+                comments?.map(({ instruction, reply }) => ({ instruction, reply })) ?? [],
+            ) ?? []),
+          ])
       : [];
     const task: Task = {
       plan: capacity.plan,
@@ -1195,7 +1218,10 @@ function Composer({
   ) {
     if (controller.current || checkingDisk.current) return false;
     if (
-      hasTaskImages(...(task.plan?.contexts ?? [task.request.taskContext])) &&
+      hasTaskImages(
+        ...(task.fixedRequests?.map(({ taskContext }) => taskContext) ??
+          task.plan?.contexts ?? [task.request.taskContext]),
+      ) &&
       !visionFor(connection)?.verified
     ) {
       setError("visionRequired");
@@ -1209,6 +1235,8 @@ function Composer({
     const recipient = labelFor(connection);
     const entry = { id: crypto.randomUUID(), task, recipientId: connection.id, recipient };
     const submitted = {
+      id: entry.id,
+      alternativeTo: task.alternativeTo,
       instruction: task.request.instruction,
       material: task.request.selectedText ?? task.request.taskContext?.currentDraft?.text,
       context: task.request.taskContext,
@@ -1222,7 +1250,9 @@ function Composer({
     let status: AttemptStatus;
     let finalReplacement: string | undefined;
     let capacityRejected = false;
+    const dispatched: WritingRequest[] = [];
     setRetryId("");
+    setBaselineId(null);
     setError(null);
     setAttempt({ ...entry, approved, status: "working", partial: "" });
 
@@ -1269,6 +1299,10 @@ function Composer({
           signal,
           plan: task.plan,
           tool,
+          fixedRequests: task.fixedRequests,
+          onDispatch: (request, batch) => {
+            dispatched[batch] = request;
+          },
           onContext: (context) => {
             sentContext = context;
             pending.current = { ...submitted, context };
@@ -1372,6 +1406,10 @@ function Composer({
         ...previous,
         {
           ...submitted,
+          baseline:
+            status === "complete" && dispatched.length
+              ? { scope: task.scope, requests: dispatched }
+              : undefined,
           context: sentContext,
           toolOutcome: toolApproval.result(),
           reply: rewrite ? "" : status === "complete" ? (replacement ?? text) : (replacement ?? ""),
@@ -1392,6 +1430,10 @@ function Composer({
     });
     controller.current = null;
     taskRunning.current = false;
+    if (status === "complete" && task.alternativeTo && isVisible.current) {
+      setPlacement("sidebar");
+      setComparisonId(entry.id);
+    }
     return status === "complete";
   }
 
@@ -1645,6 +1687,17 @@ function Composer({
             {t("writing.edit.undoDirect")}
           </button>
         )}
+        {latest.baseline && latest.id && recipients.some(({ id }) => id !== latest.recipientId) && (
+          <button
+            type="button"
+            className={buttonClass}
+            onClick={() => {
+              if (latest.id) openBaseline(latest.id);
+            }}
+          >
+            {t("writing.compare.retry")}
+          </button>
+        )}
         <button type="button" className={buttonClass} onClick={close}>
           {closeLabel}
         </button>
@@ -1700,494 +1753,728 @@ function Composer({
     );
   }
 
-  return (
-    <Container
-      ref={review}
-      tabIndex={-1}
-      aria-label={t(sidebar ? "writing.title" : "writing.ask")}
-      className={`z-10 flex flex-col gap-3 overflow-auto border border-(--mint-border) bg-(--mint-bg) p-3 text-sm ${
-        sidebar
-          ? "min-h-0 min-w-0 border-r-0 border-b-0"
-          : "absolute right-3 bottom-3 max-h-[70%] w-[min(36rem,calc(100%-1.5rem))] rounded-lg shadow-lg"
-      }`}
-      onKeyDown={(event) => {
-        if (event.key === "Escape" && !confirmTemporaryClose && !event.nativeEvent.isComposing) {
-          event.stopPropagation();
-          close();
-        }
-      }}
-      onScroll={(event) => {
-        if (event.target !== event.currentTarget) return;
-        reviewScroll.current = event.currentTarget.scrollTop;
-        queueReadingSave();
-      }}
-    >
-      <header className="flex flex-wrap items-center justify-between gap-2">
-        <span ref={heading} tabIndex={-1} className="font-medium">
-          {t(sidebar ? "writing.title" : "writing.ask")}
-        </span>
-        <div className="flex gap-2">
-          {temporary && <span className="self-center text-xs">{t("writing.temporary.label")}</span>}
-          {title && !temporary && (
-            <button type="button" className={buttonClass} onClick={onTasks}>
-              {t("writing.tasks")}
-            </button>
-          )}
-          <button type="button" className={buttonClass} onClick={close}>
-            {closeLabel}
-          </button>
-        </div>
-      </header>
-      {sidebar && (
-        <>
-          <span className="wrap-anywhere">
-            {origin.folder ? t("writing.tasks.folder", { folder: origin.folder }) : name}
-          </span>
-          {!origin.folder && origin.text && (
-            <>
-              <button type="button" className={buttonClass} onClick={locate}>
-                {t("writing.locate")}
-              </button>
-              <pre className="max-h-24 overflow-auto whitespace-pre-wrap wrap-anywhere rounded bg-(--mint-hover) p-2">
-                {origin.text}
-              </pre>
-            </>
-          )}
-        </>
-      )}
-      {taskEdits.some((suggestion) => isApplied(suggestion, draft)) && (
-        <button
-          type="button"
-          className={`${buttonClass} self-start`}
-          disabled={busy}
-          onClick={() => void revertEdits(taskEdits)}
-        >
-          {t("writing.edit.revertAll")}
-        </button>
-      )}
-      {sidebar && attempt && (
-        <WritingTaskMaterials
-          request={attempt.task.request}
-          approved={attempt.approved}
-          folder={attempt.task.searchFolder}
-        />
-      )}
-      {messages.some((turn) => turn.suggestions?.length) && (
-        <div className="flex flex-wrap items-center gap-2">
-          <button type="button" className={buttonClass} onClick={() => openFocusedReview()}>
-            {t("writing.review.title")}
-          </button>
-          <label className="flex items-center gap-1">
-            <input
-              type="checkbox"
-              checked={showSource}
-              onChange={(event) => setShowSource(event.target.checked)}
-            />
-            {t("writing.edit.source")}
-          </label>
-        </div>
-      )}
-      <div aria-live="polite" className="space-y-2">
-        {messages.map((turn, position) => {
-          const index = sidebar ? position : turns.length - 1;
-          const canRewrite = !loading && recipients.some(({ id }) => id === turn.recipientId);
-          const { suggestions } = turn;
-          return (
-            <article key={index} className="space-y-1">
-              {sidebar && (
-                <details className="wrap-anywhere">
-                  <summary>{turn.instruction}</summary>
-                  <p>{turn.recipient}</p>
-                  {turn.material !== undefined && (
-                    <pre className="max-h-24 overflow-auto whitespace-pre-wrap wrap-anywhere">
-                      {turn.material}
-                    </pre>
-                  )}
-                </details>
-              )}
-              {sidebar && renderSentContext(turn.context, turn.searchFolder)}
-              <WritingToolOutcome outcome={turn.toolOutcome} />
-              {suggestions?.length ? (
-                suggestions.map((suggestion, position) => {
-                  const status = reviewStatus(suggestion, draft);
-                  const pending = status === "preview";
-                  const revertible = !pending && canRevert(suggestion);
-                  const current = pending || revertible ? currentText(suggestion, draft) : "";
-                  const conflict = pending && current !== suggestion.before;
-                  const located = suggestion.range.hasBoundaries();
-                  const reverted = revertible && located && current === suggestion.before;
-                  const revertConflict =
-                    revertible && !reverted && (!located || current !== suggestion.appliedText);
-                  const blocked = externalChange ? "disk" : !located ? "boundaries" : undefined;
-                  return (
-                    <ProposedSelectionEdit
-                      key={suggestion.id}
-                      label={t("writing.edit.position", {
-                        index: String(position + 1),
-                        total: String(suggestions.length),
-                      })}
-                      before={suggestion.before}
-                      after={suggestion.appliedText ?? suggestion.after}
-                      status={reverted ? "reverted" : status}
-                      showAppliedComparison={revertible}
-                      source={showSource}
-                      current={conflict || revertConflict ? current : undefined}
-                      blocked={pending || (revertible && !reverted) ? blocked : undefined}
-                      busy={busy}
-                      recipient={turn.recipient}
-                      conversation={
-                        <>
-                          {suggestion.note && (
-                            <p className="whitespace-pre-wrap wrap-anywhere">{suggestion.note}</p>
-                          )}
-                          {suggestion.comments?.map(({ id, instruction, reply }) => (
-                            <div key={id} className="rounded bg-(--mint-hover) p-2">
-                              <p className="font-medium">{instruction}</p>
-                              {renderReplyExcerpt(reply)}
-                            </div>
-                          ))}
-                        </>
-                      }
-                      onApply={
-                        blocked || !pending
-                          ? undefined
-                          : () => void decide(index, position, suggestion, current)
-                      }
-                      onDiscard={
-                        pending ? () => void decide(index, position, suggestion) : undefined
-                      }
-                      onRestore={
-                        status === "discarded"
-                          ? () => updateSuggestion(index, position, { status: "preview" })
-                          : undefined
-                      }
-                      onRevert={
-                        revertible && !reverted && !blocked
-                          ? () => void revertEdits([suggestion], current)
-                          : undefined
-                      }
-                      onKeepCurrent={
-                        revertConflict ? () => keepCurrent(suggestion.range) : undefined
-                      }
-                      onRewrite={
-                        blocked || !pending || !canRewrite
-                          ? undefined
-                          : (prompt) => rewrite(index, position, turn, suggestion, current, prompt)
-                      }
-                    />
-                  );
-                })
-              ) : suggestions ? (
-                <p>{t("writing.edit.unchanged")}</p>
-              ) : null}
-              {turn.partial && (
-                <div>
-                  <p>{t("writing.task.partial")}</p>
-                  <pre className="whitespace-pre-wrap wrap-anywhere">{turn.partial}</pre>
-                </div>
-              )}
-              {!!turn.sourcePassages?.length && (
-                <SourcePassageReview
-                  draft={turn.reply}
-                  passages={turn.sourcePassages}
-                  editor={turn.direct ? origin.editor : undefined}
-                  context={turn.context}
-                  platform={platform}
-                  recipients={recipients.map((recipient) => ({
-                    ...recipient,
-                    label: labelFor(recipient),
-                    agentAccess: recipient.kind === "agent" ? recipient.access : undefined,
-                  }))}
-                  originalRecipient={turn.recipientId}
-                />
-              )}
-              {!!turn.reply && renderReplyExcerpt(turn.reply, suggestions !== undefined)}
-            </article>
-          );
-        })}
-        {sidebar && restored && pending.current && !busy && (
-          <article className="space-y-1">
-            <p>{pending.current.instruction}</p>
-            <p>{pending.current.recipient}</p>
-            {pending.current.material !== undefined && (
-              <pre className="max-h-24 overflow-auto whitespace-pre-wrap wrap-anywhere">
-                {pending.current.material}
-              </pre>
-            )}
-            {renderSentContext(pending.current.context, pending.current.searchFolder)}
-          </article>
-        )}
-        {attempt?.status === "working" && (
-          <>
-            <p>{t("writing.task.working")}</p>
-            {progress.partial && (
-              <pre className="whitespace-pre-wrap wrap-anywhere">{progress.partial}</pre>
-            )}
-          </>
-        )}
-        {canRetry && <p role="status">{t(`writing.task.${attempt.status}`)}</p>}
-      </div>
-      {(attempt?.status === "working" || attempt?.status === "approval") && (
-        <button type="button" className={buttonClass} onClick={stop}>
-          {t("writing.task.stop")}
-        </button>
-      )}
-      {canRetry && (
-        <div className="flex flex-wrap items-end gap-2">
-          {retryHasImages && sameVision && !sameVision.verified && (
-            <VisionControl check={sameVision} />
-          )}
-          <button
-            type="button"
-            className={buttonClass}
-            disabled={!sameConnection || busy || (retryHasImages && !sameVision?.verified)}
-            onClick={() => sameConnection && void runTask(attempt.task, sameConnection)}
-          >
-            {t("writing.task.retry")}
-          </button>
-          <p className="basis-full text-xs text-(--mint-muted)">
-            {[
-              t(`writing.scope.${attempt.task.scope}`),
-              ...writingMaterialNames(attempt.task.request),
-              attempt.task.searchFolder,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-          </p>
-          {recipients.some(({ id }) => id !== attempt.recipientId) && (
-            <>
-              <label className="grid gap-1">
-                {t("writing.task.retryConnection")}
-                <select
-                  className={fieldClass}
-                  value={retryId}
-                  onChange={(event) => setRetryId(event.target.value)}
-                >
-                  <option value="">{t("writing.chooseRecipient")}</option>
-                  {recipients
-                    .filter(({ id }) => id !== attempt.recipientId)
-                    .map((candidate) => (
-                      <option key={candidate.id} value={candidate.id}>
-                        {labelFor(candidate)}
-                      </option>
+  function renderTurnContent(turn: Turn, index: number, inComparison = false) {
+    const canRewrite = !loading && recipients.some(({ id }) => id === turn.recipientId);
+    const { suggestions } = turn;
+    return (
+      <>
+        <WritingToolOutcome outcome={turn.toolOutcome} />
+        {suggestions?.length ? (
+          suggestions.map((suggestion, position) => {
+            const status = reviewStatus(suggestion, draft);
+            const pending = status === "preview";
+            const revertible = !pending && canRevert(suggestion);
+            const current = pending || revertible ? currentText(suggestion, draft) : "";
+            const conflict = pending && current !== suggestion.before;
+            const located = suggestion.range.hasBoundaries();
+            const reverted = revertible && located && current === suggestion.before;
+            const revertConflict =
+              revertible && !reverted && (!located || current !== suggestion.appliedText);
+            const blocked = externalChange ? "disk" : !located ? "boundaries" : undefined;
+            return (
+              <ProposedSelectionEdit
+                key={suggestion.id}
+                label={t("writing.edit.position", {
+                  index: String(position + 1),
+                  total: String(suggestions.length),
+                })}
+                before={suggestion.before}
+                after={suggestion.appliedText ?? suggestion.after}
+                status={reverted ? "reverted" : status}
+                showAppliedComparison={revertible}
+                source={showSource}
+                current={conflict || revertConflict ? current : undefined}
+                blocked={pending || (revertible && !reverted) ? blocked : undefined}
+                busy={busy}
+                recipient={turn.recipient}
+                conversation={
+                  <>
+                    {suggestion.note && (
+                      <p className="whitespace-pre-wrap wrap-anywhere">{suggestion.note}</p>
+                    )}
+                    {suggestion.comments?.map(({ id, instruction, reply }) => (
+                      <div key={id} className="rounded bg-(--mint-hover) p-2">
+                        <p className="font-medium">{instruction}</p>
+                        {renderReplyExcerpt(reply)}
+                      </div>
                     ))}
-                </select>
-              </label>
-              {attempt.task.plan && otherConnection && (
-                <MaterialPlanPreview
-                  plan={attempt.task.plan}
-                  recipient={labelFor(otherConnection)}
-                />
-              )}
-              {retryHasImages && otherVision && <VisionControl check={otherVision} />}
-              {retryHasImages && otherConnection && !otherVision && (
-                <p role="alert">{t("materials.visionRequired")}</p>
-              )}
-              <button
-                type="button"
-                className={buttonClass}
-                disabled={!otherConnection || busy || (retryHasImages && !otherVision?.verified)}
-                onClick={() => otherConnection && void runTask(attempt.task, otherConnection)}
-              >
-                {t("writing.task.retryOther")}
-              </button>
-            </>
-          )}
-        </div>
-      )}
-      {error && (
-        <p role="alert">
-          {t(
-            error === "agentChanged"
-              ? "agent.reviewAgain"
-              : error === "visionRequired"
-                ? "materials.visionRequired"
-                : `writing.${error}`,
-          )}
-        </p>
-      )}
-      {saveFailed && <p role="alert">{t("writing.tasks.saveFailed")}</p>}
-      {!sidebar && turns.length > 0 && !attempt?.capacityRejected ? (
+                  </>
+                }
+                onApply={
+                  blocked || !pending
+                    ? undefined
+                    : () => void decide(index, position, suggestion, current, inComparison)
+                }
+                onDiscard={pending ? () => void decide(index, position, suggestion) : undefined}
+                onRestore={
+                  status === "discarded"
+                    ? () => updateSuggestion(index, position, { status: "preview" })
+                    : undefined
+                }
+                onRevert={
+                  revertible && !reverted && !blocked
+                    ? () => void revertEdits([suggestion], current)
+                    : undefined
+                }
+                onKeepCurrent={revertConflict ? () => keepCurrent(suggestion.range) : undefined}
+                onRewrite={
+                  blocked || !pending || !canRewrite
+                    ? undefined
+                    : (prompt) => rewrite(index, position, turn, suggestion, current, prompt)
+                }
+              />
+            );
+          })
+        ) : suggestions ? (
+          <p>{t("writing.edit.unchanged")}</p>
+        ) : null}
+        {turn.partial && (
+          <div>
+            <p>{t("writing.task.partial")}</p>
+            <pre className="whitespace-pre-wrap wrap-anywhere">{turn.partial}</pre>
+          </div>
+        )}
+        {!!turn.sourcePassages?.length && (
+          <SourcePassageReview
+            draft={turn.reply}
+            passages={turn.sourcePassages}
+            editor={turn.direct ? origin.editor : undefined}
+            context={turn.context}
+            platform={platform}
+            recipients={recipients.map((recipient) => ({
+              ...recipient,
+              label: labelFor(recipient),
+              agentAccess: recipient.kind === "agent" ? recipient.access : undefined,
+            }))}
+            originalRecipient={turn.recipientId}
+          />
+        )}
+        {!!turn.reply && renderReplyExcerpt(turn.reply, suggestions !== undefined)}
+      </>
+    );
+  }
+
+  function openBaseline(id: string) {
+    setRetryId("");
+    setBaselineId((previous) => (previous === id ? null : id));
+    viewChanges();
+  }
+
+  function renderBaselineRetry(turn: Turn) {
+    if (
+      !turn.id ||
+      !turn.baseline ||
+      turn.alternativeTo ||
+      !recipients.some(({ id }) => id !== turn.recipientId)
+    )
+      return null;
+    const { id, baseline } = turn;
+    const connection = recipients.find(({ id }) => id === retryId && id !== turn.recipientId);
+    const first = baseline.requests[0];
+    const hasImages = hasTaskImages(...baseline.requests.map(({ taskContext }) => taskContext));
+    const check = visionFor(connection);
+    return (
+      <>
         <button
           type="button"
-          className={`${buttonClass} self-start`}
-          onClick={() => setPlacement("sidebar")}
+          className={buttonClass}
+          disabled={busy || loading}
+          aria-expanded={baselineId === id}
+          onClick={() => openBaseline(id)}
         >
-          {t("writing.continue")}
+          {t("writing.compare.retry")}
         </button>
-      ) : (
-        <form
-          onSubmit={(event) => void submit(event)}
-          onPaste={busy ? undefined : materialDropHandlers(named).onPaste}
-          className="space-y-2"
-        >
-          <fieldset
-            disabled={busy}
-            className={pendingApproval ? "hidden" : "flex min-w-0 flex-col gap-2"}
-          >
+        {baselineId === id && sidebar && first && (
+          <fieldset className="min-w-0 space-y-2 rounded border border-(--mint-border) p-2">
+            <legend>{t("writing.compare.retry")}</legend>
+            <p className="whitespace-pre-wrap wrap-anywhere">{turn.instruction}</p>
             <label className="grid gap-1">
-              {t("agent.instruction")}
-              <input
-                ref={input}
+              {t("writing.task.retryConnection")}
+              <select
                 className={fieldClass}
-                value={instruction}
-                onChange={(event) => setInstruction(event.target.value)}
-              />
-            </label>
-            <div className="flex flex-wrap items-end gap-2">
-              <label className="grid gap-1">
-                {t("writing.action")}
-                <select
-                  className={fieldClass}
-                  value={action}
-                  onChange={(event) => setActionOverride(event.target.value as Action)}
-                >
-                  {actions.map((id) => (
-                    <option
-                      key={id}
-                      value={id}
-                      disabled={scope !== "selection" && id !== "comment"}
-                    >
-                      {t(`writing.${id}`)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="grid gap-1">
-                {t("writing.scope")}
-                <select
-                  className={fieldClass}
-                  value={scope}
-                  onChange={(event) => setScope(event.target.value as Scope)}
-                >
-                  {(origin.folder ? (["folder"] as const) : scopes).map((id) => (
-                    <option key={id} value={id}>
-                      {t(`writing.scope.${id}`)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="grid min-w-0 flex-1 gap-1">
-                {t("writing.recipient")}
-                <select
-                  className={fieldClass}
-                  value={recipient?.id ?? ""}
-                  title={recipient && labelFor(recipient)}
-                  onChange={(event) => {
-                    setRecipientId(event.target.value);
-                    setAllowedFolder(null);
-                    setIncludeHistory(false);
-                    toolPicker.clear();
-                  }}
-                >
-                  {!recipient && (
-                    <option value="">
-                      {t(loading ? "writing.loading" : "writing.chooseRecipient")}
-                    </option>
-                  )}
-                  {recipients.map((candidate) => (
+                value={retryId}
+                onChange={(event) => setRetryId(event.target.value)}
+              >
+                <option value="">{t("writing.chooseRecipient")}</option>
+                {recipients
+                  .filter((candidate) => candidate.id !== turn.recipientId)
+                  .map((candidate) => (
                     <option key={candidate.id} value={candidate.id}>
                       {labelFor(candidate)}
                     </option>
                   ))}
-                </select>
-              </label>
-            </div>
-            {recipient?.kind === "agent" && (
-              <p className="text-xs text-(--mint-muted)">
-                {t("agent.processAccess")}{" "}
-                {t(
-                  recipient.access === "readOnly"
-                    ? "agent.readOnlyAccess"
-                    : "agent.configuredAccess",
-                )}{" "}
-                {t("agent.tools")} {t("agent.usesLogin")}
-              </p>
+              </select>
+            </label>
+            {connection && (
+              <>
+                <p className="text-xs wrap-anywhere">{labelFor(connection)}</p>
+                {renderAgentAccess(connection)}
+                <p className="text-xs">
+                  {t(
+                    first.responseFormat === "replacement" ? "writing.preview" : "writing.comment",
+                  )}
+                </p>
+                {first.selectedText !== undefined && (
+                  <details className="text-xs">
+                    <summary>{t("writing.scope.selection")}</summary>
+                    <pre className="max-h-24 overflow-auto whitespace-pre-wrap wrap-anywhere">
+                      {first.selectedText}
+                    </pre>
+                  </details>
+                )}
+                {baseline.requests.map(({ taskContext, instruction, history }, index) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: The saved requests are in fixed send order.
+                  <div key={index} className="space-y-1">
+                    {baseline.requests.length > 1 && (
+                      <p className="text-xs">
+                        {t("materials.capacity.batchNumber", {
+                          number: String(index + 1),
+                          count: String(baseline.requests.length),
+                        })}
+                      </p>
+                    )}
+                    {renderSentContext(taskContext, turn.searchFolder)}
+                    {instruction !== turn.instruction && (
+                      <details className="text-xs">
+                        <summary>{t("writing.compare.instructions")}</summary>
+                        <pre className="max-h-32 overflow-auto whitespace-pre-wrap wrap-anywhere">
+                          {instruction}
+                        </pre>
+                      </details>
+                    )}
+                    {!!history?.length && (
+                      <details className="text-xs">
+                        <summary>{t("writing.compare.history")}</summary>
+                        {history.map(({ instruction, reply }, position) => (
+                          // biome-ignore lint/suspicious/noArrayIndexKey: The saved messages are in fixed send order.
+                          <div key={position} className="whitespace-pre-wrap wrap-anywhere">
+                            <p className="font-medium">{instruction}</p>
+                            <p>{reply}</p>
+                          </div>
+                        ))}
+                      </details>
+                    )}
+                  </div>
+                ))}
+                {hasImages && check && <VisionControl check={check} />}
+                {hasImages && !check && <p role="alert">{t("materials.visionRequired")}</p>}
+                <button
+                  type="button"
+                  className={buttonClass}
+                  disabled={busy || loading || (hasImages && !check?.verified)}
+                  onClick={() =>
+                    void runTask(
+                      {
+                        request: first,
+                        action: first.responseFormat === "replacement" ? "preview" : "comment",
+                        scope: baseline.scope,
+                        searchFolder: turn.searchFolder ?? null,
+                        seen: new Set(),
+                        alternativeTo: id,
+                        fixedRequests: baseline.requests,
+                      },
+                      connection,
+                    )
+                  }
+                >
+                  {t("writing.compare.send", { recipient: labelFor(connection) })}
+                </button>
+              </>
             )}
-            {loadFailed && <p role="alert">{t("writing.connectionsFailed")}</p>}
-            {!title && (
-              <label className="flex items-center gap-2 text-xs">
-                <input
-                  type="checkbox"
-                  checked={temporary}
-                  onChange={(event) => onTemporaryChange(event.target.checked)}
-                />
-                {t("writing.temporary.label")}
-              </label>
-            )}
-            <TaskContextChecklist
-              platform={platform}
-              named={named}
-              recipient={recipient && labelFor(recipient)}
-              vision={vision}
-              selection={selectedText}
-              draft={currentDraft}
-              includeDraft={scope === "selection" ? setIncludeDraft : undefined}
-              handlingFull={capacity.method === "full"}
-              folder={origin.folder && origin.folder !== folder ? null : folder}
-              searchEnabled={!!searchFolder}
-              onSearchChange={(checked) => setAllowedFolder(checked ? folder : null)}
-            />
-            {capacity.controls}
-            <WritingToolPicker picker={toolPicker} />
-            {turns.length > 0 && (
-              <label className="flex items-start gap-2 text-xs">
-                <input
-                  type="checkbox"
-                  checked={includeHistory}
-                  onChange={(event) => setIncludeHistory(event.target.checked)}
-                />
-                {t("writing.includeHistory")}
-              </label>
-            )}
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="submit"
-                className={buttonClass}
-                disabled={
-                  !recipient ||
-                  !capacity.plan ||
-                  toolPicker.incomplete ||
-                  loading ||
-                  !instruction.trim() ||
-                  named.loading ||
-                  named.unconfirmed ||
-                  (named.hasImages && !vision?.verified) ||
-                  (scope === "folder" && !searchFolder)
-                }
-              >
-                {toolPicker.plan?.exact
-                  ? t("mcp.send", {
-                      send: sendLabel,
-                      effect: t(`mcp.effect.${toolPicker.plan.effect}`),
-                    })
-                  : sendLabel}
-              </button>
-              <button type="button" className={buttonClass} onClick={onSettings}>
-                {t("writing.manage")}
-              </button>
-            </div>
           </fieldset>
-        </form>
-      )}
-      {toolApproval.pending && (
-        <WritingToolNotice pending={toolApproval.pending} onDecision={toolApproval.decide} />
-      )}
-      {busy && <WritingToolOutcome outcome={toolApproval.outcome} />}
-      {materialRequests.pending && (
-        <MaterialRequestNotice
-          key={materialRequests.pending.id}
-          pending={materialRequests.pending}
-          platform={platform}
-          vision={visionFor(recipients.find(({ id }) => id === attempt?.recipientId))}
-          onDecision={(decision) => {
-            materialRequests.decide(decision);
-            if (active && attempt?.task.action === "direct") origin.editor.focus();
-          }}
+        )}
+      </>
+    );
+  }
+
+  function renderAgentAccess(candidate: WritingRecipient) {
+    if (candidate.kind !== "agent") return null;
+    return (
+      <p className="text-xs text-(--mint-muted)">
+        {t("agent.processAccess")}{" "}
+        {t(candidate.access === "readOnly" ? "agent.readOnlyAccess" : "agent.configuredAccess")}{" "}
+        {t("agent.tools")} {t("agent.usesLogin")}
+      </p>
+    );
+  }
+
+  const alternateIndex = turns.findIndex((turn) => turn.id === comparisonId);
+  const alternate = turns[alternateIndex];
+  const originalIndex = turns.findIndex((turn) => turn.id && turn.id === alternate?.alternativeTo);
+  const original = turns[originalIndex];
+  return (
+    <>
+      <Container
+        ref={review}
+        tabIndex={-1}
+        aria-label={t(sidebar ? "writing.title" : "writing.ask")}
+        className={`z-10 flex flex-col gap-3 overflow-auto border border-(--mint-border) bg-(--mint-bg) p-3 text-sm ${
+          sidebar
+            ? "min-h-0 min-w-0 border-r-0 border-b-0"
+            : "absolute right-3 bottom-3 max-h-[70%] w-[min(36rem,calc(100%-1.5rem))] rounded-lg shadow-lg"
+        }`}
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && !confirmTemporaryClose && !event.nativeEvent.isComposing) {
+            event.stopPropagation();
+            close();
+          }
+        }}
+        onScroll={(event) => {
+          if (event.target !== event.currentTarget) return;
+          reviewScroll.current = event.currentTarget.scrollTop;
+          queueReadingSave();
+        }}
+      >
+        <header className="flex flex-wrap items-center justify-between gap-2">
+          <span ref={heading} tabIndex={-1} className="font-medium">
+            {t(sidebar ? "writing.title" : "writing.ask")}
+          </span>
+          <div className="flex gap-2">
+            {temporary && (
+              <span className="self-center text-xs">{t("writing.temporary.label")}</span>
+            )}
+            {title && !temporary && (
+              <button type="button" className={buttonClass} onClick={onTasks}>
+                {t("writing.tasks")}
+              </button>
+            )}
+            <button type="button" className={buttonClass} onClick={close}>
+              {closeLabel}
+            </button>
+          </div>
+        </header>
+        {sidebar && (
+          <>
+            <span className="wrap-anywhere">
+              {origin.folder ? t("writing.tasks.folder", { folder: origin.folder }) : name}
+            </span>
+            {!origin.folder && origin.text && (
+              <>
+                <button type="button" className={buttonClass} onClick={locate}>
+                  {t("writing.locate")}
+                </button>
+                <pre className="max-h-24 overflow-auto whitespace-pre-wrap wrap-anywhere rounded bg-(--mint-hover) p-2">
+                  {origin.text}
+                </pre>
+              </>
+            )}
+          </>
+        )}
+        {taskEdits.some((suggestion) => isApplied(suggestion, draft)) && (
+          <button
+            type="button"
+            className={`${buttonClass} self-start`}
+            disabled={busy}
+            onClick={() => void revertEdits(taskEdits)}
+          >
+            {t("writing.edit.revertAll")}
+          </button>
+        )}
+        {sidebar && attempt && (
+          <WritingTaskMaterials
+            request={attempt.task.request}
+            approved={attempt.approved}
+            folder={attempt.task.searchFolder}
+          />
+        )}
+        {messages.some((turn) => turn.suggestions?.length) && (
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" className={buttonClass} onClick={() => openFocusedReview()}>
+              {t("writing.review.title")}
+            </button>
+            <label className="flex items-center gap-1">
+              <input
+                type="checkbox"
+                checked={showSource}
+                onChange={(event) => setShowSource(event.target.checked)}
+              />
+              {t("writing.edit.source")}
+            </label>
+          </div>
+        )}
+        <div aria-live="polite" className="space-y-2">
+          {messages.map((turn, position) => {
+            const index = sidebar ? position : turns.length - 1;
+            return (
+              <article key={index} className="space-y-1">
+                {sidebar && (
+                  <details className="wrap-anywhere">
+                    <summary>{turn.instruction}</summary>
+                    <p>{turn.recipient}</p>
+                    {turn.material !== undefined && (
+                      <pre className="max-h-24 overflow-auto whitespace-pre-wrap wrap-anywhere">
+                        {turn.material}
+                      </pre>
+                    )}
+                  </details>
+                )}
+                {sidebar && renderSentContext(turn.context, turn.searchFolder)}
+                {renderTurnContent(turn, index)}
+                {renderBaselineRetry(turn)}
+                {turn.alternativeTo && turn.id && turn.status === "complete" && (
+                  <button
+                    type="button"
+                    className={buttonClass}
+                    onClick={() => setComparisonId(turn.id ?? null)}
+                  >
+                    {t("writing.compare.open")}
+                  </button>
+                )}
+              </article>
+            );
+          })}
+          {sidebar && restored && pending.current && !busy && (
+            <article className="space-y-1">
+              <p>{pending.current.instruction}</p>
+              <p>{pending.current.recipient}</p>
+              {pending.current.material !== undefined && (
+                <pre className="max-h-24 overflow-auto whitespace-pre-wrap wrap-anywhere">
+                  {pending.current.material}
+                </pre>
+              )}
+              {renderSentContext(pending.current.context, pending.current.searchFolder)}
+            </article>
+          )}
+          {attempt?.status === "working" && (
+            <>
+              <p>{t("writing.task.working")}</p>
+              {progress.partial && (
+                <pre className="whitespace-pre-wrap wrap-anywhere">{progress.partial}</pre>
+              )}
+            </>
+          )}
+          {canRetry && <p role="status">{t(`writing.task.${attempt.status}`)}</p>}
+        </div>
+        {(attempt?.status === "working" || attempt?.status === "approval") && (
+          <button type="button" className={buttonClass} onClick={stop}>
+            {t("writing.task.stop")}
+          </button>
+        )}
+        {canRetry && (
+          <div className="flex flex-wrap items-end gap-2">
+            {retryHasImages && sameVision && !sameVision.verified && (
+              <VisionControl check={sameVision} />
+            )}
+            <button
+              type="button"
+              className={buttonClass}
+              disabled={!sameConnection || busy || (retryHasImages && !sameVision?.verified)}
+              onClick={() => sameConnection && void runTask(attempt.task, sameConnection)}
+            >
+              {t("writing.task.retry")}
+            </button>
+            <p className="basis-full text-xs text-(--mint-muted)">
+              {[
+                t(`writing.scope.${attempt.task.scope}`),
+                ...writingMaterialNames(attempt.task.request),
+                attempt.task.searchFolder,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
+            {recipients.some(({ id }) => id !== attempt.recipientId) && (
+              <>
+                <label className="grid gap-1">
+                  {t("writing.task.retryConnection")}
+                  <select
+                    className={fieldClass}
+                    value={retryId}
+                    onChange={(event) => setRetryId(event.target.value)}
+                  >
+                    <option value="">{t("writing.chooseRecipient")}</option>
+                    {recipients
+                      .filter(({ id }) => id !== attempt.recipientId)
+                      .map((candidate) => (
+                        <option key={candidate.id} value={candidate.id}>
+                          {labelFor(candidate)}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                {attempt.task.plan && otherConnection && (
+                  <MaterialPlanPreview
+                    plan={attempt.task.plan}
+                    recipient={labelFor(otherConnection)}
+                  />
+                )}
+                {retryHasImages && otherVision && <VisionControl check={otherVision} />}
+                {retryHasImages && otherConnection && !otherVision && (
+                  <p role="alert">{t("materials.visionRequired")}</p>
+                )}
+                <button
+                  type="button"
+                  className={buttonClass}
+                  disabled={!otherConnection || busy || (retryHasImages && !otherVision?.verified)}
+                  onClick={() => otherConnection && void runTask(attempt.task, otherConnection)}
+                >
+                  {t("writing.task.retryOther")}
+                </button>
+              </>
+            )}
+          </div>
+        )}
+        {error && (
+          <p role="alert">
+            {t(
+              error === "agentChanged"
+                ? "agent.reviewAgain"
+                : error === "visionRequired"
+                  ? "materials.visionRequired"
+                  : `writing.${error}`,
+            )}
+          </p>
+        )}
+        {saveFailed && <p role="alert">{t("writing.tasks.saveFailed")}</p>}
+        {!sidebar && turns.length > 0 && !attempt?.capacityRejected ? (
+          <button
+            type="button"
+            className={`${buttonClass} self-start`}
+            onClick={() => setPlacement("sidebar")}
+          >
+            {t("writing.continue")}
+          </button>
+        ) : (
+          <form
+            onSubmit={(event) => void submit(event)}
+            onPaste={busy ? undefined : materialDropHandlers(named).onPaste}
+            className="space-y-2"
+          >
+            <fieldset
+              disabled={busy}
+              className={pendingApproval ? "hidden" : "flex min-w-0 flex-col gap-2"}
+            >
+              <label className="grid gap-1">
+                {t("agent.instruction")}
+                <input
+                  ref={input}
+                  className={fieldClass}
+                  value={instruction}
+                  onChange={(event) => setInstruction(event.target.value)}
+                />
+              </label>
+              <div className="flex flex-wrap items-end gap-2">
+                <label className="grid gap-1">
+                  {t("writing.action")}
+                  <select
+                    className={fieldClass}
+                    value={action}
+                    onChange={(event) => setActionOverride(event.target.value as Action)}
+                  >
+                    {actions.map((id) => (
+                      <option
+                        key={id}
+                        value={id}
+                        disabled={scope !== "selection" && id !== "comment"}
+                      >
+                        {t(`writing.${id}`)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid gap-1">
+                  {t("writing.scope")}
+                  <select
+                    className={fieldClass}
+                    value={scope}
+                    onChange={(event) => setScope(event.target.value as Scope)}
+                  >
+                    {(origin.folder ? (["folder"] as const) : scopes).map((id) => (
+                      <option key={id} value={id}>
+                        {t(`writing.scope.${id}`)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid min-w-0 flex-1 gap-1">
+                  {t("writing.recipient")}
+                  <select
+                    className={fieldClass}
+                    value={recipient?.id ?? ""}
+                    title={recipient && labelFor(recipient)}
+                    onChange={(event) => {
+                      setRecipientId(event.target.value);
+                      setAllowedFolder(null);
+                      setIncludeHistory(false);
+                      toolPicker.clear();
+                    }}
+                  >
+                    {!recipient && (
+                      <option value="">
+                        {t(loading ? "writing.loading" : "writing.chooseRecipient")}
+                      </option>
+                    )}
+                    {recipients.map((candidate) => (
+                      <option key={candidate.id} value={candidate.id}>
+                        {labelFor(candidate)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              {recipient && renderAgentAccess(recipient)}
+              {loadFailed && <p role="alert">{t("writing.connectionsFailed")}</p>}
+              {!title && (
+                <label className="flex items-center gap-2 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={temporary}
+                    onChange={(event) => onTemporaryChange(event.target.checked)}
+                  />
+                  {t("writing.temporary.label")}
+                </label>
+              )}
+              <TaskContextChecklist
+                platform={platform}
+                named={named}
+                recipient={recipient && labelFor(recipient)}
+                vision={vision}
+                selection={selectedText}
+                draft={currentDraft}
+                includeDraft={scope === "selection" ? setIncludeDraft : undefined}
+                handlingFull={capacity.method === "full"}
+                folder={origin.folder && origin.folder !== folder ? null : folder}
+                searchEnabled={!!searchFolder}
+                onSearchChange={(checked) => setAllowedFolder(checked ? folder : null)}
+              />
+              {capacity.controls}
+              <WritingToolPicker picker={toolPicker} />
+              {turns.length > 0 && (
+                <label className="flex items-start gap-2 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={includeHistory}
+                    onChange={(event) => setIncludeHistory(event.target.checked)}
+                  />
+                  {t("writing.includeHistory")}
+                </label>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="submit"
+                  className={buttonClass}
+                  disabled={
+                    !recipient ||
+                    !capacity.plan ||
+                    toolPicker.incomplete ||
+                    loading ||
+                    !instruction.trim() ||
+                    named.loading ||
+                    named.unconfirmed ||
+                    (named.hasImages && !vision?.verified) ||
+                    (scope === "folder" && !searchFolder)
+                  }
+                >
+                  {toolPicker.plan?.exact
+                    ? t("mcp.send", {
+                        send: sendLabel,
+                        effect: t(`mcp.effect.${toolPicker.plan.effect}`),
+                      })
+                    : sendLabel}
+                </button>
+                <button type="button" className={buttonClass} onClick={onSettings}>
+                  {t("writing.manage")}
+                </button>
+              </div>
+            </fieldset>
+          </form>
+        )}
+        {toolApproval.pending && (
+          <WritingToolNotice pending={toolApproval.pending} onDecision={toolApproval.decide} />
+        )}
+        {busy && <WritingToolOutcome outcome={toolApproval.outcome} />}
+        {materialRequests.pending && (
+          <MaterialRequestNotice
+            key={materialRequests.pending.id}
+            pending={materialRequests.pending}
+            platform={platform}
+            vision={visionFor(recipients.find(({ id }) => id === attempt?.recipientId))}
+            onDecision={(decision) => {
+              materialRequests.decide(decision);
+              if (active && attempt?.task.action === "direct") origin.editor.focus();
+            }}
+          />
+        )}
+        {closeConfirmation}
+      </Container>
+      {original && alternate && (
+        <WritingComparison
+          instruction={original.instruction}
+          original={original.recipient}
+          alternative={alternate.recipient}
+          source={showSource}
+          onSource={setShowSource}
+          onClose={() => setComparisonId(null)}
+          originalContent={renderTurnContent(original, originalIndex, true)}
+          alternativeContent={renderTurnContent(alternate, alternateIndex, true)}
         />
       )}
-      {closeConfirmation}
-    </Container>
+    </>
+  );
+}
+
+function WritingComparison({
+  instruction,
+  original,
+  alternative,
+  source,
+  onSource,
+  onClose,
+  originalContent,
+  alternativeContent,
+}: {
+  readonly instruction: string;
+  readonly original: string;
+  readonly alternative: string;
+  readonly source: boolean;
+  readonly onSource: (value: boolean) => void;
+  readonly onClose: () => void;
+  readonly originalContent: ReactNode;
+  readonly alternativeContent: ReactNode;
+}) {
+  const t = useT();
+  const { props, close } = useModalDialog(onClose);
+  return (
+    <dialog
+      {...props}
+      aria-label={t("writing.compare.title")}
+      className="m-auto max-h-[90vh] w-[min(68rem,94vw)] overflow-auto rounded-lg border border-(--mint-border) bg-(--mint-bg) p-4 text-sm text-(--mint-fg) backdrop:bg-black/30"
+    >
+      <header className="mb-3 space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-medium">{t("writing.compare.title")}</h2>
+          <button type="button" className={buttonClass} onClick={close}>
+            {t("settings.close")}
+          </button>
+        </div>
+        <p className="whitespace-pre-wrap wrap-anywhere">{instruction}</p>
+        <label className="flex items-center gap-1">
+          <input
+            type="checkbox"
+            checked={source}
+            onChange={(event) => onSource(event.target.checked)}
+          />
+          {t("writing.edit.source")}
+        </label>
+      </header>
+      <div className="grid gap-3 md:grid-cols-2">
+        <section
+          aria-label={t("writing.compare.original")}
+          className="min-w-0 space-y-2 rounded border border-(--mint-border) p-3 md:max-h-[65vh] md:overflow-auto"
+        >
+          <h3 className="font-medium">{t("writing.compare.original")}</h3>
+          <p className="text-xs wrap-anywhere">{original}</p>
+          {originalContent}
+        </section>
+        <section
+          aria-label={t("writing.compare.alternative")}
+          className="min-w-0 space-y-2 rounded border border-(--mint-border) p-3 md:max-h-[65vh] md:overflow-auto"
+        >
+          <h3 className="font-medium">{t("writing.compare.alternative")}</h3>
+          <p className="text-xs wrap-anywhere">{alternative}</p>
+          {alternativeContent}
+        </section>
+      </div>
+    </dialog>
   );
 }
 

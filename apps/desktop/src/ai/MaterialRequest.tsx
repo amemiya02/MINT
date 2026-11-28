@@ -96,6 +96,8 @@ export function useMaterialRequests(sendMcpRequest?: McpTransport) {
       options?: Omit<WritingOptions, "onDelta"> & {
         readonly plan?: MaterialPlan;
         readonly tool?: WritingToolPlan;
+        readonly fixedRequests?: readonly WritingRequest[];
+        readonly onDispatch?: (request: WritingRequest, batch: number) => void;
         readonly onContext?: (context: TaskContext | undefined) => void;
         readonly onApproval?: (text: string) => void;
         readonly onResume?: (decision: MaterialDecision | null, text: string) => void;
@@ -104,32 +106,48 @@ export function useMaterialRequests(sendMcpRequest?: McpTransport) {
       },
     ): Promise<WritingReply> {
       const id = ++sequence.current;
-      const { signal, taskId, plan, onContext, onApproval, onResume, onProgress } = options ?? {};
-      const contexts = plan?.contexts ?? [request.taskContext];
+      const {
+        signal,
+        taskId,
+        plan,
+        fixedRequests,
+        onDispatch,
+        onContext,
+        onApproval,
+        onResume,
+        onProgress,
+      } = options ?? {};
+      const contexts = fixedRequests?.map(({ taskContext }) => taskContext) ??
+        plan?.contexts ?? [request.taskContext];
       const limit = plan?.limit;
       const dispatched: (TaskContext | undefined)[] = [];
       const completed: string[] = [];
       const combined = (text: string) => [...completed, text].filter(Boolean).join("\n\n");
       let approvalId = 0;
       externalTool.resetOutcome();
+      let batch = 0;
+      const dispatch: WritingSender = (outbound, options) => {
+        onDispatch?.(outbound, batch);
+        return sender(outbound, options);
+      };
       const send =
-        options?.tool && sendMcpRequest
+        !fixedRequests && options?.tool && sendMcpRequest
           ? externalTool.wrap(
               sendMcpRequest,
-              sender,
+              dispatch,
               options.tool,
               recipient,
               () => onApproval?.(combined("")),
               () => onResume?.(null, combined("")),
             )
-          : sender;
+          : dispatch;
 
       async function sendBatch(taskContext: TaskContext | undefined, index: number) {
         const instruction =
           contexts.length === 1
             ? request.instruction
             : `${request.instruction}\n\nThis is material batch ${index + 1} of ${contexts.length}. Answer using this batch as source. Write only the part supported by this batch, without a repeated introduction or conclusion. MINT combines the parts in order.`;
-        let outbound = { ...request, instruction, taskContext };
+        let outbound = fixedRequests?.[index] ?? { ...request, instruction, taskContext };
         while (true) {
           if (signal?.aborted || id !== sequence.current) throw "stopped";
           const remainingBytes = limit === undefined ? undefined : limit - materialBytes(outbound);
@@ -160,6 +178,7 @@ export function useMaterialRequests(sendMcpRequest?: McpTransport) {
           });
           const extra = requestedMaterial(reply);
           if (!extra) return options?.mapBatchReply?.(reply, outbound.taskContext) ?? reply;
+          if (fixedRequests) throw "unresolvedMaterialRequest";
           if (signal?.aborted) throw "stopped";
           const previous = outbound.taskContext?.materialDecisions ?? [];
           if (id !== sequence.current || previous.some(({ name }) => name === extra.name))
@@ -192,6 +211,7 @@ export function useMaterialRequests(sendMcpRequest?: McpTransport) {
       }
 
       for (const [index, context] of contexts.entries()) {
+        batch = index;
         const reply = await sendBatch(context, index);
         const text = combined(reply.text);
         if (
