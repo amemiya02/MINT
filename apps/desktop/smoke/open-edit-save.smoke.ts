@@ -1363,9 +1363,11 @@ test("a native model receives only the sample or live selection and edits throug
       async () => (await readFile(draft)).equals(Buffer.from(edited)) || null,
     ).catch(explain);
     assert.deepEqual(requests[2], sent);
-    await keyActions(chord(keys.control, "z"));
+    await clickPath(
+      "//section[@aria-label='Ask AI']//button[normalize-space(.)='Undo direct edits']",
+    );
     await until(
-      "one undo to autosave the selected baseline",
+      "reverting from the completion notice to autosave the selected baseline",
       async () => (await readFile(draft)).equals(Buffer.from(liveManuscript)) || null,
     ).catch(explain);
     await clickPath("//section[@aria-label='Ask AI']//button[normalize-space(.)='Close']");
@@ -1586,6 +1588,19 @@ test("a saved writing review resumes after a native restart without contacting i
       await invokeNative<number[]>("list_versions", { path: renamedDraft }),
       history,
     );
+    await click("Writing tasks");
+    await click(instruction);
+    const first = "//fieldset[@aria-label='Proposed edit 1 of 4']";
+    await clickPath(`${first}//button[normalize-space(.)='Revert this edit']`);
+    await clickPath("//aside[@aria-label='Writing Assistant']//button[normalize-space(.)='Close']");
+    await nativeShortcut("ctrl+s");
+    await until(
+      "reverting an accepted proposal from the restored task to preserve the external edit",
+      async () =>
+        (await readFile(renamedDraft, "utf8")) === changed.replace("First edit.", "First draft.") ||
+        null,
+    ).catch(explain);
+    assert.equal(requests.length, 1);
   } finally {
     try {
       if (connectionId && session)

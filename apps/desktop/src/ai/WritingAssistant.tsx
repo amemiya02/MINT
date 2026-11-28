@@ -703,7 +703,7 @@ function Composer({
             collapseSelection: range,
             lineEndings: "match",
           });
-          if (turns[index]?.direct && inserted) {
+          if (inserted) {
             const edited = origin.editor.getText();
             update = recordApplied(
               suggestion,
@@ -1098,7 +1098,7 @@ function Composer({
                       before={suggestion.before}
                       after={suggestion.appliedText ?? suggestion.after}
                       status={reverted ? "reverted" : suggestion.status}
-                      showAppliedComparison={turn.direct}
+                      showAppliedComparison={revertible}
                       source={showSource}
                       current={conflict || revertConflict ? current : undefined}
                       blocked={pending || (revertible && !reverted) ? blocked : undefined}
