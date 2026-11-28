@@ -1,5 +1,6 @@
 """Fill the GTK file chooser on the private Xvfb display used by desktop CI."""
 
+from pathlib import Path
 import subprocess
 import sys
 import time
@@ -23,14 +24,14 @@ def chooser():
     return None
 
 
-def controls(node):
+def controls(node, include_files=False):
     yield node
     # A file list may contain thousands of rows. The location field and
     # action buttons are separate GTK widgets outside the directory listing.
-    if node.getRoleName() not in ("table", "tree table", "tree", "list"):
+    if include_files or node.getRoleName() not in ("table", "tree table", "tree", "list"):
         for child in node:
             if child is not None and shown(child):
-                yield from controls(child)
+                yield from controls(child, include_files)
 
 
 def find_control(predicate):
@@ -47,7 +48,7 @@ def snapshot():
     return [
         (node.getRoleName(), node.name,
          node.queryText().getText(0, -1) if "EditableText" in node.get_interfaces() else "")
-        for node in controls(window)
+        for node in controls(window, include_files=True)
     ]
 
 
@@ -74,17 +75,41 @@ def editable():
                         n.getState().contains(atspi.STATE_EDITABLE))
 
 
+def click_node(node, count=1):
+    x, y, width, height = node.queryComponent().getExtents(atspi.DESKTOP_COORDS)
+    subprocess.run(["xdotool", "mousemove", str(x + width // 2), str(y + height // 2),
+                    "click", "--repeat", str(count), "1"], check=True)
+
+
+def file_cell(name):
+    table = find_control(lambda node: node.name == "Files" and node.getRoleName() == "table")
+    if table is not None:
+        return next((node for node in controls(table, include_files=True) if node.name == name), None)
+    return None
+
+
 wait_for("waiting for confirmation button", accept)
-subprocess.run(["xdotool", "search", "--onlyvisible", "--name", f"^{title}$",
-                "windowfocus", "--sync"], check=True, timeout=5)
-if not editable():
-    # Folder selection initially shows a breadcrumb. Ctrl+L reveals its path entry.
-    subprocess.run(["xdotool", "key", "--clearmodifiers", "ctrl+l"], check=True)
-entry = wait_for("waiting for a location or filename entry", editable)
-entry.queryComponent().grabFocus()
-entry.queryEditableText().setTextContents(path)
-wait_for("checking the full path", lambda: entry.queryText().getText(0, -1) == path)
+home = wait_for("waiting for GTK Home", lambda: find_control(
+    lambda node: node.name == "Home" and node.getRoleName() == "label"))
+click_node(home)
+target = Path(path)
+if button_name == "Open":
+    # GTK select-folder needs a highlighted directory row to enable Open.
+    # The isolated fixture sits directly under the hosted runner's Home.
+    assert target.parent == Path.home()
+    folder = wait_for(f"waiting for directory row {target.name!r}", lambda: file_cell(target.name))
+    click_node(folder)
+else:
+    # Navigate through real directory rows so GTK saves under the intended parent.
+    for component in target.parent.relative_to(Path.home()).parts:
+        folder = wait_for(f"waiting for directory row {component!r}", lambda: file_cell(component))
+        click_node(folder, count=2)
+    entry = wait_for("waiting for the Save As filename", editable)
+    entry.queryComponent().grabFocus()
+    entry.queryEditableText().setTextContents(target.name)
+    wait_for("checking the filename", lambda: entry.queryText().getText(0, -1) == target.name)
+
 button = wait_for("waiting for the enabled confirmation button",
                   lambda: (node := accept()) and node.getState().contains(atspi.STATE_SENSITIVE) and node)
-button.queryAction().doAction(0)
+click_node(button)
 wait_for("waiting for confirmation to close the chooser", lambda: chooser() is None)
