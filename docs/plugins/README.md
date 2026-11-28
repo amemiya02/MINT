@@ -51,3 +51,28 @@ A folder plugin contributes a sidebar entry. The bundled **Tag browser** uses th
 ```
 
 The host reads Markdown documents in the current folder when the authorized view opens. It uses the top-level YAML front matter field `tags`, accepting a string or a sequence such as `tags: [research, travel]`. Select a tag and click a document's relative path to open the original file.
+
+## Digital timing diagrams
+
+Install **Digital timing diagrams** in Settings → Plugins and allow it to read the current document. Paste the following example into a document and move the caret outside the block to see the clock and acknowledge signals on a shared time scale.
+
+````markdown
+```timing
+CLK: 0101
+ACK: 0011
+```
+````
+
+Each row contains a signal name, a colon, and one binary sample per time step. All signals have the same number of samples. Click a waveform to edit its source. An invalid block shows the submitted samples and a diagnostic. Disabling the plugin displays the ordinary fenced code again.
+
+A local MINT package can contribute the same renderer with this manifest.
+
+```json
+{
+  "apiVersion": 1,
+  "id": "example.timing",
+  "name": "Bus timing diagrams",
+  "permissions": ["document.read"],
+  "diagram": "timing"
+}
+```

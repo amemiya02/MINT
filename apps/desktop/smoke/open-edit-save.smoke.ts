@@ -8,10 +8,12 @@
 // The document is handed to MINT on the command line, as a file manager does,
 // so no native dialog is involved.
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
+import { promisify } from "node:util";
 
 const driver = process.env.TAURI_DRIVER_URL ?? "http://127.0.0.1:4444";
 const application = process.env.MINT_APP;
@@ -72,6 +74,14 @@ async function keyActions(actions: KeyAction[]): Promise<void> {
   await command("DELETE", `/session/${session}/actions`);
 }
 
+const exec = promisify(execFile);
+
+/** WebDriver's keyboard targets the webview. Native menu accelerators belong to its GTK window. */
+async function nativeShortcut(chord: string) {
+  await exec("xdotool", ["search", "--onlyvisible", "--name", "MINT$", "windowfocus", "--sync"]);
+  await exec("xdotool", ["key", chord]);
+}
+
 /** Fail with what the window shows, which says which step went missing. */
 async function explain(e: unknown): Promise<never> {
   const page = await command<string>("POST", `/session/${session}/execute/sync`, {
@@ -127,7 +137,7 @@ test("a document opened from the command line can be edited and saved", async ()
     },
     10_000,
   ).catch(explain);
-  await keyActions(chord(keys.control, "s"));
+  await nativeShortcut("ctrl+s");
 
   const saved = await until("the document to be saved", async () => {
     const text = await readFile(document, "utf8");
@@ -135,12 +145,14 @@ test("a document opened from the command line can be edited and saved", async ()
   }).catch(explain);
   assert.equal(saved, "\uFEFF# Smoke\r\n\r\nfirst line  \r\nsecond line");
 
-  await keyActions([
-    ...chord(keys.shift, keys.home),
-    ...chord(keys.control, "k"),
-    ...typing("#smoke"),
-    ...chord(keys.control, "s"),
-  ]);
+  await keyActions(chord(keys.shift, keys.home));
+  await nativeShortcut("ctrl+k");
+  await until("the selected text to become a link", async () => {
+    const text = await command<string>("GET", `/session/${session}/element/${editor}/text`);
+    return text.includes("[second line]()") || null;
+  }).catch(explain);
+  await keyActions(typing("#smoke"));
+  await nativeShortcut("ctrl+s");
   const linked = await until("the standard Markdown link on disk", async () => {
     const bytes = await readFile(document);
     return bytes.includes(Buffer.from("[second line](#smoke)")) ? bytes : null;
@@ -165,15 +177,17 @@ test("a document opened from the command line can be edited and saved", async ()
       return ready || null;
     }).catch(explain);
   await waitForFocusedPane(2);
-  await keyActions([...chord(keys.control, keys.end), ...typing("!"), ...chord(keys.control, "s")]);
+  await keyActions([...chord(keys.control, keys.end), ...typing("!")]);
+  await nativeShortcut("ctrl+s");
   await until(
     "the second view to save the original document",
     async () =>
       (await readFile(document)).equals(Buffer.concat([linked, Buffer.from("!")])) || null,
   ).catch(explain);
-  await keyActions(chord(keys.control, "w"));
+  await nativeShortcut("ctrl+w");
   await waitForFocusedPane(1);
-  await keyActions([...chord(keys.control, "z"), ...chord(keys.control, "s")]);
+  await keyActions(chord(keys.control, "z"));
+  await nativeShortcut("ctrl+s");
   await until(
     "the first view to undo the edit and restore the original bytes",
     async () => (await readFile(document)).equals(linked) || null,
@@ -229,7 +243,7 @@ test("the native statistics view refuses a denied read and allows an explicit gr
       }).then((found) => (found ? true : null)),
     ).catch(explain);
 
-  await keyActions(chord(keys.control, "n"));
+  await nativeShortcut("ctrl+n");
   await until("the new document to receive focus", async () => {
     const ready = await command<boolean>("POST", `/session/${session}/execute/sync`, {
       script:
@@ -239,7 +253,7 @@ test("the native statistics view refuses a denied read and allows an explicit gr
     return ready ? true : null;
   }).catch(explain);
   await keyActions(typing("a native draft"));
-  await keyActions(chord(keys.control, ","));
+  await nativeShortcut("ctrl+comma");
   await click("Install");
   await shows("Read the current document");
   await click("Deny access");
@@ -247,13 +261,13 @@ test("the native statistics view refuses a denied read and allows an explicit gr
   await click("Writing statistics");
   await shows("Permission to read the current document was denied.");
   await click("Close");
-  await keyActions(chord(keys.control, ","));
+  await nativeShortcut("ctrl+comma");
   await click("Allow access");
   await click("Close");
   await click("Writing statistics");
   await shows("Words: 3");
   await click("Close");
-  await keyActions(chord(keys.control, ","));
+  await nativeShortcut("ctrl+comma");
   await click("Uninstall");
   await click("Close");
 });
