@@ -1152,7 +1152,9 @@ test("model keys survive a restart only when remembered and disconnect removes t
 }, async () => {
   assert.ok(credentialPolicy && process.env.XDG_DATA_HOME);
   const draft = join(dir, "model-connection-review.md");
-  await writeFile(draft, "\uFEFF# Field notes\r\n\r\nTuesday entry  ");
+  const prefix = "\uFEFF# Field notes\r\n\r\n";
+  const excerpt = "Tuesday entry";
+  await writeFile(draft, `${prefix}${excerpt}  `);
   const persistentKey = "mint-smoke-remembered-7291";
   const sessionKey = "mint-smoke-session-8732";
   const requests: { authorization?: string; body: unknown }[] = [];
@@ -1216,6 +1218,17 @@ test("model keys survive a restart only when remembered and disconnect removes t
   }
   const versions = () => invokeNative<number[]>("list_versions", { path: draft });
   const versionText = (id: number) => invokeNative<string>("read_version", { path: draft, id });
+  const annotations = () => invokeNative("read_annotations", { path: draft });
+  const review = {
+    "review-fixture": {
+      id: "review-fixture",
+      kind: "text",
+      excerpt,
+      note: "Confirmed the date against the field log.",
+      resolved: true,
+      range: { from: prefix.length, source: excerpt, before: prefix, after: "  " },
+    },
+  };
 
   try {
     await restart([draft]);
@@ -1224,6 +1237,8 @@ test("model keys survive a restart only when remembered and disconnect removes t
       path: draft,
       text: "# Field notes\r\n\r\nMonday entry",
     });
+    await invokeNative("update_annotations", { path: draft, changes: review });
+    assert.deepEqual(await annotations(), review);
     const history = await versions();
     const latestId = history.at(-1);
     assert.ok(latestId !== undefined, "verify an existing local version history survives");
@@ -1310,6 +1325,7 @@ test("model keys survive a restart only when remembered and disconnect removes t
     assert.deepEqual(await readFile(draft), manuscript);
     assert.deepEqual(await versions(), history);
     assert.equal(await versionText(latestId), latest);
+    assert.deepEqual(await annotations(), review);
     assert.equal(requests.length, 2, "reopening Settings never sends a model request");
     await click("Close");
   } finally {
