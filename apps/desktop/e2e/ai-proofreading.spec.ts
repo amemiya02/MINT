@@ -113,6 +113,7 @@ test("automatic proofreading locates and applies one undoable correction", async
   await inline.selectOption({ label: modelName });
   await expect(toggle).not.toBeChecked();
   await settings.getByRole("button", { name: "Close", exact: true }).click();
+  await editor.click();
   await page.keyboard.type(" We walked");
   await expect(editor.getByText("across the ridge.", { exact: true })).toBeVisible();
   await expect(suggestion).toBeHidden();
