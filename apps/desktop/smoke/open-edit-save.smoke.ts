@@ -1040,7 +1040,11 @@ test("only granted Zotero reads reach the local service and the chosen item is s
   }
 });
 
-test("a model trial sends only the visible sample and shows native streaming replies", async () => {
+test("a model receives only the sample or the chosen selection through the native connection", async () => {
+  const draft = join(dir, "ask-ai-model.md");
+  const manuscript = "\uFEFFPrivate notes.  \r\n\r\nSelected sentence.";
+  await writeFile(draft, manuscript);
+  await restart([draft]);
   const requests: { url?: string; method?: string; authorization?: string; body: unknown }[] = [];
   let pendingReply: ServerResponse | undefined;
   const endpoint = createServer(async (request, response) => {
@@ -1055,6 +1059,19 @@ test("a model trial sends only the visible sample and shows native streaming rep
     });
     if (request.method !== "POST" || request.url !== "/fixture/v1/chat/completions") {
       response.writeHead(404).end();
+      return;
+    }
+    if (!JSON.parse(body).stream) {
+      response.writeHead(200, { "Content-Type": "application/json" }).end(
+        JSON.stringify({
+          choices: [
+            {
+              message: { content: "<replacement>Short sentence.</replacement>" },
+              finish_reason: "stop",
+            },
+          ],
+        }),
+      );
       return;
     }
     pendingReply = response;
@@ -1140,7 +1157,73 @@ test("a model trial sends only the visible sample and shows native streaming rep
       }),
       "",
     );
+    await fill("Connection name", "Selection fixture");
+    await fill("API address", `http://127.0.0.1:${address.port}/fixture/v1`);
+    await fill("Model name", "native-fixture");
+    await fill("API key", secret);
+    await click("Use for this launch");
+    await shows("Selection fixture");
     await click("Close");
+
+    await waitForView(
+      "the draft to regain focus",
+      "return document.activeElement?.matches('.cm-content');",
+    );
+    await keyActions([...chord(keys.control, keys.end), ...chord(keys.shift, keys.home)]);
+    await click("Ask AI");
+    await waitForView(
+      "the saved model to appear in the send row",
+      `return [...document.querySelectorAll('section[aria-label="Ask AI"] select option')]
+        .some((option) => option.textContent.startsWith("Selection fixture · "));`,
+    );
+    await command("POST", `/session/${session}/execute/sync`, {
+      script: `const option = [...document.querySelectorAll('section[aria-label="Ask AI"] select option')]
+        .find((item) => item.textContent.startsWith("Selection fixture · "));
+        option.parentElement.value = option.value;
+        option.parentElement.dispatchEvent(new Event('change', { bubbles: true }));`,
+      args: [],
+    });
+    await clickPath("//section[@aria-label='Ask AI']//input");
+    const instruction = "Shorten this sentence, apply directly";
+    await keyActions([...typing(instruction), ...typing(keys.enter)]);
+    await waitForView(
+      "the authorized replacement in the active editor",
+      `return document.activeElement?.matches(".cm-content") &&
+        document.activeElement.textContent.includes("Short sentence.");`,
+    );
+    await until(
+      "the edited bytes to be autosaved",
+      async () =>
+        (await readFile(draft, "utf8")) ===
+          manuscript.replace("Selected sentence.", "Short sentence.") || null,
+    ).catch(explain);
+    assert.equal(requests.length, 2);
+    const sent = requests[1];
+    assert.ok(sent);
+    assert.equal(sent.url, "/fixture/v1/chat/completions");
+    assert.equal(sent.authorization, `Bearer ${secret}`);
+    const payload = sent.body as {
+      model: string;
+      stream: boolean;
+      messages: { role: string; content: string }[];
+    };
+    assert.equal(payload.model, "native-fixture");
+    assert.equal(payload.stream, false);
+    assert.deepEqual(
+      payload.messages.map(({ role }) => role),
+      ["system", "user"],
+    );
+    const selectedMessage = payload.messages[1];
+    assert.ok(selectedMessage);
+    assert.deepEqual(JSON.parse(selectedMessage.content), {
+      instruction,
+      selectedText: "Selected sentence.",
+    });
+    await keyActions(chord(keys.control, "z"));
+    await until(
+      "one undo to restore the original bytes",
+      async () => (await readFile(draft, "utf8")) === manuscript || null,
+    ).catch(explain);
   } finally {
     endpoint.closeAllConnections();
     await new Promise<void>((resolve) => endpoint.close(() => resolve()));
@@ -1587,6 +1670,71 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   assert.equal(sample.readable, initial);
   await assert.rejects(readFile(writeTarget), { code: "ENOENT" });
 
+  // Run the same installed connection from the manuscript, including a real follow-up process.
+  await click("Close");
+  await waitForView(
+    "the manuscript to regain focus",
+    "return document.activeElement?.matches('.cm-content');",
+  );
+  await keyActions([...chord(keys.control, keys.end), ...chord(keys.shift, keys.home)]);
+  await click("Ask AI");
+  await command("POST", `/session/${session}/execute/sync`, {
+    script: `const action = document.querySelector('section[aria-label="Ask AI"] select');
+      action.value = 'comment';
+      action.dispatchEvent(new Event('change', { bubbles: true }));`,
+    args: [],
+  });
+  await clickPath("//section[@aria-label='Ask AI']//input");
+  await keyActions([...typing("Is the selected line clear?"), ...typing(keys.enter)]);
+  await waitForView(
+    "the inline reply from the CLI",
+    `return document.querySelector('section[aria-label="Ask AI"]')?.innerText.includes('Fixture Agent reply.') &&
+      !document.querySelector('aside[aria-label="Writing Assistant"]');`,
+  );
+  await click("Continue in sidebar");
+  await command("POST", `/session/${session}/execute/sync`, {
+    script: `const scope = [...document.querySelectorAll('aside[aria-label="Writing Assistant"] select')]
+      .find((select) => select.querySelector('option[value="instruction"]'));
+      scope.value = 'instruction';
+      scope.dispatchEvent(new Event('change', { bubbles: true }));`,
+    args: [],
+  });
+  await clickPath("//aside[@aria-label='Writing Assistant']//input[not(@type='checkbox')]");
+  await keyActions([...typing("What would help?"), ...typing(keys.enter)]);
+  await waitForView(
+    "both CLI replies in the sidebar",
+    `return [...document.querySelectorAll('aside[aria-label="Writing Assistant"] article')]
+      .filter((article) => article.innerText.includes('Fixture Agent reply.')).length === 2;`,
+  );
+  await click("Go to original selection");
+  await waitForView(
+    "the selected line to be restored",
+    `return window.getSelection()?.toString() === "On-disk sentence.";`,
+  );
+  const selectedCalls = (await readFile(calls, "utf8"))
+    .trim()
+    .split("\n")
+    .slice(1)
+    .map((line) => JSON.parse(line));
+  assert.deepEqual(
+    selectedCalls.map((entry) => entry.prompt),
+    [
+      { instruction: "Is the selected line clear?", selectedText: "On-disk sentence." },
+      {
+        instruction: "What would help?",
+        history: [{ instruction: "Is the selected line clear?", reply: "Fixture Agent reply." }],
+      },
+    ],
+  );
+  assert.ok(selectedCalls.every((entry) => entry.entries.length === 0));
+  assert.ok(
+    selectedCalls.every((entry) => entry.args[entry.args.indexOf("--sandbox") + 1] === "read-only"),
+  );
+  assert.equal(await readFile(draft, "utf8"), initial);
+  await clickPath("//aside[@aria-label='Writing Assistant']//button[normalize-space(.)='Close']");
+  await openSettings();
+  await click("External Agents");
+
   await command("POST", `/session/${session}/execute/sync`, {
     script: `const select = Array.from(document.querySelectorAll('dialog[open] select'))
       .find((control) => control.querySelector('option[value="configured"]'));
@@ -1601,7 +1749,7 @@ console.log(JSON.stringify({ type: "turn.completed" }));
     invokeNative("send_external_agent", { path, revision, access: "configured", request }),
     /agentAccessRequired/,
   );
-  assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, 1);
+  assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, 3);
   await assert.rejects(readFile(writeTarget), { code: "ENOENT" });
 
   await click("Try example");
@@ -1618,13 +1766,13 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   await shows(executable);
   await click("Try example");
   await shows("Fixture Agent reply.");
-  assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, 3);
+  assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, 5);
   await click("Close");
   await nativeShortcut("ctrl+n");
   await click("Draft with AI");
   await until("the approved Agent to appear as a draft recipient", () =>
     command<boolean>("POST", `/session/${session}/execute/sync`, {
-      script: `const select = document.querySelector('main form select');
+      script: `const select = document.querySelector('[role="tabpanel"]:not([hidden]) form[aria-labelledby] select');
         const option = Array.from(select?.options ?? []).find(option => option.label === arguments[0]);
         if (!option) return false;
         select.value = option.value;
@@ -1649,6 +1797,7 @@ console.log(JSON.stringify({ type: "turn.completed" }));
       "Write a Markdown draft following this instruction. Return only the draft text, without a surrounding code fence.\n\nDraft one paragraph about the ridge.",
   });
   assert.deepEqual(draftCall.entries, []);
+  assert.ok(!draftCall.args.includes("--sandbox"));
   assert.equal(await readFile(draft, "utf8"), initial);
 
   await openSettings();
@@ -1661,7 +1810,7 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   );
   await click("Try example");
   await shows("Agent access changed. Review its permissions before sending.");
-  assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, 4);
+  assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, 6);
   await click("Try example");
   await click("Decline");
   await shows("Agent access declined.");

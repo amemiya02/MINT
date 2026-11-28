@@ -3,6 +3,7 @@ import { type MessageKey, useT } from "../i18n/index.ts";
 import type { Platform } from "../platform/platform.ts";
 import { ConnectionSection } from "./ConnectionSection.tsx";
 import { modelEndpoint, modelWritingSender, type SavedModelConnection } from "./model.ts";
+import { replacementFromReply } from "./writing-sender.ts";
 
 const presets = {
   custom: { label: "models.custom", address: "" },
@@ -152,10 +153,7 @@ function ModelTrial({
         },
       );
       const reply = await send({ instruction: sample });
-      const replacement =
-        reply.finishReason === null || reply.finishReason === "stop"
-          ? /^<replacement>([\s\S]+)<\/replacement>$/.exec(reply.text.trim())?.[1]?.trim()
-          : undefined;
+      const replacement = replacementFromReply(reply)?.trim();
       setResult({
         text: replacement || reply.text,
         streamed: reply.streamed,

@@ -1,4 +1,9 @@
-import type { WritingReply, WritingRequest, WritingSender } from "./writing-sender.ts";
+import {
+  replacementInstruction,
+  type WritingReply,
+  type WritingRequest,
+  type WritingSender,
+} from "./writing-sender.ts";
 
 export type AgentAccess = "readOnly" | "configured";
 
@@ -18,7 +23,11 @@ export interface ExternalAgentPlatform {
   inspect(path: string): Promise<ExternalAgent>;
   approve(agent: ExternalAgent, access: AgentAccess): Promise<ExternalAgent>;
   forget(path: string): Promise<void>;
-  send(agent: ExternalAgent, access: AgentAccess, request: WritingRequest): Promise<WritingReply>;
+  send(
+    agent: ExternalAgent,
+    access: AgentAccess,
+    request: Omit<WritingRequest, "responseFormat">,
+  ): Promise<WritingReply>;
 }
 
 export function externalAgentSender(
@@ -27,5 +36,12 @@ export function externalAgentSender(
   access: AgentAccess,
 ): WritingSender {
   // The native boundary rechecks access and executable identity for every operation.
-  return (request) => platform.send(agent, access, request);
+  return ({ responseFormat, ...request }) =>
+    platform.send(
+      agent,
+      access,
+      responseFormat === "replacement"
+        ? { ...request, instruction: `${request.instruction}\n\n${replacementInstruction}` }
+        : request,
+    );
 }
