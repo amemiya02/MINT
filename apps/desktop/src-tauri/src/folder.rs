@@ -68,20 +68,13 @@ pub fn create_dir(path: &Path) -> io::Result<()> {
 /// Rename a file or directory. Never replaces an existing entry, except that a
 /// case-only rename (`a.md` → `A.md`) works on case-insensitive file systems.
 pub fn rename(from: &Path, to: &Path) -> io::Result<()> {
-    if fs::symlink_metadata(to).is_ok() && !same_entry(from, to) {
+    if fs::symlink_metadata(to).is_ok() && !crate::fs::same_entry(from, to) {
         return Err(io::Error::new(
             io::ErrorKind::AlreadyExists,
             format!("{} already exists", to.display()),
         ));
     }
     fs::rename(from, to)
-}
-
-fn same_entry(a: &Path, b: &Path) -> bool {
-    match (fs::canonicalize(a), fs::canonicalize(b)) {
-        (Ok(a), Ok(b)) => a == b,
-        _ => false,
-    }
 }
 
 /// Move a file or directory to the system trash. Never falls back to a permanent delete.

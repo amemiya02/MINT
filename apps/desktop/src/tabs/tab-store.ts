@@ -1,5 +1,6 @@
 import { type MintEditor, SharedDocument } from "@mint/editor";
 import { matchingHeadings } from "@mint/markdown";
+import { type FolderReference, locateCitation } from "../backlinks/references.ts";
 import { isWithin, rebasePath } from "../paths.ts";
 import type { Platform } from "../platform/platform.ts";
 
@@ -66,6 +67,7 @@ function startOfMatch(text: string, range: LineRange): number | null {
 
 export type DocumentLocation =
   | LineRange
+  | { readonly citation: FolderReference }
   | { readonly sourceFrom: number; readonly sourceTo: number }
   | { readonly fragment: string };
 
@@ -78,6 +80,8 @@ export interface TabsState {
 
 export type TabError =
   | { readonly kind: "staleSearchResult" }
+  | { readonly kind: "staleCitation" }
+  | { readonly kind: "alreadyOpen"; readonly path: string }
   | { readonly kind: "missingHeading" | "ambiguousHeading"; readonly fragment: string }
   | { readonly kind: "open"; readonly path: string; readonly reason: string }
   | { readonly kind: "save" | "history"; readonly path: string; readonly reason: string }
@@ -92,7 +96,7 @@ export interface TabStoreOptions {
   /** Ask the user what to do with a tab that has unsaved changes. */
   readonly askUnsaved: (tab: Tab) => Promise<UnsavedChoice>;
   /** Ask the user where to save a tab's document (Save As, or the first save of an untitled one); `null` if cancelled. */
-  readonly askSavePath: (tab: Tab) => Promise<string | null>;
+  readonly askSavePath: (tab: Tab, knownPaths: string[]) => Promise<string | null>;
 }
 
 /**
@@ -184,6 +188,7 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
   /** Set while the store itself replaces a tab's text, so the change does not count as an edit. */
   let reloading: number | null = null;
   /** Paths being read, so a double open does not create two tabs. */
+  const reservedPaths = new Map<string, Promise<boolean>>();
   const opening = new Map<string, Promise<void>>();
   /** Ranges to select in tabs whose editor has not mounted yet. */
   const pendingSelections = new Map<number, DocumentLocation>();
@@ -243,6 +248,16 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
   function reveal(id: number, range: DocumentLocation) {
     const editor = editors.get(id);
     if (state.activeId !== id || !editor) return;
+    if ("citation" in range) {
+      const match = locateCitation(range.citation, editor.getText());
+      if (!match) {
+        set({ error: { kind: "staleCitation" } });
+        return;
+      }
+      editor.setSelection({ anchor: match.from, head: match.to, scrollIntoView: true });
+      editor.focus();
+      return;
+    }
     if ("sourceFrom" in range) {
       editor.setSelection({ anchor: range.sourceFrom, head: range.sourceTo, scrollIntoView: true });
       editor.focus();
@@ -328,6 +343,8 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
 
   async function openDocument(path: string, select?: DocumentLocation, pane?: Pane) {
     if (state.error) set({ error: null });
+    const reservation = reservedPaths.get(path);
+    if (reservation) await reservation;
     let tab = state.tabs.find((t) => t.path === path);
     if (!tab) {
       let pending = opening.get(path);
@@ -442,8 +459,25 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
     async function write() {
       const tab = documentTab(id);
       if (!tab) return false;
-      const path = choosePath || tab.path === null ? await askSavePath(tab) : tab.path;
+      const path =
+        choosePath || tab.path === null
+          ? await askSavePath(
+              tab,
+              state.tabs.flatMap((t) => (t.path ? [t.path] : [])),
+            )
+          : tab.path;
       if (path === null || !versions.has(id)) return false;
+      if (path !== tab.path) {
+        if (
+          opening.has(path) ||
+          reservedPaths.has(path) ||
+          state.tabs.some((t) => t.path === path && t.documentId !== id)
+        ) {
+          set({ error: { kind: "alreadyOpen", path } });
+          return false;
+        }
+        reservedPaths.set(path, pending);
+      }
       try {
         await platform.writeTextFile(path, text);
         let historyError: TabError | null = null;
@@ -467,12 +501,14 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
       } catch (e) {
         if (versions.has(id)) set({ error: { kind: "save", path, reason: reasonOf(e) } });
         return false;
+      } finally {
+        if (reservedPaths.get(path) === pending) reservedPaths.delete(path);
       }
     }
 
     saveEpochs.set(id, (saveEpochs.get(id) ?? 0) + 1);
     const previous = savesInFlight.get(id) ?? Promise.resolve();
-    const pending = previous.then(write, write).finally(() => {
+    const pending: Promise<boolean> = previous.then(write, write).finally(() => {
       if (savesInFlight.get(id) !== pending) return;
       savesInFlight.delete(id);
       void runRecheck(id);

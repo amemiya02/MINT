@@ -1,6 +1,6 @@
 import { renderMermaid } from "@mint/editor";
 import { type ExportImage, exportHtml } from "@mint/markdown";
-import { createImageHost } from "../assets/image-host.ts";
+import { exportImagePath } from "../assets/image-host.ts";
 import type { Platform } from "../platform/platform.ts";
 import { dialectOf } from "../settings/dialect.ts";
 import type { Settings } from "../settings/schema.ts";
@@ -11,6 +11,7 @@ import { readTheme, typographyCss } from "../theme/theme.ts";
 export interface HtmlExportChoice {
   /** A built-in theme ID or a user theme's name. */
   readonly theme: string;
+  readonly forPreview?: boolean;
   readonly appearance: "light" | "dark";
   /** Embed local images as data URIs instead of linking to them. */
   readonly embedImages: boolean;
@@ -37,14 +38,8 @@ export interface HtmlExportSource {
 export async function documentHtml(source: HtmlExportSource, choice: HtmlExportChoice) {
   const { platform, settings } = source;
   const selectedTheme = await readTheme(platform, source.themeFolder, choice.theme);
-  // Only resolving images: export never saves one.
-  const images = createImageHost(
-    platform,
-    () => source.path,
-    () => settings,
-    () => {},
-  );
   return exportHtml(source.text, {
+    forPreview: choice.forPreview ?? false,
     // The dialect the editor uses, so an export reads the document as it was edited.
     dialect: dialectOf(settings),
     title: source.title,
@@ -52,7 +47,7 @@ export async function documentHtml(source: HtmlExportSource, choice: HtmlExportC
     appearance: choice.appearance,
     renderMermaid,
     ...(choice.embedImages
-      ? { loadImage: (src: string) => loadImage(src, images.resolveImageUrl) }
+      ? { loadImage: (src: string) => loadImage(src, source.path, platform) }
       : {}),
   });
 }
@@ -60,19 +55,16 @@ export async function documentHtml(source: HtmlExportSource, choice: HtmlExportC
 /** A local image's bytes; `null` for remote images (http:, https:...), which stay links. */
 async function loadImage(
   src: string,
-  resolve: (path: string) => string | null,
+  documentPath: string,
+  platform: Platform,
 ): Promise<ExportImage | null> {
   const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(src)?.[1]?.toLowerCase();
   // A one-letter "scheme" is a Windows drive.
   if (scheme && scheme !== "file" && scheme.length > 1) return null;
   // Resolved exactly as the editor resolves the images it shows.
-  const url = resolve(src);
-  if (!url) return null;
-  const response = await fetch(url);
-  if (!response.ok) return null;
-  const blob = await response.blob();
-  const type = blob.type.startsWith("image/") ? blob.type : imageType(src);
-  return { data: new Uint8Array(await blob.arrayBuffer()), type };
+  const path = exportImagePath(documentPath, src);
+  if (!path) return null;
+  return { data: new Uint8Array(await platform.readBinaryFile(path)), type: imageType(src) };
 }
 
 const imageTypes: Readonly<Record<string, string>> = {

@@ -20,6 +20,7 @@ export interface Platform {
    * missing or not valid UTF-8.
    */
   readTextFile(path: string): Promise<string>;
+  readBinaryFile(path: string): Promise<ArrayBuffer>;
 
   /** Write text as UTF-8 atomically: either the whole new content lands or the old file stays intact. */
   writeTextFile(path: string, text: string): Promise<void>;
@@ -39,6 +40,9 @@ export interface Platform {
    * Resolves to a function that stops watching.
    */
   watchFile(path: string, onChange: () => void): Promise<() => void>;
+
+  /** Select one import package. The File grants access only to the chosen bytes. */
+  pickFile(accept: string): Promise<File | null>;
 
   /** Ask the user to pick a document. Resolves to its path, or `null` if cancelled. */
   showOpenDialog(options: OpenDialogOptions): Promise<string | null>;
@@ -323,6 +327,8 @@ export interface OpenDialogOptions {
 }
 
 export interface SaveDialogOptions {
+  /** Return the known spelling when the chosen file aliases an open document. */
+  readonly knownPaths?: readonly string[];
   readonly title: string;
   readonly defaultPath: string;
   readonly filters: readonly { readonly name: string; readonly extensions: readonly string[] }[];

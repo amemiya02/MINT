@@ -1,11 +1,19 @@
 import { expect, type Page, test } from "@playwright/test";
-import { externalWrite, launch, readFile, runMenuItem } from "./memory-platform.ts";
+import {
+  externalWrite,
+  launch,
+  pickFile,
+  readFile,
+  runMenuItem,
+  settingsPath,
+} from "./memory-platform.ts";
 
 const root = "/research";
 const source =
   "\uFEFF# Draft\r\n\r\nSee [evidence][ref].  \r\n\r\n[ref]: data/Report.md#Results\r\n";
 const report = "# Report\n\n## Results\n\nThree nests.\n";
 const files = {
+  [settingsPath]: '{"autosave":false}',
   [`${root}/draft.md`]: source,
   [`${root}/data/Report.md`]: report,
   [`${root}/other.md`]: "`[literal](draft.md)` [missing](absent.md) [outside](../private.md)",
@@ -40,6 +48,12 @@ test("the graph opens both ends of an actual reference at the same occurrence as
   const edge = graph.getByRole("list", { name: "References" }).getByRole("listitem");
   await edge.getByRole("button", { name: /draft\.md/ }).click();
   await expect(page).toHaveTitle("draft.md — MINT");
+  await expect
+    .poll(() => page.evaluate(() => window.getSelection()?.toString()))
+    .toBe("[evidence][ref]");
+  await page.keyboard.press("ControlOrMeta+Home");
+  await page.keyboard.insertText("New paragraph\n\n");
+  await edge.getByRole("button", { name: /draft\.md/ }).click();
   await expect
     .poll(() => page.evaluate(() => window.getSelection()?.toString()))
     .toBe("[evidence][ref]");
@@ -121,7 +135,7 @@ test("an imported graph package follows the current folder", async ({ page }) =>
   await page.keyboard.press("ControlOrMeta+,");
   const settings = page.getByRole("dialog", { name: "Settings" });
   const label = "Citation map";
-  await settings.getByLabel("Install a MINT plugin file").setInputFiles({
+  await pickFile(page, settings.getByRole("button", { name: "Install a MINT plugin file" }), {
     name: "citations.mint.json",
     mimeType: "application/json",
     buffer: Buffer.from(

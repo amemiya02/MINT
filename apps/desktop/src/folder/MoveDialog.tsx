@@ -13,7 +13,7 @@ export function MoveDialog({
 }: {
   preview: MovePreview;
   folder: string;
-  onChoose: (edits: DocumentEdit[]) => void;
+  onChoose: (edits: DocumentEdit[], updateLinks: boolean) => void;
   onClose: () => void;
 }) {
   const t = useT();
@@ -80,14 +80,14 @@ export function MoveDialog({
         <button type="button" onClick={close}>
           {t("unsaved.cancel")}
         </button>
-        <button type="button" onClick={() => onChoose([preview.moveOnly])}>
+        <button type="button" onClick={() => onChoose([preview.moveOnly], false)}>
           {t("move.only")}
         </button>
         <button
           type="button"
           className="disabled:opacity-50"
           disabled={!ready}
-          onClick={() => onChoose(moveEdits(preview, choices))}
+          onClick={() => onChoose(moveEdits(preview, choices), true)}
         >
           {t("move.update")}
         </button>

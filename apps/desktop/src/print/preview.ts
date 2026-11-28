@@ -17,7 +17,7 @@ async function paginate(html: string, { paper, margin, font }: PageLayout) {
   const [width, height] = paperSizes[paper];
   document.documentElement.dataset.appearance = source.documentElement.dataset.appearance;
   document.title = source.title;
-  for (const style of source.querySelectorAll("style")) {
+  for (const style of source.head.querySelectorAll("style")) {
     style.textContent = style.textContent.replace(/@media print\s*\{/g, "@media all {");
     document.head.append(style);
   }

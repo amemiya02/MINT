@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import { externalWrite, launch, readFile, runMenuItem } from "./memory-platform.ts";
+import { externalWrite, launch, readFile, runMenuItem, settingsPath } from "./memory-platform.ts";
 
 const original = '\uFEFF[Shown][id]\r\n[again][id]\n\r\n[id]: <draft.md#Some%20Heading> "Title"\r';
 const draft = "[back](index.md?q=1#top)\r\n[self](#same)\n";
@@ -105,6 +105,10 @@ test("an open document follows the move with its rewritten source and follows un
 }) => {
   await launch(page, {
     files: { "/notes/draft.md": draft, "/notes/index.md": "", "/notes/archive/other.md": "" },
+    appData: {
+      "history:/notes/draft.md": "[1]",
+      "snapshot:1:/notes/draft.md": "Saved before the move",
+    },
     openFolderDialogResults: ["/notes"],
     locale: "en-US",
   });
@@ -122,10 +126,22 @@ test("an open document follows the move with its rewritten source and follows un
   await content.click();
   await page.keyboard.press("ControlOrMeta+Home");
   await expect(content).toContainText("../index.md?q=1#top");
+  await runMenuItem(page, "file.history");
+  const history = page.getByRole("dialog", { name: "Version History" });
+  await expect(history.locator("del")).toContainText("Saved before the move");
+  await history.getByRole("button", { name: "Close" }).click();
   await page.getByRole("button", { name: "Undo move" }).click();
   await expect(page).toHaveTitle("draft.md — MINT");
   await expect(content).not.toContainText("../index.md");
   expect(await readFile(page, "/notes/draft.md")).toBe(draft);
+  await runMenuItem(page, "file.history");
+  await expect(history.locator("del")).toContainText("Saved before the move");
+  await history.getByRole("button", { name: "Close" }).click();
+  await externalWrite(page, "/notes/archive/final.md", "Unrelated draft");
+  await page.getByRole("treeitem", { name: "archive", exact: true }).press("ArrowRight");
+  await page.getByRole("treeitem", { name: "final.md", exact: true }).click();
+  await runMenuItem(page, "file.history");
+  await expect(history).toContainText("No saved versions yet");
 });
 
 const wikiDraft =
@@ -252,4 +268,36 @@ test("a moved document keeps its relative wikilinks and remains reachable inside
     .poll(() => readFile(page, "/notes/#archive/Final.md"))
     .toBe("See [[/draft.md|./draft]] and `[[./draft]]`.");
   expect(await readFile(page, "/notes/draft.md")).toBe("[[Final.md#Results|original]]");
+});
+
+test("a new reference after preview requires another move review", async ({ page }) => {
+  const dialog = await preview(page);
+  await externalWrite(page, "/notes/new.md", "[draft](draft.md)");
+  await dialog.getByRole("button", { name: "Move and update links" }).click();
+  await expect(page.getByRole("alert")).toContainText("/notes/new.md");
+  expect(await readFile(page, "/notes/draft.md")).toBe(draft);
+  expect(await readFile(page, "/notes/index.md")).toBe(original);
+});
+
+test("a dirty reference blocks a move with a localized explanation", async ({ page }) => {
+  await launch(page, {
+    locale: "zh-CN",
+    files: {
+      "/notes/draft.md": "Draft",
+      "/notes/ref.md": "[link](draft.md)",
+      [settingsPath]: '{"autosave":false}',
+    },
+    openFolderDialogResults: ["/notes"],
+  });
+  await runMenuItem(page, "file.openFolder");
+  await page.getByRole("treeitem", { name: "ref.md" }).click();
+  await page.getByRole("textbox").fill("[link](draft.md) unsaved");
+  await page.getByRole("treeitem", { name: "draft.md" }).press("F2");
+  const name = page.getByRole("textbox", { name: "名称" });
+  await name.fill("final.md");
+  await name.press("Enter");
+  await page.getByRole("button", { name: "移动并更新链接" }).click();
+  await expect(page.getByRole("alert")).toContainText("/notes/ref.md 有未保存的更改");
+  expect(await readFile(page, "/notes/draft.md")).toBe("Draft");
+  expect(await readFile(page, "/notes/ref.md")).toBe("[link](draft.md)");
 });

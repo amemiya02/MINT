@@ -182,3 +182,11 @@ test("exports the current draft as HTML from the format chooser", async ({ page 
   expect(await readFile(page, "/notes/report.md")).toBe(doc);
   await expect(page.getByText("Unsaved changes")).toBeVisible();
 });
+
+test("HTML export protects the open manuscript as a destination", async ({ page }) => {
+  await openReport(page, ["/notes/report.md"]);
+  await runMenuItem(page, "file.exportHtml");
+  await page.getByRole("button", { name: "Export", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("different from the manuscript");
+  expect(await readFile(page, "/notes/report.md")).toBe(doc);
+});

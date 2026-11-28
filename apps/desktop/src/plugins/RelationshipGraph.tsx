@@ -147,9 +147,7 @@ export function RelationshipGraph({
                   type="button"
                   className={node}
                   title={link.context}
-                  onClick={() =>
-                    openDocument(link.sourcePath, { sourceFrom: link.from, sourceTo: link.to })
-                  }
+                  onClick={() => openDocument(link.sourcePath, { citation: link })}
                 >
                   {relativePath(folder, link.sourcePath)}
                   <small className="block">

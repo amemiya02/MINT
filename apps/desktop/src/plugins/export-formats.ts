@@ -27,12 +27,40 @@ export const exportFormats = {
   },
 } satisfies Record<string, FormatCodec>;
 
-export type PluginFormat = keyof typeof exportFormats;
+interface TextFormat {
+  label: string;
+  extension: string;
+  template: string;
+}
+
+export type PluginFormat = keyof typeof exportFormats | TextFormat;
 
 export function isPluginFormat(value: unknown): value is PluginFormat {
-  return typeof value === "string" && Object.hasOwn(exportFormats, value);
+  if (typeof value === "string") return Object.hasOwn(exportFormats, value);
+  if (!value || typeof value !== "object") return false;
+  const format = value as Partial<TextFormat>;
+  return (
+    typeof format.label === "string" &&
+    !!format.label.trim() &&
+    format.label.length <= 120 &&
+    typeof format.extension === "string" &&
+    /^[a-z0-9]{1,16}$/i.test(format.extension) &&
+    typeof format.template === "string" &&
+    /\{\{(?:json\.)?text\}\}/.test(format.template)
+  );
 }
 
 export function codecFor(format: PluginFormat): FormatCodec {
-  return exportFormats[format];
+  if (typeof format === "string") return exportFormats[format];
+  return {
+    label: format.label,
+    extension: format.extension,
+    async encode(source) {
+      return format.template.replace(
+        /\{\{(json\.)?(title|text|language)\}\}/g,
+        (_, json: string | undefined, key: "title" | "text" | "language") =>
+          json ? JSON.stringify(source[key]) : source[key],
+      );
+    },
+  };
 }

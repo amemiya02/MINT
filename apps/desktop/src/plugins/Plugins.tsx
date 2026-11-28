@@ -1,6 +1,7 @@
 import type { WordCount } from "@mint/editor";
 import { useEffect, useState } from "react";
 import { type Translate, useT } from "../i18n/index.ts";
+import type { Platform } from "../platform/platform.ts";
 import { useModalDialog } from "../window/useModalDialog.ts";
 import {
   addedPermissions,
@@ -70,7 +71,7 @@ function permission(action: Permission, t: Translate) {
   return t(action === "folder.read" ? "plugin.folderRead" : "plugin.read");
 }
 
-export function PluginSettings() {
+export function PluginSettings({ platform }: { platform: Platform }) {
   const t = useT();
   const installed = useInstallations();
   const [pending, setPending] = useState<PluginManifest | null>(null);
@@ -126,36 +127,34 @@ export function PluginSettings() {
           </button>
         </fieldset>
       ))}
-      <label className="flex flex-col gap-1 text-sm">
-        {t("plugin.file")}
-        <input
-          type="file"
-          accept=".json,application/json"
-          onChange={async (event) => {
-            const file = event.currentTarget.files?.[0];
-            event.currentTarget.value = "";
+      <button
+        type="button"
+        className={button}
+        onClick={async () => {
+          try {
+            const file = await platform.pickFile(".json,application/json");
             if (!file) return;
             setPending(null);
             setReview(null);
-            try {
-              const manifest: unknown = file.size <= 65536 && JSON.parse(await file.text());
-              if (!isManifest(manifest) || manifest.id.startsWith("mint.")) {
-                setInvalidFile(true);
-                return;
-              }
-              const current = installations().find((i) => i.manifest.id === manifest.id);
-              if (current) {
-                const added = addedPermissions(current.manifest, manifest);
-                if (added.length) setReview({ manifest, added });
-                else apply(() => update(manifest));
-              } else setPending(manifest);
-              setInvalidFile(false);
-            } catch {
+            const manifest: unknown = file.size <= 65536 && JSON.parse(await file.text());
+            if (!isManifest(manifest) || manifest.id.startsWith("mint.")) {
               setInvalidFile(true);
+              return;
             }
-          }}
-        />
-      </label>
+            const current = installations().find((i) => i.manifest.id === manifest.id);
+            if (current) {
+              const added = addedPermissions(current.manifest, manifest);
+              if (added.length) setReview({ manifest, added });
+              else apply(() => update(manifest));
+            } else setPending(manifest);
+            setInvalidFile(false);
+          } catch {
+            setInvalidFile(true);
+          }
+        }}
+      >
+        {t("plugin.file")}
+      </button>
       {invalidFile && <p role="alert">{t("plugin.invalid")}</p>}
       {pending && (
         <div className="rounded border border-(--mint-border) p-2">

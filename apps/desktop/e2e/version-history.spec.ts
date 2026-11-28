@@ -60,8 +60,9 @@ test("restore one change without disturbing newer paragraphs or mixed line endin
   page,
 }) => {
   const path = "/notes/report.md";
-  const earlier = "\uFEFFFirst\r\nLost paragraph  \nMiddle\rClosing";
-  const current = "\uFEFFFirst\r\nMiddle\rNew ending  \n";
+  const middle = "Unchanged paragraph\r\n".repeat(2100);
+  const earlier = `\uFEFFFirst\r\nLost paragraph  \n${middle}Closing`;
+  const current = `\uFEFFFirst\r\n${middle}New ending  \n`;
   await launch(page, {
     files: { [path]: current },
     appData: { [`history:${path}`]: "[1]", [`snapshot:1:${path}`]: earlier },
@@ -72,10 +73,11 @@ test("restore one change without disturbing newer paragraphs or mixed line endin
   await runMenuItem(page, "file.history");
   const dialog = page.getByRole("dialog", { name: "Version History" });
   await dialog.getByLabel("To version").selectOption({ label: "Current draft" }, { timeout: 3000 });
+  await expect(dialog.getByRole("button", { name: "Restore this change" })).toHaveCount(2);
   await dialog.getByRole("button", { name: "Restore this change" }).first().click();
   await expect
     .poll(() => readFile(page, path))
-    .toBe("\uFEFFFirst\r\nLost paragraph  \nMiddle\rNew ending  \n");
+    .toBe(`\uFEFFFirst\r\nLost paragraph  \n${middle}New ending  \n`);
   await page.keyboard.press("ControlOrMeta+Z");
   await expect.poll(() => readFile(page, path)).toBe(current);
 });

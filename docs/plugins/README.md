@@ -101,6 +101,26 @@ A MINT package can contribute the format under its own name. The host supplies t
 }
 ```
 
+## Package-defined text exports
+
+A local JSON package can add a UTF-8 format to **File → Import / Export…**. For example, this package exports the current draft as a transcript that a JSON reader can open.
+
+```json
+{
+  "apiVersion": 1,
+  "id": "example.transcript",
+  "name": "Transcript exchange",
+  "permissions": ["document.read"],
+  "exportFormat": {
+    "label": "Transcript JSON",
+    "extension": "transcript",
+    "template": "{\"title\":{{json.title}},\"body\":{{json.text}}}"
+  }
+}
+```
+
+The host substitutes `{{title}}`, `{{text}}`, and `{{language}}` once. Prefix a field with `json.` to encode it as a quoted JSON string, including escaping quotes and newlines. Include the draft with `{{text}}` or `{{json.text}}`. The extension is 1–16 alphanumeric characters. The writer chooses the output path. Disabling the package or revoking its document grant removes the format.
+
 ## EPUB export
 
 Install **EPUB export** in Settings → Plugins and allow it to read the current document. Choose **File → Import / Export… → EPUB** to save a reflowable EPUB 3 book with a linked contents page built from the headings in the active draft. Image captions are included as text.

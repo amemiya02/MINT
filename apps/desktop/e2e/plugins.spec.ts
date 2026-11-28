@@ -1,5 +1,12 @@
 import { expect, test } from "@playwright/test";
-import { launch } from "./memory-platform.ts";
+import {
+  launch,
+  pickFile,
+  readFile,
+  runMenuItem,
+  savedDialogs,
+  settingsPath,
+} from "./memory-platform.ts";
 
 test("a writer controls access to the active draft and manages the statistics plugin", async ({
   page,
@@ -61,7 +68,7 @@ test("a local MINT plugin contributes the document metrics its author selected",
   await page.locator(".cm-content").fill("An unsaved draft.");
   await page.keyboard.press("ControlOrMeta+,");
   const settings = page.getByRole("dialog", { name: "Settings" });
-  const input = settings.getByLabel("Install a MINT plugin file");
+  const input = settings.getByRole("button", { name: "Install a MINT plugin file" });
   const manifest = {
     apiVersion: 1,
     id: "example.characters",
@@ -74,9 +81,9 @@ test("a local MINT plugin contributes the document metrics its author selected",
     mimeType: "application/json",
     buffer: Buffer.from(JSON.stringify(data)),
   });
-  await input.setInputFiles(file({ ...manifest, permissions: ["folder.read"] }));
+  await pickFile(page, input, file({ ...manifest, permissions: ["folder.read"] }));
   await expect(settings.getByRole("alert")).toContainText("Unsupported plugin package");
-  await input.setInputFiles(file(manifest));
+  await pickFile(page, input, file(manifest));
   await settings.getByRole("button", { name: "Allow access" }).click();
   await settings.getByRole("button", { name: "Close", exact: true }).click();
   await page.getByRole("button", { name: "Character budget" }).click();
@@ -133,7 +140,7 @@ test("updating a local plugin retains its existing document grant", async ({ pag
   // Open an installation saved by an earlier MINT release.
   await page.addInitScript((manifest) => {
     localStorage.setItem(
-      "mint.plugin.v1." + manifest.id,
+      `mint.plugin.v1.${manifest.id}`,
       JSON.stringify({ manifest, enabled: true, granted: true }),
     );
   }, original);
@@ -142,8 +149,10 @@ test("updating a local plugin retains its existing document grant", async ({ pag
   await page.locator(".cm-content").fill("draft");
   await page.keyboard.press("ControlOrMeta+,");
   const settings = page.getByRole("dialog", { name: "Settings" });
-  const input = settings.getByLabel("Install a MINT plugin file");
-  await input.setInputFiles(
+  const input = settings.getByRole("button", { name: "Install a MINT plugin file" });
+  await pickFile(
+    page,
+    input,
     upload({ ...original, name: "Draft size", statistics: ["characters"] }),
   );
   await expect(settings.getByRole("group", { name: "Draft size" })).toBeVisible();
@@ -160,7 +169,7 @@ test("a writer can decline an additional action, then approve the update", async
   await page.keyboard.press("ControlOrMeta+n");
   await editor.fill("draft");
   const settings = page.getByRole("dialog", { name: "Settings" });
-  const input = settings.getByLabel("Install a MINT plugin file");
+  const input = settings.getByRole("button", { name: "Install a MINT plugin file" });
   const close = settings.getByRole("button", { name: "Close", exact: true });
   const expanded = {
     ...original,
@@ -169,9 +178,9 @@ test("a writer can decline an additional action, then approve the update", async
     templates: [{ name: "Review marker", text: "REVIEW" }],
   };
   await page.keyboard.press("ControlOrMeta+,");
-  await input.setInputFiles(upload(original));
+  await pickFile(page, input, upload(original));
   await settings.getByRole("button", { name: "Allow access" }).click();
-  await input.setInputFiles(upload(expanded));
+  await pickFile(page, input, upload(expanded));
   const review = settings.getByRole("group", { name: "Update Draft toolkit" });
   await expect(review).toContainText("Modify the current document at the selection");
   await expect(review).not.toContainText("Read the current document");
@@ -184,7 +193,7 @@ test("a writer can decline an additional action, then approve the update", async
   await expect(page.getByRole("option", { name: /Review marker/ })).toHaveCount(0);
   await page.keyboard.press("Escape");
   await page.keyboard.press("ControlOrMeta+,");
-  await input.setInputFiles(upload(expanded));
+  await pickFile(page, input, upload(expanded));
   await review.getByRole("button", { name: "Allow and update" }).click();
   await close.click();
   await page.getByRole("button", { name: "Draft toolkit" }).click();
@@ -200,4 +209,46 @@ test("a writer can decline an additional action, then approve the update", async
   await expect(page.locator(".cm-content").filter({ hasText: "another open draft" })).toHaveText(
     "another open draft",
   );
+});
+
+test("an installed package exports its own format from the current draft", async ({ page }) => {
+  const manifest = {
+    apiVersion: 1,
+    id: "example.transcript",
+    name: "Transcript exchange",
+    permissions: ["document.read"],
+    exportFormat: {
+      label: "Transcript JSON",
+      extension: "transcript",
+      template: '{"title":{{json.title}},"body":{{json.text}}}',
+    },
+  };
+  await launch(page, {
+    locale: "en-US",
+    files: {
+      "/notes/report.md": "Saved draft",
+      "/packages/transcript.json": JSON.stringify(manifest),
+      [settingsPath]: '{"autosave":false}',
+    },
+    openDialogResults: ["/notes/report.md"],
+    fileDialogResults: ["/packages/transcript.json"],
+    saveDialogResults: ["/notes/share.transcript"],
+  });
+  await page.keyboard.press("ControlOrMeta+O");
+  const body = 'Line one\n"Unpublished"';
+  await page.getByRole("textbox").fill(body);
+  await page.keyboard.press("ControlOrMeta+,");
+  await page.getByRole("button", { name: "Install a MINT plugin file" }).click({ timeout: 2500 });
+  await page.getByRole("button", { name: "Allow access" }).click();
+  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await runMenuItem(page, "file.export");
+  const dialog = page.getByRole("dialog", { name: "Import / Export" });
+  await dialog.getByLabel("Format").selectOption({ label: "Transcript JSON" });
+  await dialog.getByRole("button", { name: "Export", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(await savedDialogs(page)).toEqual(["/notes/report.transcript"]);
+  expect(JSON.parse((await readFile(page, "/notes/share.transcript")) ?? "")).toEqual({
+    title: "report",
+    body,
+  });
 });

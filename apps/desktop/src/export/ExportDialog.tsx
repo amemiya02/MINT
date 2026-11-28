@@ -2,12 +2,6 @@ import { useEffect, useId, useMemo, useState } from "react";
 import { useT } from "../i18n/index.ts";
 import { baseName } from "../paths.ts";
 import type { Platform } from "../platform/platform.ts";
-import {
-  codecFor,
-  exportFormats,
-  isPluginFormat,
-  type PluginFormat,
-} from "../plugins/export-formats.ts";
 import { activeExportFormats } from "../plugins/host.ts";
 import { NotionImport } from "../plugins/NotionImport.tsx";
 import { pluginName, useInstallations } from "../plugins/Plugins.tsx";
@@ -20,7 +14,7 @@ import { useTheme } from "../theme/useTheme.ts";
 import { useModalDialog } from "../window/useModalDialog.ts";
 import { documentHtml, type HtmlExportChoice } from "./html-export.ts";
 
-export type ExportFormat = "html" | "pdf" | "docx" | PluginFormat;
+export type ExportFormat = "html" | "pdf" | "docx";
 
 interface ExportDialogProps {
   readonly platform: Platform;
@@ -71,6 +65,8 @@ export function ExportDialog({
     !importers.some(({ manifest }) => `import:${manifest.id}` === selectedFormat);
   const format = removed && path ? "html" : selectedFormat;
   const importing = format.startsWith("import:");
+  const unavailable =
+    !importing && !["html", "pdf", "docx"].includes(format) && !formats.has(format);
   const themeId = useId();
   const appearanceId = useId();
   const imagesId = useId();
@@ -117,7 +113,7 @@ export function ExportDialog({
               themeFolder: folder,
               title: stem(path),
             },
-            choice: { appearance, theme, embedImages: true },
+            choice: { appearance, theme, embedImages: true, forPreview: true },
           },
     [pdfText, appearance, theme, platform, path, settings, folder],
   );
@@ -152,78 +148,73 @@ export function ExportDialog({
     setError(null);
     try {
       const name = stem(path);
-      if (format === "pdf") {
-        if (!preview || !ready) throw new Error(t("export.pdf.preview"));
-        const target = platform.savesPdfDirectly
-          ? await platform.showSaveDialog({
-              title: t("export.pdf.saveTitle"),
-              defaultPath: `${path.slice(0, path.length - baseName(path).length)}${name}.pdf`,
-              filters: [{ name: "PDF", extensions: ["pdf"] }],
-            })
-          : undefined;
-        if (target === null) {
-          close();
-          return;
-        }
-        if (target === path) throw new Error(t("export.docx.chooseAnotherFile"));
+      const pdf = format === "pdf";
+      const codec = formats.get(format);
+      if (pdf && (!preview || !ready)) throw new Error(t("export.pdf.preview"));
+      const extension = codec?.extension ?? format;
+      const label = codec?.label ?? format.toUpperCase();
+      const title = codec
+        ? t("export.plugin.saveTitle", { format: label })
+        : t(
+            pdf
+              ? "export.pdf.saveTitle"
+              : format === "docx"
+                ? "export.docx.saveTitle"
+                : "export.html.saveTitle",
+          );
+      const target =
+        pdf && !platform.savesPdfDirectly
+          ? undefined
+          : await platform.showSaveDialog({
+              knownPaths: [path],
+              title,
+              defaultPath: `${path.slice(0, path.length - baseName(path).length)}${name}.${extension}`,
+              filters: [
+                { name: label, extensions: format === "html" ? ["html", "htm"] : [extension] },
+              ],
+            });
+      if (target === null) {
+        close();
+        return;
+      }
+      if (target === path) throw new Error(t("export.chooseAnotherFile"));
+      if (pdf && preview) {
         await platform.printDocument(preview.html, {
           title: name,
           paper: layout.paper,
           ...(target ? { target } : {}),
         });
-        close();
-        return;
-      }
-      if (isPluginFormat(format)) {
-        const codec = codecFor(format);
-        const target = await platform.showSaveDialog({
-          title: t("export.plugin.saveTitle", { format: codec.label }),
-          defaultPath: `${path.slice(0, path.length - baseName(path).length)}${name}.${codec.extension}`,
-          filters: [{ name: codec.label, extensions: [codec.extension] }],
-        });
-        if (target) {
-          if (target === path) throw new Error(t("export.docx.chooseAnotherFile"));
-          const requireGrant = () => {
-            if (!activeExportFormats().includes(format)) throw new Error(t("plugin.denied"));
-          };
-          requireGrant();
-          const content = await codec.encode({
-            title: name,
-            text: getText(),
-            dialect: dialectOf(settings),
-            language: document.documentElement.lang || platform.locale,
-          });
-          requireGrant();
-          if (typeof content === "string") await platform.writeTextFile(target, content);
-          else await platform.writeBinaryFile(target, content);
-        }
-        close();
-        return;
-      }
-      const word = format === "docx";
-      const target = await platform.showSaveDialog({
-        title: t(word ? "export.docx.saveTitle" : "export.html.saveTitle"),
-        defaultPath: `${path.slice(0, path.length - baseName(path).length)}${name}.${format}`,
-        filters: [
-          word
-            ? { name: "DOCX", extensions: ["docx"] }
-            : { name: "HTML", extensions: ["html", "htm"] },
-        ],
-      });
-      if (target && word) {
-        if (target === path) throw new Error(t("export.docx.chooseAnotherFile"));
+      } else if (target && format === "docx") {
         const { documentDocx } = await import("./docx-export.ts");
         await platform.writeBinaryFile(
           target,
           await documentDocx(platform, path, getText(), settings),
         );
-      } else if (target) {
-        const html = await documentHtml(
-          { platform, path, text: getText(), settings, themeFolder: folder, title: name },
-          choice,
+      } else if (target && format === "html") {
+        await platform.writeTextFile(
+          target,
+          await documentHtml(
+            { platform, path, text: getText(), settings, themeFolder: folder, title: name },
+            choice,
+          ),
         );
-        await platform.writeTextFile(target, html);
-      }
+      } else if (target && codec) {
+        const requireGrant = () => {
+          const current = activeExportFormats().get(format);
+          if (!current || JSON.stringify(current.definition) !== JSON.stringify(codec.definition))
+            throw new Error(t("plugin.denied"));
+        };
+        requireGrant();
+        const content = await codec.encode({
+          title: name,
+          text: getText(),
+          dialect: dialectOf(settings),
+          language: document.documentElement.lang || platform.locale,
+        });
+        requireGrant();
+        if (typeof content === "string") await platform.writeTextFile(target, content);
+        else await platform.writeBinaryFile(target, content);
+      } else throw new Error(t("export.plugin.unavailable"));
       close();
     } catch (e) {
       setError(t("export.html.failed", { reason: e instanceof Error ? e.message : String(e) }));
@@ -281,14 +272,14 @@ export function ExportDialog({
                 <option disabled={!path} value="docx">
                   DOCX
                 </option>
-                {isPluginFormat(format) && !formats.includes(format) && (
+                {unavailable && (
                   <option value={format} disabled>
                     {t("export.plugin.unavailable")}
                   </option>
                 )}
-                {formats.map((key) => (
+                {[...formats].map(([key, codec]) => (
                   <option disabled={!path} key={key} value={key}>
-                    {exportFormats[key].label}
+                    {codec.label}
                   </option>
                 ))}
                 {importers.map(({ manifest }) => (
@@ -437,11 +428,7 @@ export function ExportDialog({
           {!importing && (
             <button
               type="submit"
-              disabled={
-                busy ||
-                (isPluginFormat(format) && !formats.includes(format)) ||
-                (format === "pdf" && !ready)
-              }
+              disabled={busy || unavailable || (format === "pdf" && !ready)}
               className={`${buttonClass} border-(--mint-accent) font-medium`}
             >
               {t(

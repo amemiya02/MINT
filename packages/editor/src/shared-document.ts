@@ -1,9 +1,19 @@
-import { historyField } from "@codemirror/commands";
-import { Compartment, type Extension, Transaction } from "@codemirror/state";
+import { historyField, invertedEffects, isolateHistory } from "@codemirror/commands";
+import {
+  Compartment,
+  EditorState,
+  type Extension,
+  Facet,
+  StateEffect,
+  Transaction,
+} from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import { copyFileDocument, sharedFileEffects } from "./file-text.ts";
 
 import { ManualReview } from "./manual-review.ts";
+
+const viewOwner = Facet.define<symbol, symbol | undefined>({ combine: (owners) => owners[0] });
+const historyOwner = StateEffect.define<symbol>();
 
 /** Views of one manuscript share CodeMirror changes and the immutable history field.
  * Each view maps its own selection through a sibling's changes and keeps its own viewport. */
@@ -11,7 +21,7 @@ export class SharedDocument {
   readonly review = new ManualReview();
   private views = new Set<EditorView>();
   private history = new Compartment();
-  private lastWriter: EditorView | null = null;
+  private lastWriter: symbol | undefined;
 
   currentDocument() {
     const first = this.views.values().next().value;
@@ -21,7 +31,24 @@ export class SharedDocument {
   initialHistory(): Extension {
     const first = this.views.values().next().value;
     const snapshot = first?.state.field(historyField);
-    return this.history.of(snapshot ? historyField.init(() => snapshot) : []);
+    const owner = Symbol();
+    return [
+      this.history.of(snapshot ? historyField.init(() => snapshot) : []),
+      viewOwner.of(owner),
+      invertedEffects.of((tr) => {
+        if (!tr.docChanged) return [];
+        // A redo still belongs to the pane that made the original edit.
+        return [tr.effects.find((effect) => effect.is(historyOwner)) ?? historyOwner.of(owner)];
+      }),
+      EditorState.transactionExtender.of((tr) =>
+        tr.docChanged &&
+        this.lastWriter !== owner &&
+        !tr.isUserEvent("undo") &&
+        !tr.isUserEvent("redo")
+          ? { annotations: isolateHistory.of("before") }
+          : null,
+      ),
+    ];
   }
 
   attach(view: EditorView) {
@@ -30,7 +57,6 @@ export class SharedDocument {
 
   detach(view: EditorView) {
     this.views.delete(view);
-    if (this.lastWriter === view) this.lastWriter = null;
   }
 
   dispatch(transactions: readonly Transaction[], source: EditorView) {
@@ -42,8 +68,7 @@ export class SharedDocument {
       return;
     }
     if (
-      this.views.size > 1 &&
-      this.lastWriter !== source &&
+      last.effects.some((e) => e.is(historyOwner) && e.value !== source.state.facet(viewOwner)) &&
       (last.isUserEvent("undo") || last.isUserEvent("redo"))
     ) {
       const selection = last.startState.selection.map(last.changes);
@@ -53,7 +78,7 @@ export class SharedDocument {
       source.update(transactions);
     }
     for (const transaction of changed) this.review.record(transaction);
-    this.lastWriter = source;
+    this.lastWriter = source.state.facet(viewOwner);
     for (const peer of this.views) {
       if (peer === source) continue;
       const updates: Transaction[] = [];
