@@ -1,7 +1,8 @@
 import { type FormEvent, useId, useState } from "react";
 import { type MessageKey, useT } from "../i18n/index.ts";
 import type { Platform } from "../platform/platform.ts";
-import { modelEndpoint } from "./model.ts";
+import { ConnectionSection } from "./ConnectionSection.tsx";
+import { modelEndpoint, modelWritingSender } from "./model.ts";
 
 const presets = {
   custom: { label: "models.custom", address: "" },
@@ -16,23 +17,10 @@ const fieldClass =
 
 export function ModelConnections({ platform }: { readonly platform: Platform }) {
   const t = useT();
-  const [open, setOpen] = useState(false);
-  const sectionId = useId();
   return (
-    <section className="rounded-md border border-(--mint-border)">
-      <button
-        type="button"
-        aria-expanded={open}
-        aria-controls={sectionId}
-        onClick={() => setOpen(!open)}
-        className="w-full rounded-md px-3 py-2 text-start text-sm font-medium hover:bg-(--mint-hover) focus-visible:outline-2 focus-visible:outline-(--mint-accent)"
-      >
-        {t("models.title")}
-      </button>
-      <div id={sectionId} hidden={!open}>
-        {open && <ModelTrial platform={platform} />}
-      </div>
-    </section>
+    <ConnectionSection title={t("models.title")}>
+      <ModelTrial platform={platform} />
+    </ConnectionSection>
   );
 }
 
@@ -75,14 +63,15 @@ function ModelTrial({ platform }: { readonly platform: Platform }) {
     setBusy(true);
     setApiKey("");
     try {
-      const reply = await platform.sendModelMessage(
+      const send = modelWritingSender(
+        platform.sendModelMessage,
         { address, model },
-        [{ role: "user", content: sample }],
         {
           apiKey,
           onDelta: stream ? (text) => setPartial((previous) => previous + text) : undefined,
         },
       );
+      const reply = await send({ instruction: sample });
       const replacement =
         reply.finishReason === null || reply.finishReason === "stop"
           ? /^<replacement>([\s\S]+)<\/replacement>$/.exec(reply.text.trim())?.[1]?.trim()

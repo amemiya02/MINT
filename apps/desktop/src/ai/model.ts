@@ -1,3 +1,5 @@
+import type { WritingReply, WritingSender } from "./writing-sender.ts";
+
 export interface ModelConnection {
   readonly address: string;
   readonly model: string;
@@ -14,8 +16,7 @@ interface ModelOptions {
   readonly onDelta?: (text: string) => void;
 }
 
-interface ModelReply {
-  readonly text: string;
+interface ModelReply extends WritingReply {
   readonly streamed: boolean;
   readonly finishReason: string | null;
 }
@@ -25,6 +26,28 @@ export type SendModelMessage = (
   messages: readonly ModelMessage[],
   options?: ModelOptions,
 ) => Promise<ModelReply>;
+
+/** Reuse the model transport for the same text tasks that external Agents accept. */
+export function modelWritingSender(
+  send: SendModelMessage,
+  connection: ModelConnection,
+  options?: ModelOptions,
+): WritingSender<ModelReply> {
+  return ({ instruction, selectedText }) =>
+    send(
+      connection,
+      [
+        {
+          role: "user",
+          content:
+            selectedText === undefined
+              ? instruction
+              : JSON.stringify({ instruction, selectedText }),
+        },
+      ],
+      options,
+    );
+}
 
 export interface ModelRequest {
   readonly url: string;
