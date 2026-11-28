@@ -28,11 +28,13 @@ interface DraftConnection {
 }
 
 interface DraftTask {
+  readonly title: string;
   readonly request: WritingRequest;
   readonly folder: string | null;
 }
 
 interface DraftAttempt {
+  readonly id: string;
   readonly task: DraftTask;
   readonly connection: DraftConnection;
   readonly status: AttemptStatus;
@@ -81,6 +83,7 @@ export function DraftComposer({
   const busy = attempt?.status === "working" || attempt?.status === "approval";
   const [error, setError] = useState<MessageKey | null>(null);
   const [unapplied, setUnapplied] = useState("");
+  const [applied, setApplied] = useState(false);
   const named = useNamedMaterials();
   const [allowedFolder, setAllowedFolder] = useState<string | null>(null);
   const searchFolder = allowedFolder === folder ? folder : null;
@@ -182,6 +185,7 @@ export function DraftComposer({
     if (!connection) return;
     await runDraft(
       {
+        title: instruction.trim(),
         request: {
           instruction: t("draft.prompt", { instruction: instruction.trim() }),
           taskContext:
@@ -203,7 +207,7 @@ export function DraftComposer({
     const running = new AbortController();
     const { signal } = running;
     controller.current = running;
-    const entry = { task, connection };
+    const entry = { id: crypto.randomUUID(), task, connection };
     let partial = "";
     let approved: NamedMaterial[] = [];
     let status: AttemptStatus;
@@ -239,7 +243,9 @@ export function DraftComposer({
       if (status === "complete") {
         controller.current = null;
         if (onDraft(reply.text)) {
-          onClose();
+          setApplied(true);
+          setAttempt({ ...entry, approved, status, partial: "" });
+          if (store.getState().activeId === tabId) store.editor(tabId)?.focus();
           return;
         }
         setUnapplied(reply.text);
@@ -273,6 +279,8 @@ export function DraftComposer({
   const report = useMemo(
     () =>
       attempt && {
+        tabId,
+        title: attempt.task.title,
         name,
         recipient: attempt.connection.label,
         material: [
@@ -283,13 +291,21 @@ export function DraftComposer({
         ].join(" · "),
         status: attempt.status,
         count: 0,
+        decisions: Number(!!pending || !!unapplied),
+        background: !active || collapsed,
+        notice: pending
+          ? { id: `${attempt.id}:approval:${pending.id}`, detail: pending.name }
+          : attempt.status === "complete"
+            ? { id: attempt.id }
+            : undefined,
         stop: busy ? () => controller.current?.abort() : undefined,
         reveal: () => {
-          setCollapsed(false);
           store.activate(tabId);
+          if (applied) store.editor(tabId)?.focus();
+          else setCollapsed(false);
         },
       },
-    [attempt, busy, name, pending, store, t, tabId],
+    [active, applied, attempt, busy, collapsed, name, pending, store, t, tabId, unapplied],
   );
   useWritingTask(report);
 
@@ -305,6 +321,7 @@ export function DraftComposer({
   const alternatives = retry ? connections.filter(({ id }) => id !== retry.connection.id) : [];
   const alternate = alternatives.find(({ id }) => id === retryId);
 
+  if (applied) return null;
   if (collapsed)
     return (
       active && (

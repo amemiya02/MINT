@@ -18,7 +18,6 @@ import { ReplyExcerpt } from "./ReplyExcerpt.tsx";
 import { type SelectionEdit, selectionEdits } from "./selection-edits.ts";
 import { TaskContextChecklist, useNamedMaterials } from "./TaskContext.tsx";
 import { useWritingTask, WritingTaskMaterials } from "./WritingTasks.tsx";
-import { WritingTasksDialog } from "./WritingTasksDialog.tsx";
 import {
   type AttemptStatus,
   failureStatus,
@@ -51,7 +50,7 @@ const fieldClass =
   "min-w-0 rounded-md border border-(--mint-border) bg-(--mint-bg) px-2 py-1 focus-visible:outline-2 focus-visible:outline-(--mint-accent)";
 
 const scopes = ["selection", "document", "instruction"] as const;
-type Scope = (typeof scopes)[number];
+type Scope = (typeof scopes)[number] | "folder";
 const actions = ["comment", "preview", "direct"] as const;
 type Action = (typeof actions)[number];
 
@@ -61,6 +60,7 @@ function editKey({ from, to, before, after }: SelectionEdit) {
 
 interface Origin extends WritingSelection {
   readonly id: string;
+  readonly folder?: string;
 }
 
 interface Task {
@@ -73,6 +73,7 @@ interface Task {
 }
 
 interface Attempt {
+  readonly id: string;
   readonly task: Task;
   readonly recipientId: string;
   readonly recipient: string;
@@ -129,8 +130,9 @@ interface Props {
   readonly active: boolean;
   readonly platform: Platform;
   readonly folder: string | null;
-  readonly askRequest: number | null;
-  readonly tasksRequest: number | null;
+  readonly askRequest: { readonly folder?: string } | null;
+  readonly taskRestore: { readonly task: SavedWritingTask } | null;
+  readonly taskDeletion: number;
   readonly settingsOpen: boolean;
   readonly onAsk: () => void;
   readonly onTasks: () => void;
@@ -151,7 +153,8 @@ export function WritingAssistant({
   platform,
   folder,
   askRequest,
-  tasksRequest,
+  taskRestore,
+  taskDeletion,
   settingsOpen,
   onAsk,
   onTasks,
@@ -167,12 +170,12 @@ export function WritingAssistant({
   const [restored, setRestored] = useState<RestoredReview | null>(null);
   const taskRunning = useRef(false);
   const [placement, setPlacement] = useState<"inline" | "sidebar" | null>(null);
-  const [historyOpen, setHistoryOpen] = useState(false);
   const [hasSavedTasks, setHasSavedTasks] = useState(false);
   const [busyTask, setBusyTask] = useState<string | null>(null);
-  const lastAsk = useRef<number | null>(null);
-  const lastHistory = useRef<number | null>(null);
+  const lastAsk = useRef<typeof askRequest>(null);
+  const lastRestore = useRef<typeof taskRestore>(null);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Deleting a task invalidates this document's saved task list.
   useEffect(() => {
     let current = true;
     void platform.writingTasks.list(path).then(
@@ -184,13 +187,7 @@ export function WritingAssistant({
     return () => {
       current = false;
     };
-  }, [platform, path]);
-
-  useEffect(() => {
-    if (tasksRequest === null || tasksRequest === lastHistory.current) return;
-    lastHistory.current = tasksRequest;
-    setHistoryOpen(true);
-  }, [tasksRequest]);
+  }, [platform, path, taskDeletion]);
 
   useEffect(() => {
     if (!editor) return;
@@ -211,11 +208,11 @@ export function WritingAssistant({
       setPlacement("sidebar");
       return;
     }
-    const selection = captureWritingSelection(editor);
+    const selection = captureWritingSelection(editor, !!askRequest.folder);
     if (!selection) return;
-    setOrigin({ id: crypto.randomUUID(), ...selection });
+    setOrigin({ id: crypto.randomUUID(), ...selection, folder: askRequest.folder });
     setRestored(null);
-    setPlacement("inline");
+    setPlacement(askRequest.folder ? "sidebar" : "inline");
   }, [askRequest, editor]);
 
   useEffect(() => () => origin?.range.release(), [origin]);
@@ -224,13 +221,13 @@ export function WritingAssistant({
     if (!origin || origin.editor !== editor) return;
     const reviews = openWritingReviews(platform.writingTasks);
     reviews.set(origin.id, {
+      tabId,
       busy: busyTask === origin.id,
       focus() {
         onActivate();
         setPlacement("sidebar");
       },
-      remove(remaining) {
-        setHasSavedTasks(remaining > 0);
+      remove() {
         setPlacement(null);
         setOrigin(null);
         setRestored(null);
@@ -239,33 +236,23 @@ export function WritingAssistant({
     return () => {
       reviews.delete(origin.id);
     };
-  }, [busyTask, editor, onActivate, origin, platform]);
+  }, [busyTask, editor, onActivate, origin, platform, tabId]);
 
-  function openTask(task: SavedWritingTask) {
-    if (!editor) return false;
-    if (task.id !== origin?.id) {
-      const openReview = openWritingReviews(platform.writingTasks).get(task.id);
-      if (openReview) {
-        openReview.focus();
-        return true;
-      }
-      if (taskRunning.current) return false;
-      if (task.path === null && task.baseline !== editor.getText()) {
-        if (editor.getText()) return false;
-        editor.replaceText(task.baseline);
-      }
-      const mapper = mapReviewRanges(task.baseline, editor.getText());
-      setOrigin({
-        id: task.id,
-        editor,
-        text: task.origin.text,
-        range: restoreRange(editor, mapper.range(task.origin)),
-      });
-      setRestored({ task, mapper });
-    }
+  useEffect(() => {
+    if (!editor || !taskRestore || lastRestore.current === taskRestore) return;
+    lastRestore.current = taskRestore;
+    const { task } = taskRestore;
+    const mapper = mapReviewRanges(task.baseline, editor.getText());
+    setOrigin({
+      id: task.id,
+      editor,
+      text: task.origin.text,
+      range: restoreRange(editor, mapper.range(task.origin)),
+      folder: task.folder,
+    });
+    setRestored({ task, mapper });
     setPlacement("sidebar");
-    return true;
-  }
+  }, [editor, taskRestore]);
 
   return (
     <div
@@ -299,19 +286,6 @@ export function WritingAssistant({
           )}
         </div>
       )}
-      {historyOpen && (
-        <WritingTasksDialog
-          tasks={platform.writingTasks}
-          path={path}
-          busyTask={busyTask}
-          onClose={() => setHistoryOpen(false)}
-          onOpen={openTask}
-          onDelete={(id, remaining) => {
-            setHasSavedTasks(remaining > 0);
-            openWritingReviews(platform.writingTasks).get(id)?.remove(remaining);
-          }}
-        />
-      )}
       {origin && origin.editor === editor && (
         <Composer
           key={origin.id}
@@ -330,7 +304,9 @@ export function WritingAssistant({
           externalChange={externalChange}
           refreshDisk={refreshDisk}
           restored={restored}
-          onSaved={() => setHasSavedTasks(true)}
+          onSaved={() => {
+            if (!origin.folder) setHasSavedTasks(true);
+          }}
           onTasks={onTasks}
           onBusyChange={setBusyTask}
         />
@@ -382,11 +358,12 @@ function Composer({
 }) {
   const t = useT();
   const [instruction, setInstruction] = useState("");
-  const [scope, setScope] = useState<Scope>("selection");
+  const [scope, setScope] = useState<Scope>(origin.folder ? "folder" : "selection");
   const [actionOverride, setActionOverride] = useState<Action | null>(null);
   const [includeDraft, setIncludeDraft] = useState(false);
   const [allowedFolder, setAllowedFolder] = useState<string | null>(null);
-  const searchFolder = allowedFolder === folder ? folder : null;
+  const searchFolder =
+    allowedFolder === folder && (!origin.folder || origin.folder === folder) ? folder : null;
   const named = useNamedMaterials();
   const materialRequests = useMaterialRequests();
   const [includeHistory, setIncludeHistory] = useState(true);
@@ -444,6 +421,7 @@ function Composer({
         version: 1,
         id: origin.id,
         path,
+        folder: origin.folder,
         title: taskTitle,
         updatedAt: Date.now(),
         baseline: editor.getText(),
@@ -829,6 +807,7 @@ function Composer({
       busy ||
       loading ||
       named.loading ||
+      (scope === "folder" && !searchFolder) ||
       checkingDisk.current
     )
       return;
@@ -889,7 +868,7 @@ function Composer({
     controller.current = running;
     taskRunning.current = true;
     const recipient = labelFor(connection);
-    const entry = { task, recipientId: connection.id, recipient };
+    const entry = { id: crypto.randomUUID(), task, recipientId: connection.id, recipient };
     const submitted = {
       instruction: task.request.instruction,
       material: task.request.selectedText ?? task.request.taskContext?.currentDraft?.text,
@@ -1066,6 +1045,12 @@ function Composer({
   const stop = () => controller.current?.abort();
   const status = attempt?.status;
   const sendingTo = attempt?.recipient;
+  const pendingApproval = materialRequests.pending;
+  const decisions = turns.reduce(
+    (total, turn) =>
+      total + (turn.suggestions?.filter(({ status }) => status === "preview").length ?? 0),
+    Number(!!pendingApproval),
+  );
   const materials = task
     ? [
         t(`writing.scope.${task.scope}`),
@@ -1078,11 +1063,22 @@ function Composer({
     () =>
       status && sendingTo
         ? {
+            id: origin.id,
+            tabId,
+            title: title || attempt.task.request.instruction,
             name,
+            folder: origin.folder,
             recipient: sendingTo,
             material: materials,
             status,
             count,
+            decisions,
+            background: !active || !placement,
+            notice: pendingApproval
+              ? { id: `${attempt.id}:approval:${pendingApproval.id}`, detail: pendingApproval.name }
+              : status === "complete"
+                ? { id: attempt.id }
+                : undefined,
             stop:
               status === "working" || status === "approval"
                 ? () => controller.current?.abort()
@@ -1093,7 +1089,23 @@ function Composer({
             },
           }
         : null,
-    [count, materials, name, sendingTo, setPlacement, status, store, tabId],
+    [
+      active,
+      attempt,
+      count,
+      decisions,
+      materials,
+      name,
+      origin,
+      pendingApproval,
+      placement,
+      sendingTo,
+      setPlacement,
+      status,
+      store,
+      tabId,
+      title,
+    ],
   );
   useWritingTask(report);
 
@@ -1235,13 +1247,19 @@ function Composer({
       </header>
       {sidebar && (
         <>
-          <span className="wrap-anywhere">{name}</span>
-          <button type="button" className={buttonClass} onClick={locate}>
-            {t("writing.locate")}
-          </button>
-          <pre className="max-h-24 overflow-auto whitespace-pre-wrap wrap-anywhere rounded bg-(--mint-hover) p-2">
-            {origin.text}
-          </pre>
+          <span className="wrap-anywhere">
+            {origin.folder ? t("writing.tasks.folder", { folder: origin.folder }) : name}
+          </span>
+          {!origin.folder && origin.text && (
+            <>
+              <button type="button" className={buttonClass} onClick={locate}>
+                {t("writing.locate")}
+              </button>
+              <pre className="max-h-24 overflow-auto whitespace-pre-wrap wrap-anywhere rounded bg-(--mint-hover) p-2">
+                {origin.text}
+              </pre>
+            </>
+          )}
         </>
       )}
       {sidebar && attempt && (
@@ -1492,7 +1510,7 @@ function Composer({
                   value={scope}
                   onChange={(event) => setScope(event.target.value as Scope)}
                 >
-                  {scopes.map((id) => (
+                  {(origin.folder ? (["folder"] as const) : scopes).map((id) => (
                     <option key={id} value={id}>
                       {t(`writing.scope.${id}`)}
                     </option>
@@ -1543,7 +1561,7 @@ function Composer({
               selection={selectedText}
               draft={currentDraft}
               includeDraft={scope === "selection" ? setIncludeDraft : undefined}
-              folder={folder}
+              folder={origin.folder && origin.folder !== folder ? null : folder}
               searchEnabled={!!searchFolder}
               onSearchChange={(checked) => setAllowedFolder(checked ? folder : null)}
             />
@@ -1561,7 +1579,13 @@ function Composer({
               <button
                 type="submit"
                 className={buttonClass}
-                disabled={!recipient || loading || !instruction.trim() || named.loading}
+                disabled={
+                  !recipient ||
+                  loading ||
+                  !instruction.trim() ||
+                  named.loading ||
+                  (scope === "folder" && !searchFolder)
+                }
               >
                 {recipient
                   ? t("writing.sendAuthorized", {

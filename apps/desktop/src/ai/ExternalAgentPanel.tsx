@@ -47,7 +47,9 @@ export function ExternalAgentSettings({ platform }: { readonly platform: Externa
 }
 
 interface AgentTaskTarget {
+  readonly tabId: number;
   readonly name: string;
+  readonly visible: boolean;
   readonly reveal: () => void;
   readonly engaged: { current: boolean };
 }
@@ -57,6 +59,7 @@ export function ExternalAgentDialog({
   onHide,
   onReveal,
   name,
+  tabId,
   visible,
   renderReply,
   ...props
@@ -65,6 +68,7 @@ export function ExternalAgentDialog({
   readonly onHide: () => void;
   readonly onReveal: () => void;
   readonly name: string;
+  readonly tabId: number;
   readonly visible: boolean;
   readonly renderReply: (reply: string, close: () => void) => ReactNode;
 }) {
@@ -76,11 +80,13 @@ export function ExternalAgentDialog({
   reveal.current = onReveal;
   const target = useMemo(
     () => ({
+      tabId,
       name,
+      visible,
       engaged,
       reveal: () => reveal.current(),
     }),
-    [name],
+    [name, tabId, visible],
   );
   useEffect(() => {
     if (visible) dialog.current?.showModal();
@@ -138,14 +144,19 @@ function ExternalAgentPanel({
   const [saved, setSaved] = useState<ExternalAgent[]>([]);
   const [found, setFound] = useState<string[] | null>(null);
   const [instruction, setInstruction] = useState("");
-  const [pending, setPending] = useState<WritingRequest | null>(null);
+  const [pending, setPending] = useState<{ id: string; request: WritingRequest } | null>(null);
   const [busy, setBusy] = useState(true);
   const [status, setStatus] = useState<MessageKey | null>(null);
   const [error, setError] = useState<MessageKey | null>(null);
   const [reply, setReply] = useState("");
   const [streaming, setStreaming] = useState("");
   const [partial, setPartial] = useState<readonly { id: string; text: string }[]>([]);
-  const [attempt, setAttempt] = useState<{ recipient: string; status: AttemptStatus } | null>(null);
+  const [attempt, setAttempt] = useState<{
+    id: string;
+    title: string;
+    recipient: string;
+    status: AttemptStatus;
+  } | null>(null);
   const controller = useRef<AbortController | null>(null);
   const lastRequest = useRef<{
     agent: ExternalAgent;
@@ -160,23 +171,37 @@ function ExternalAgentPanel({
     if (controller.current) controller.current.abort();
     else if (taskRecipient) {
       setPending(null);
-      setAttempt({ recipient: taskRecipient, status: "stopped" });
+      setAttempt({
+        id: pending?.id ?? crypto.randomUUID(),
+        title: pending?.request.instruction ?? instruction,
+        recipient: taskRecipient,
+        status: "stopped",
+      });
     }
-  }, [taskRecipient]);
+  }, [instruction, pending, taskRecipient]);
   const task = useMemo(
     () =>
       target && taskStatus && taskRecipient
         ? {
+            tabId: target.tabId,
+            title: pending?.request.instruction ?? attempt?.title ?? instruction,
             name: target.name,
             recipient: t("writing.recipient.agent", { path: taskRecipient }),
             material: t("writing.scope.selection"),
             status: taskStatus,
             count: 0,
+            decisions: Number(!!pending),
+            background: !target.visible,
+            notice: pending
+              ? { id: pending.id }
+              : attempt?.status === "complete"
+                ? { id: attempt.id }
+                : undefined,
             stop: taskStatus === "working" || taskStatus === "approval" ? stop : undefined,
             reveal: target.reveal,
           }
         : null,
-    [stop, t, target, taskRecipient, taskStatus],
+    [attempt, instruction, pending, stop, t, target, taskRecipient, taskStatus],
   );
   useWritingTask(task);
 
@@ -262,8 +287,9 @@ function ExternalAgentPanel({
     lastRequest.current = { agent: current, access, request };
     const running = target ? new AbortController() : null;
     const signal = running?.signal;
+    const entry = { id: crypto.randomUUID(), title: request.instruction, recipient: current.path };
     controller.current = running;
-    if (running) setAttempt({ recipient: current.path, status: "working" });
+    if (running) setAttempt({ ...entry, status: "working" });
     void run(async () => {
       let text = "";
       try {
@@ -293,7 +319,7 @@ function ExternalAgentPanel({
         );
         if (!mounted.current) return;
         const outcome = signal?.aborted ? "stopped" : replyStatus(result);
-        if (running) setAttempt({ recipient: current.path, status: outcome });
+        if (running) setAttempt({ ...entry, status: outcome });
         if (outcome !== "complete") {
           retainPartial(result.text);
           return;
@@ -310,7 +336,7 @@ function ExternalAgentPanel({
         if (!mounted.current) return;
         if (!signal) throw problem;
         const outcome = failureStatus(problem, signal);
-        setAttempt({ recipient: current.path, status: outcome });
+        setAttempt({ ...entry, status: outcome });
         retainPartial(text);
         if (outcome === "failed") throw problem;
       } finally {
@@ -413,7 +439,7 @@ function ExternalAgentPanel({
                 setError(null);
                 setReply("");
                 lastRequest.current = { agent, access, request };
-                setPending(request);
+                setPending({ id: crypto.randomUUID(), request });
               }
             }}
           >
@@ -493,7 +519,7 @@ function ExternalAgentPanel({
             <button
               type="button"
               className={buttonClass}
-              onClick={() => send(agent, pending, true)}
+              onClick={() => send(agent, pending.request, true)}
             >
               {t("agent.allowSend")}
             </button>
@@ -514,7 +540,7 @@ function ExternalAgentPanel({
           className={buttonClass}
           onClick={() => {
             if (agent.approved.includes(access)) send(agent, retry.request, false);
-            else setPending(retry.request);
+            else setPending({ id: crypto.randomUUID(), request: retry.request });
           }}
         >
           {t("writing.task.retry")}

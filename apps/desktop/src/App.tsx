@@ -12,9 +12,20 @@ import { DraftComposer } from "./ai/DraftComposer.tsx";
 import { ExternalAgentDialog } from "./ai/ExternalAgentPanel.tsx";
 import { inlineCompletionSender } from "./ai/inline-completion.ts";
 import { ReplyExcerpt } from "./ai/ReplyExcerpt.tsx";
-import { type WritingTask, WritingTasks, WritingTasksContext } from "./ai/WritingTasks.tsx";
+import {
+  type WritingTask,
+  WritingTaskNotices,
+  WritingTasks,
+  WritingTasksContext,
+} from "./ai/WritingTasks.tsx";
+import { WritingTasksDialog } from "./ai/WritingTasksDialog.tsx";
 import { captureWritingSelection, type WritingSelection } from "./ai/writing-selection.ts";
-import { checkpointOpenWritingTasks, writingTaskWrites } from "./ai/writing-tasks.ts";
+import {
+  checkpointOpenWritingTasks,
+  openWritingReviews,
+  type SavedWritingTask,
+  writingTaskWrites,
+} from "./ai/writing-tasks.ts";
 import type { AnnotationReviewKind } from "./annotations/AnnotationReview.tsx";
 import { AnnotationDialog, AnnotationPanel } from "./annotations/Annotations.tsx";
 import { createAnnotationStorage } from "./annotations/annotation-storage.ts";
@@ -157,13 +168,48 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     });
   }, []);
   const [draftTabs, setDraftTabs] = useState<ReadonlySet<number>>(() => new Set());
-  const [writingRequest, setWritingRequest] = useState<{ tabId: number; sequence: number } | null>(
+  const [writingRequest, setWritingRequest] = useState<{ tabId: number; folder?: string } | null>(
     null,
   );
-  const [writingTasksRequest, setWritingTasksRequest] = useState<{
-    tabId: number;
-    sequence: number;
-  } | null>(null);
+  const [taskDialog, setTaskDialog] = useState<"current" | "all" | null>(null);
+  const [taskRestore, setTaskRestore] = useState<{ tabId: number; task: SavedWritingTask } | null>(
+    null,
+  );
+  const [taskDeletion, setTaskDeletion] = useState(0);
+
+  async function openWritingTask(task: SavedWritingTask | WritingTask) {
+    if (task.folder && task.folder !== folder) {
+      await openFolder(task.folder);
+      if (openFolderState.current.tree?.root !== task.folder) return false;
+    }
+    if ("reveal" in task) {
+      task.reveal();
+      return true;
+    }
+    const reviews = openWritingReviews(platform.writingTasks);
+    const live = reviews.get(task.id);
+    if (live) {
+      live.focus();
+      return true;
+    }
+    let tabId: number;
+    if (task.path !== null) {
+      const openTabs = store.getState().tabs.filter(({ path }) => path === task.path);
+      const busy = [...reviews.values()].some(
+        (review) => review.busy && openTabs.some(({ id }) => id === review.tabId),
+      );
+      if (busy) return false;
+      await store.openDocument(task.path);
+      const { tabs, activeId } = store.getState();
+      const target = tabs.find(({ id, path }) => id === activeId && path === task.path);
+      if (!target) return false;
+      tabId = target.id;
+    } else {
+      tabId = store.restoreDocument(null, task.baseline);
+    }
+    setTaskRestore({ tabId, task });
+    return true;
+  }
   const [agentSelection, setAgentSelection] = useState<{
     tabId: number;
     origin: WritingSelection;
@@ -478,18 +524,18 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
         return;
       }
       setShellError(null);
-      setWritingRequest((previous) => ({
-        tabId: activeId,
-        sequence: (previous?.sequence ?? 0) + 1,
-      }));
+      setWritingRequest({ tabId: activeId });
     },
-    "edit.writingTasks": () => {
-      if (activeId === null) return;
-      setWritingTasksRequest((previous) => ({
-        tabId: activeId,
-        sequence: (previous?.sequence ?? 0) + 1,
-      }));
+    "edit.askFolderAI": () => {
+      if (!folder) {
+        setShellError(t("writing.tasks.noFolder"));
+        return;
+      }
+      setShellError(null);
+      setWritingRequest({ tabId: activeId ?? store.newDocument(), folder });
     },
+    "edit.writingTasks": () => setTaskDialog(activeId === null ? "all" : "current"),
+    "edit.allWritingTasks": () => setTaskDialog("all"),
     "edit.addAnnotation": addAnnotation,
     "edit.reviewDocument": () => {
       if (active) openAnnotationReview(active.documentId, "document");
@@ -739,14 +785,24 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
                   <div className="min-w-0 flex-1">
                     <TabBar pane="primary" />
                   </div>
-                  {selected.reference === null && <WritingTasks tasks={writingTasks} />}
+                  {selected.reference === null && (
+                    <WritingTasks
+                      tasks={writingTasks}
+                      onAllTasks={() => run.current("edit.allWritingTasks")}
+                      onReveal={(task) => void openWritingTask(task)}
+                    />
+                  )}
                 </div>
                 {selected.reference !== null && (
                   <div className="flex min-w-0">
                     <div className="min-w-0 flex-1">
                       <TabBar pane="reference" />
                     </div>
-                    <WritingTasks tasks={writingTasks} />
+                    <WritingTasks
+                      tasks={writingTasks}
+                      onAllTasks={() => run.current("edit.allWritingTasks")}
+                      onReveal={(task) => void openWritingTask(task)}
+                    />
                   </div>
                 )}
               </div>
@@ -779,10 +835,9 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
                   toolbarPosition={toolbarPositions[tab.pane]}
                   platform={platform}
                   folder={folder}
-                  askWriting={writingRequest?.tabId === tab.id ? writingRequest.sequence : null}
-                  writingTasksRequest={
-                    writingTasksRequest?.tabId === tab.id ? writingTasksRequest.sequence : null
-                  }
+                  askWriting={writingRequest?.tabId === tab.id ? writingRequest : null}
+                  writingTaskRestore={taskRestore?.tabId === tab.id ? taskRestore : null}
+                  writingTaskDeletion={taskDeletion}
                   settingsOpen={settingsOpen}
                   onAskWriting={() => run.current("edit.askAI")}
                   onWritingTasks={() => run.current("edit.writingTasks")}
@@ -943,6 +998,26 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
           }}
         />
       )}
+      {taskDialog && (
+        <WritingTasksDialog
+          key={taskDialog}
+          tasks={platform.writingTasks}
+          liveTasks={writingTasks}
+          path={active?.path ?? null}
+          currentTabIds={
+            new Set(tabs.filter((tab) => tab.documentId === active?.documentId).map(({ id }) => id))
+          }
+          all={taskDialog === "all"}
+          onScopeChange={(all) => setTaskDialog(all ? "all" : "current")}
+          onClose={() => setTaskDialog(null)}
+          onOpen={openWritingTask}
+          onDelete={(id) => {
+            openWritingReviews(platform.writingTasks).get(id)?.remove();
+            setTaskDeletion((revision) => revision + 1);
+          }}
+        />
+      )}
+      <WritingTaskNotices tasks={writingTasks} onReveal={(task) => void openWritingTask(task)} />
       {annotationDraft && (
         <AnnotationDialog
           target={annotationDraft.target}
@@ -977,6 +1052,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
           platform={platform.externalAgent}
           selection={agentSelection.origin.text}
           name={agentTab ? tabName(t, agentTab) : t("writing.scope.untitled")}
+          tabId={agentSelection.tabId}
           visible={agentDialogVisible}
           onReveal={() => {
             store.activate(agentSelection.tabId);

@@ -102,7 +102,7 @@ export function createTauriPlatform(): Platform {
   return {
     locale: navigator.language,
     writingTasks: {
-      list: (path) => invoke("list_writing_tasks", { path }),
+      list: (path, all) => invoke("list_writing_tasks", { path, all }),
       create: (task) => invoke("create_writing_task", { task }),
       update: (task, expectedUpdatedAt) =>
         invoke("update_writing_task", { task, expectedUpdatedAt }),

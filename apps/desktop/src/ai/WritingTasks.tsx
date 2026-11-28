@@ -1,14 +1,21 @@
-import { createContext, useContext, useEffect, useId, useRef } from "react";
-import { useT } from "../i18n/index.ts";
+import { createContext, useContext, useEffect, useId, useRef, useState } from "react";
+import { type Translate, useT } from "../i18n/index.ts";
 import type { AttemptStatus } from "./writing-attempt.ts";
 import type { NamedMaterial, WritingRequest } from "./writing-sender.ts";
 
 export interface WritingTask {
+  readonly id?: string;
+  readonly tabId: number;
+  readonly title: string;
   readonly name: string;
+  readonly folder?: string;
   readonly recipient: string;
   readonly material: string;
   readonly status: AttemptStatus;
   readonly count: number;
+  readonly decisions?: number;
+  readonly notice?: { readonly id: string; readonly detail?: string };
+  readonly background?: boolean;
   readonly stop?: () => void;
   readonly reveal: () => void;
 }
@@ -19,14 +26,117 @@ export const WritingTasksContext = createContext<(id: string, task: WritingTask 
 
 export function useWritingTask(task: WritingTask | null) {
   const publish = useContext(WritingTasksContext);
-  const id = useId();
+  const localId = useId();
+  const id = task?.id ?? localId;
   useEffect(() => {
     publish(id, task);
   }, [id, publish, task]);
   useEffect(() => () => publish(id, null), [id, publish]);
 }
 
-export function WritingTasks({ tasks }: { readonly tasks: ReadonlyMap<string, WritingTask> }) {
+export function writingTaskDecisionLabel(t: Translate, count: number) {
+  return t(count === 1 ? "writing.tasks.oneDecision" : "writing.tasks.decisions", {
+    count: String(count),
+  });
+}
+
+export function WritingTaskNotices({
+  tasks,
+  onReveal,
+}: {
+  readonly tasks: ReadonlyMap<string, WritingTask>;
+  readonly onReveal: (task: WritingTask) => void;
+}) {
+  const t = useT();
+  const seen = useRef(new Set<string>());
+  const [announced, setAnnounced] = useState<ReadonlySet<string>>(() => new Set());
+  useEffect(() => {
+    const next = new Set<string>();
+    const current = new Set<string>();
+    for (const task of tasks.values()) {
+      const id = task.notice?.id;
+      if (!id) continue;
+      if (task.background) {
+        current.add(id);
+        if (!seen.current.has(id)) next.add(id);
+      }
+      seen.current.add(id);
+    }
+    setAnnounced((previous) => {
+      const retained = [...previous].filter((id) => current.has(id));
+      return !next.size && retained.length === previous.size
+        ? previous
+        : new Set([...retained, ...next]);
+    });
+  }, [tasks]);
+
+  function dismiss(id: string) {
+    setAnnounced((previous) => {
+      const next = new Set(previous);
+      next.delete(id);
+      return next;
+    });
+  }
+
+  return (
+    <section
+      aria-label={t("writing.tasks.notifications")}
+      aria-live="polite"
+      className="pointer-events-none fixed right-4 bottom-12 z-30 flex max-w-[min(22rem,calc(100vw-2rem))] flex-col gap-2"
+    >
+      {[...tasks.values()].flatMap((task) => {
+        const notice = task.notice;
+        if (!notice || !task.background || !announced.has(notice.id)) return [];
+        return (
+          <div
+            key={notice.id}
+            className="pointer-events-auto space-y-1 rounded border border-(--mint-border) bg-(--mint-bg) p-2 text-sm wrap-anywhere shadow-lg"
+          >
+            <p>
+              {task.folder ? t("writing.tasks.folder", { folder: task.folder }) : task.name} ·{" "}
+              {t(`writing.task.${task.status}`)}
+            </p>
+            {(notice.detail || !!task.decisions) && (
+              <p className="text-xs text-(--mint-muted)">
+                {[
+                  notice.detail,
+                  task.decisions ? writingTaskDecisionLabel(t, task.decisions) : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </p>
+            )}
+            <div className="flex gap-3">
+              <button
+                className="underline"
+                type="button"
+                onClick={() => {
+                  dismiss(notice.id);
+                  onReveal(task);
+                }}
+              >
+                {t("writing.task.open", { name: task.name })}
+              </button>
+              <button className="underline" type="button" onClick={() => dismiss(notice.id)}>
+                {t("writing.tasks.dismissNotice")}
+              </button>
+            </div>
+          </div>
+        );
+      })}
+    </section>
+  );
+}
+
+export function WritingTasks({
+  tasks,
+  onAllTasks,
+  onReveal,
+}: {
+  readonly tasks: ReadonlyMap<string, WritingTask>;
+  readonly onAllTasks: () => void;
+  readonly onReveal: (task: WritingTask) => void;
+}) {
   const t = useT();
   const drawer = useRef<HTMLDetailsElement>(null);
   if (!tasks.size) return null;
@@ -38,6 +148,18 @@ export function WritingTasks({ tasks }: { readonly tasks: ReadonlyMap<string, Wr
       <details ref={drawer}>
         <summary className="h-8 cursor-pointer px-3 py-1.5">{t("writing.tasks")}</summary>
         <ul className="absolute top-full right-0 max-h-40 w-[min(28rem,calc(100vw-3rem))] space-y-1 overflow-auto wrap-anywhere rounded-md border border-(--mint-border) bg-(--mint-bg) p-2 shadow-lg">
+          <li>
+            <button
+              className="underline"
+              type="button"
+              onClick={() => {
+                if (drawer.current) drawer.current.open = false;
+                onAllTasks();
+              }}
+            >
+              {t("writing.tasks.all")}
+            </button>
+          </li>
           {[...tasks].map(([id, task]) => (
             <li key={id} className="flex flex-wrap items-baseline gap-x-3">
               <button
@@ -45,7 +167,7 @@ export function WritingTasks({ tasks }: { readonly tasks: ReadonlyMap<string, Wr
                 type="button"
                 onClick={() => {
                   if (drawer.current) drawer.current.open = false;
-                  task.reveal();
+                  onReveal(task);
                 }}
               >
                 {t("writing.task.open", { name: task.name })}

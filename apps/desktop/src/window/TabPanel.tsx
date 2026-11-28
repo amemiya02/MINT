@@ -2,6 +2,7 @@ import type { CodeBlockRenderer, DocumentLink, LinkTarget, WordCount } from "@mi
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { Proofreading } from "../ai/Proofreading.tsx";
 import { WritingAssistant } from "../ai/WritingAssistant.tsx";
+import type { SavedWritingTask } from "../ai/writing-tasks.ts";
 import { createImageHost, type ImageSaveFailure } from "../assets/image-host.ts";
 import { EditorPane } from "../EditorPane.tsx";
 import { resolveDocumentLink } from "../folder/wikilinks.ts";
@@ -30,7 +31,8 @@ export function TabPanel({
   platform,
   folder,
   askWriting,
-  writingTasksRequest,
+  writingTaskRestore,
+  writingTaskDeletion,
   settingsOpen,
   onAskWriting,
   onWritingTasks,
@@ -50,8 +52,9 @@ export function TabPanel({
   readonly toolbarPosition: ToolbarPosition;
   readonly platform: Platform;
   readonly folder: string | null;
-  readonly askWriting: number | null;
-  readonly writingTasksRequest: number | null;
+  readonly askWriting: { readonly folder?: string } | null;
+  readonly writingTaskRestore: { readonly task: SavedWritingTask } | null;
+  readonly writingTaskDeletion: number;
   readonly settingsOpen: boolean;
   readonly onAskWriting: () => void;
   readonly onWritingTasks: () => void;
@@ -180,7 +183,8 @@ export function TabPanel({
           platform={platform}
           folder={folder}
           askRequest={askWriting}
-          tasksRequest={writingTasksRequest}
+          taskRestore={writingTaskRestore}
+          taskDeletion={writingTaskDeletion}
           settingsOpen={settingsOpen}
           onAsk={onAskWriting}
           onTasks={onWritingTasks}
