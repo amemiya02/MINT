@@ -57,6 +57,7 @@ Windows、macOS 和 AppImage 支持应用内更新。`.deb` 和 `.rpm` 用户可
 | 打开文档 | `⌘O` | `Ctrl+O` |
 | 快速打开当前文件夹中的文件 | `⌘P` | `Ctrl+P` |
 | 打开命令面板 | `⌘⇧P` | `Ctrl+Shift+P` |
+| 预览本地文档链接 | Option 点按或 `⌘⌥Enter` | Alt 单击或 `Ctrl+Alt+Enter` |
 | 切换源码模式 | `⌘/` | `Ctrl+/` |
 
 ## 功能

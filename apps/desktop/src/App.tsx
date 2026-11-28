@@ -592,9 +592,10 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
           onClose={() => setQuickOpenVisible(false)}
         />
       )}
-      {historyPath && (
+      {historyPath && active?.path === historyPath && (
         <HistoryDialog
           path={historyPath}
+          editor={store.editor(active.id)}
           platform={platform}
           onClose={() => {
             setHistoryPath(null);

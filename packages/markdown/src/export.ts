@@ -1,4 +1,5 @@
 import type { Element, Root } from "hast";
+import type { Root as MarkdownRoot, Nodes, Parent } from "mdast";
 import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema, type Options as SanitizeSchema } from "rehype-sanitize";
@@ -69,7 +70,12 @@ const appSchema: SanitizeSchema = {
 };
 
 /** Render Markdown to an HTML fragment, recognising exactly the syntax enabled in `dialect`. */
-function render(markdown: string, dialect: Dialect, clean: PluggableList): string {
+function render(
+  markdown: string,
+  dialect: Dialect,
+  clean: PluggableList,
+  select: PluggableList = [],
+): string {
   const rendering: PluggableList = [];
   if (dialect.math) {
     // A malformed formula is rendered as a KaTeX error message; the export never fails on it.
@@ -78,6 +84,7 @@ function render(markdown: string, dialect: Dialect, clean: PluggableList): strin
   const processor = unified()
     .use(remarkParse)
     .use(syntaxPlugins(dialect))
+    .use(select)
     // HTML in the document is kept (and cleaned below); ids get their prefix from the cleaning.
     .use(remarkRehype, { allowDangerousHtml: true, clobberPrefix: "" })
     .use(rehypeRaw)
@@ -87,13 +94,36 @@ function render(markdown: string, dialect: Dialect, clean: PluggableList): strin
   return String(processor.processSync(markdown));
 }
 
+interface SectionLines {
+  /** One-based lines. The end is exclusive. */
+  from: number;
+  to: number;
+}
+
+/** Leave reference definitions available even when they are outside the selected section. */
+const selectLines: Plugin<[SectionLines], MarkdownRoot> =
+  ({ from, to }) =>
+  (tree) => {
+    function keep(node: Nodes): boolean {
+      if (node.type === "definition" || node.type === "footnoteDefinition") return true;
+      if (node.position && node.position.start.line >= from && node.position.end.line < to)
+        return true;
+      if (!("children" in node)) return false;
+      // A blockquote or list can straddle either section boundary.
+      const parent: Parent = node;
+      parent.children = parent.children.filter(keep);
+      return parent.children.length > 0;
+    }
+    tree.children = tree.children.filter(keep);
+  };
+
 /**
  * Render Markdown to an HTML fragment that is safe to put into the app's DOM,
  * recognising exactly the syntax enabled in `dialect`. HTML written in the
  * document is kept as far as it is harmless (see `appSchema`).
  */
-export function renderHtml(markdown: string, dialect: Dialect): string {
-  return render(markdown, dialect, [[rehypeSanitize, appSchema], linkPrefixedIds]);
+export function renderHtml(markdown: string, dialect: Dialect, lines?: SectionLines): string {
+  return render(markdown, dialect, cleanForApp, lines ? [[selectLines, lines]] : []);
 }
 
 /**
@@ -120,6 +150,8 @@ const linkPrefixedIds: Plugin<[], Root> = () => (tree) => {
     if (!ids.has(id) && ids.has(prefix + id)) node.properties.href = `#${prefix}${id}`;
   });
 };
+
+const cleanForApp: PluggableList = [[rehypeSanitize, appSchema], linkPrefixedIds];
 
 const urlProperties = ["href", "src", "action", "formAction", "xLinkHref", "poster", "cite"];
 

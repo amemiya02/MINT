@@ -19,6 +19,8 @@ export type LinkTarget =
    */
   | { readonly kind: "document"; readonly path: string; readonly fragment?: string };
 
+export type DocumentLink = Extract<LinkTarget, { kind: "document" }>;
+
 /** The link target at `pos`, if `pos` is inside a link MINT can open. */
 export function linkAt(state: EditorState, pos: number): LinkTarget | null {
   const tree = syntaxTree(state);
@@ -180,20 +182,33 @@ export const linkOpener = Facet.define<
   ((link: LinkTarget) => void) | null
 >({ combine: (values) => values[0] ?? null });
 
-/** ⌘-click (Ctrl-click off macOS) on a link hands its target to `open`. */
-export function linkOpening(open: (link: LinkTarget) => void): Extension {
+/** Mod-click follows a link; Alt-click previews a local document without moving the selection. */
+export function linkOpening(
+  open?: (link: LinkTarget) => void,
+  preview?: (link: DocumentLink) => void,
+): Extension {
   return [
-    linkOpener.of(open),
+    open ? linkOpener.of(open) : [],
     EditorView.domEventHandlers({
       mousedown(event, view) {
-        if (!isOpenLinkClick(event)) return false;
-        const element =
-          event.target instanceof Element ? event.target.closest(`.${linkClass}`) : null;
-        if (!element || !view.contentDOM.contains(element)) return false;
-        const target = linkAt(view.state, view.posAtDOM(element, 0));
-        if (!target) return false;
+        if (!(event.target instanceof Element) || !view.contentDOM.contains(event.target))
+          return false;
+        const label = event.target.closest(`.${linkClass}`);
+        if (event.button === 0 && event.altKey && preview) {
+          // Source mode has no label decoration; resolve the Markdown under the pointer.
+          const pos = label
+            ? view.posAtDOM(label, 0)
+            : view.posAtCoords({ x: event.clientX, y: event.clientY });
+          const link = pos === null ? null : linkAt(view.state, pos);
+          if (link?.kind !== "document") return false;
+          preview(link);
+        } else {
+          if (!label || !open || !isOpenLinkClick(event)) return false;
+          const link = linkAt(view.state, view.posAtDOM(label, 0));
+          if (!link) return false;
+          open(link);
+        }
         event.preventDefault();
-        open(target);
         return true;
       },
     }),
