@@ -9,7 +9,7 @@
 // so no native dialog is involved.
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -21,6 +21,7 @@ const application = process.env.MINT_APP;
 /** WebDriver's key codes (https://w3c.github.io/webdriver/#keyboard-actions). */
 const keys = {
   control: "\uE009",
+  f2: "\uE032",
   end: "\uE010",
   home: "\uE011",
   shift: "\uE008",
@@ -378,12 +379,20 @@ test("declining a plugin update keeps its native read grant and withholds its wr
   await click("Close");
 });
 
-test("recognizing and previewing a native folder's wikilinks preserves its files", async () => {
+test("preview, disambiguate, move and undo wikilinks in a native folder", async () => {
   assert.ok(application);
   const folder = await mkdtemp(join(dir, "wikilinks-"));
   const source = join(folder, "draft.md");
   const target = join(folder, "Report.md");
-  const draft = Buffer.from("\uFEFF# Draft\r\n\r\nSee [[Report#Results|evidence]].  \r\n");
+  const archive = join(folder, "archive");
+  const other = join(archive, "Report.md");
+  const moved = join(archive, "Renamed.md");
+  const otherBytes = Buffer.from("# Archived report\n");
+  const draft = Buffer.from(
+    "\uFEFF# Draft\r\n\r\nSee [[/Report.md#Results|evidence]].  \r\n[[Report#Results|notes]] and [data](Report.md#Results)\n",
+  );
+  await mkdir(archive);
+  await writeFile(other, otherBytes);
   const report = Buffer.from("# Report\n\n## Results\n\nA flock of herons.\n");
   await writeFile(source, draft);
   await writeFile(target, report);
@@ -429,10 +438,55 @@ test("recognizing and previewing a native folder's wikilinks preserves its files
   await nativeShortcut("ctrl+alt+Return");
   await shows("A flock of herons.");
   await click("Close");
+  assert.deepEqual(await readFile(source), draft);
+  assert.deepEqual(await readFile(target), report);
+
+  const treeItem = await command<Record<string, string>>("POST", `/session/${session}/element`, {
+    using: "css selector",
+    value: '[role=treeitem][aria-label="Report.md"]',
+  });
+  // F2 opens the tree's rename field. Replace the selected stem and extension.
+  await command("POST", `/session/${session}/element/${treeItem[elementKey]}/value`, {
+    text: keys.f2,
+  });
+  await until(
+    "the rename field to receive focus",
+    async () =>
+      (await command<boolean>("POST", `/session/${session}/execute/sync`, {
+        script: "return document.activeElement?.getAttribute('aria-label') === 'Name'",
+        args: [],
+      })) || null,
+  ).catch(explain);
+  await keyActions([...chord(keys.control, "a"), ...typing(`archive/Renamed.md${keys.enter}`)]);
+  await shows("[[Report#Results|notes]]");
+  const choice = await command<Record<string, string>>("POST", `/session/${session}/element`, {
+    using: "xpath",
+    value: "//dialog//select/option[normalize-space(.)='Report.md']",
+  });
+  await command("POST", `/session/${session}/element/${choice[elementKey]}/click`, {});
+  await shows("→ [[archive/Renamed.md#Results|notes]]");
+  await click("Move and update links");
+  const updated = Buffer.from(
+    "\uFEFF# Draft\r\n\r\nSee [[archive/Renamed.md#Results|evidence]].  \r\n[[archive/Renamed.md#Results|notes]] and [data](archive/Renamed.md#Results)\n",
+  );
+  await until(
+    "the selected references to reach disk",
+    async () => (await readFile(source)).equals(updated) || null,
+  ).catch(explain);
+  assert.deepEqual(await readFile(moved), report);
+  assert.deepEqual(await readFile(other), otherBytes);
+  await assert.rejects(readFile(target), { code: "ENOENT" });
+  await click("Undo move");
+  await until(
+    "undo to restore the native file path",
+    async () => (await readFile(target)).equals(report) || null,
+  ).catch(explain);
+  await assert.rejects(readFile(moved), { code: "ENOENT" });
+  assert.deepEqual(await readFile(other), otherBytes);
   await toggleSetting(false);
   assert.deepEqual(await readFile(source), draft);
   assert.deepEqual(await readFile(target), report);
-  assert.deepEqual((await readdir(folder)).sort(), ["Report.md", "draft.md"]);
+  assert.deepEqual((await readdir(folder)).sort(), ["Report.md", "archive", "draft.md"]);
 });
 
 test("reopen a bookmark after a native restart and remove it without touching the working folder", async () => {

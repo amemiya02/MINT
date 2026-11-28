@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import { externalWrite, launch, readFile } from "./memory-platform.ts";
+import { externalWrite, launch, readFile, runMenuItem } from "./memory-platform.ts";
 
 const original = '\uFEFF[Shown][id]\r\n[again][id]\n\r\n[id]: <draft.md#Some%20Heading> "Title"\r';
 const draft = "[back](index.md?q=1#top)\r\n[self](#same)\n";
@@ -126,4 +126,130 @@ test("an open document follows the move with its rewritten source and follows un
   await expect(page).toHaveTitle("draft.md — MINT");
   await expect(content).not.toContainText("../index.md");
   expect(await readFile(page, "/notes/draft.md")).toBe(draft);
+});
+
+const wikiDraft =
+  "\uFEFF[standard](Report.md#Results)\r\nFirst [[Report#Results|field notes]]\nSecond [[Report#Results]]\r\nArchive [[Report|older notes]]\n";
+
+async function renameReport(page: Page, destination = "archive/New report.md") {
+  await page.getByRole("treeitem", { name: "Report.md", exact: true }).press("F2");
+  const name = page.getByRole("textbox", { name: "Name" });
+  await name.fill(destination);
+  await name.press("Enter");
+  return page.getByRole("dialog", { name: "Preview link changes" });
+}
+
+async function openWikiFolder(page: Page, files: Record<string, string> = {}) {
+  await launch(page, {
+    files: {
+      "/notes/draft.md": wikiDraft,
+      "/notes/Report.md": "# Results",
+      "/notes/archive/Report.md": "# Older results",
+      "/other/draft.md": wikiDraft,
+      "/other/Report.md": "# Results",
+      "/other/archive/Report.md": "# Older results",
+      ...files,
+    },
+    openFolderDialogResults: ["/notes", "/other"],
+    locale: "en-US",
+  });
+  await page.getByRole("button", { name: "Open Folder…" }).click();
+  await page.keyboard.press("ControlOrMeta+,");
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  await settings.getByRole("checkbox", { name: "Recognize wikilinks in /notes" }).check();
+  await settings.getByRole("button", { name: "Close", exact: true }).click();
+}
+
+test("choose each ambiguous wikilink, preview its actual change, and undo the entire move", async ({
+  page,
+}) => {
+  await openWikiFolder(page);
+  const preview = await renameReport(page);
+  const first = preview.getByRole("listitem").filter({ hasText: "First [[" });
+  const second = preview.getByRole("listitem").filter({ hasText: "Second [[" });
+  await expect(first).toContainText("draft.md · 2:7");
+  const update = preview.getByRole("button", { name: "Move and update links" });
+  await expect(update).toBeDisabled();
+  await first.getByRole("combobox").selectOption({ label: "Report.md" });
+  await expect(first.locator("code")).toHaveText("→ [[archive/New report.md#Results|field notes]]");
+  await second.getByRole("combobox").selectOption({ label: "archive/Report.md" });
+  await expect(second).toContainText("Keep original link");
+  // The same occurrence can be reassigned while previewing.
+  await second.getByRole("combobox").selectOption({ label: "Report.md" });
+  await expect(second.locator("code")).toHaveText(
+    "→ [[archive/New report.md#Results|Report#Results]]",
+  );
+  await preview
+    .getByRole("listitem")
+    .filter({ hasText: "Archive [[" })
+    .getByRole("combobox")
+    .selectOption({ label: "archive/Report.md" });
+  expect(await readFile(page, "/notes/draft.md")).toBe(wikiDraft);
+  await update.click();
+  await expect
+    .poll(() => readFile(page, "/notes/draft.md"))
+    .toBe(
+      "\uFEFF[standard](archive/New%20report.md#Results)\r\nFirst [[archive/New report.md#Results|field notes]]\nSecond [[archive/New report.md#Results|Report#Results]]\r\nArchive [[Report|older notes]]\n",
+    );
+  expect(await readFile(page, "/notes/archive/New report.md")).toBe("# Results");
+  expect(await readFile(page, "/notes/archive/Report.md")).toBe("# Older results");
+  expect(await readFile(page, "/notes/Report.md")).toBeUndefined();
+  await page.getByRole("button", { name: "Undo move" }).click();
+  await expect.poll(() => readFile(page, "/notes/Report.md")).toBe("# Results");
+  expect(await readFile(page, "/notes/draft.md")).toBe(wikiDraft);
+  expect(await readFile(page, "/notes/archive/New report.md")).toBeUndefined();
+});
+
+test("cancel discards target choices and move only preserves all link bytes", async ({ page }) => {
+  await openWikiFolder(page);
+  const preview = await renameReport(page);
+  await preview.getByRole("combobox").first().selectOption({ label: "Report.md" });
+  await preview.getByRole("button", { name: "Cancel" }).click();
+  await expect(preview).toHaveCount(0);
+  expect(await readFile(page, "/notes/Report.md")).toBe("# Results");
+  expect(await readFile(page, "/notes/archive/New report.md")).toBeUndefined();
+  expect(await readFile(page, "/notes/draft.md")).toBe(wikiDraft);
+  await renameReport(page);
+  await expect(preview.getByRole("combobox").first()).toHaveValue("");
+  await preview.getByRole("button", { name: "Move only", exact: true }).click();
+  await expect.poll(() => readFile(page, "/notes/archive/New report.md")).toBe("# Results");
+  expect(await readFile(page, "/notes/draft.md")).toBe(wikiDraft);
+  expect(await readFile(page, "/notes/Report.md")).toBeUndefined();
+  await page.getByRole("button", { name: "Undo move" }).click();
+  await expect.poll(() => readFile(page, "/notes/Report.md")).toBe("# Results");
+});
+
+test("a second folder with wikilinks disabled updates only standard links", async ({ page }) => {
+  await openWikiFolder(page);
+  await runMenuItem(page, "file.openFolder");
+  await expect(page.getByRole("treeitem", { name: "Report.md" })).toHaveAttribute(
+    "title",
+    "/other/Report.md",
+  );
+  const preview = await renameReport(page);
+  await expect(preview.getByRole("listitem")).toHaveCount(1);
+  await expect(preview.getByRole("listitem")).toContainText("[standard]");
+  await preview.getByRole("button", { name: "Move and update links" }).click();
+  await expect
+    .poll(() => readFile(page, "/other/draft.md"))
+    .toBe(wikiDraft.replace("(Report.md", "(archive/New%20report.md"));
+  expect(await readFile(page, "/notes/draft.md")).toBe(wikiDraft);
+});
+
+test("a moved document keeps its relative wikilinks and remains reachable inside a folder containing #", async ({
+  page,
+}) => {
+  await openWikiFolder(page, {
+    "/notes/draft.md": "[[/Report.md#Results|original]]",
+    "/notes/Report.md": "See [[./draft]] and `[[./draft]]`.",
+    "/notes/#archive/other.md": "",
+  });
+  const preview = await renameReport(page, "#archive/Final.md");
+  await expect(preview).toContainText("→ [[Final.md#Results|original]]");
+  await expect(preview).toContainText("→ [[/draft.md|./draft]]");
+  await preview.getByRole("button", { name: "Move and update links" }).click();
+  await expect
+    .poll(() => readFile(page, "/notes/#archive/Final.md"))
+    .toBe("See [[/draft.md|./draft]] and `[[./draft]]`.");
+  expect(await readFile(page, "/notes/draft.md")).toBe("[[Final.md#Results|original]]");
 });
