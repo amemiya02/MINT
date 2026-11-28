@@ -2054,7 +2054,7 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   await keyActions([...typing("Is the selected line clear?"), ...typing(keys.enter)]);
   await waitForView(
     "the inline reply from the CLI",
-    `return document.querySelector('section[aria-label="Ask AI"]')?.innerText.includes('Fixture Agent reply.') &&
+    `return document.querySelector('section[aria-label="Ask AI"] textarea')?.value === 'Fixture Agent reply.' &&
       !document.querySelector('aside[aria-label="Writing Assistant"]');`,
   );
   await click("Continue in sidebar");
@@ -2069,8 +2069,8 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   await keyActions([...typing("What would help?"), ...typing(keys.enter)]);
   await waitForView(
     "both CLI replies in the sidebar",
-    `return [...document.querySelectorAll('aside[aria-label="Writing Assistant"] article')]
-      .filter((article) => article.innerText.includes('Fixture Agent reply.')).length === 2;`,
+    `return [...document.querySelectorAll('aside[aria-label="Writing Assistant"] textarea')]
+      .filter((reply) => reply.value === 'Fixture Agent reply.').length === 2;`,
   );
   await click("Go to original selection");
   await waitForView(
@@ -2097,6 +2097,34 @@ console.log(JSON.stringify({ type: "turn.completed" }));
     selectedCalls.every((entry) => entry.args[entry.args.indexOf("--sandbox") + 1] === "read-only"),
   );
   assert.equal(await readFile(draft, "utf8"), initial);
+
+  await command("POST", `/session/${session}/execute/sync`, {
+    script: `const reply = document.querySelector('aside[aria-label="Writing Assistant"] textarea');
+      reply.focus();
+      reply.setSelectionRange("Fixture ".length, "Fixture Agent".length);`,
+    args: [],
+  });
+  await clickPath(
+    "//aside[@aria-label='Writing Assistant']//button[not(@disabled) and normalize-space(.)='Replace original selection in draft.md']",
+  );
+  await waitForView(
+    "the selected part of the CLI reply in the editor",
+    `return document.activeElement?.matches(".cm-content") &&
+      document.activeElement.lastElementChild?.textContent === "Agent";`,
+  );
+  await nativeShortcut("ctrl+s");
+  await until(
+    "the selected reply excerpt on disk",
+    async () =>
+      (await readFile(draft, "utf8")) === initial.replace("On-disk sentence.", "Agent") || null,
+  ).catch(explain);
+  await keyActions(chord(keys.control, "z"));
+  await nativeShortcut("ctrl+s");
+  await until(
+    "one undo to restore the manuscript bytes",
+    async () => (await readFile(draft, "utf8")) === initial || null,
+  ).catch(explain);
+
   await clickPath("//aside[@aria-label='Writing Assistant']//button[normalize-space(.)='Close']");
   await openSettings();
   await click("External Agents");

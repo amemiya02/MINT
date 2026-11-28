@@ -3,8 +3,14 @@ import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "rea
 import { useT } from "../i18n/index.ts";
 import type { Platform } from "../platform/platform.ts";
 import { type EditStatus, ProposedSelectionEdit } from "./ProposedSelectionEdit.tsx";
+import { ReplyExcerpt } from "./ReplyExcerpt.tsx";
 import { type SelectionEdit, selectionEdits } from "./selection-edits.ts";
 import { loadWritingRecipients, type WritingRecipient } from "./writing-recipients.ts";
+import {
+  applyWritingSelection,
+  captureWritingSelection,
+  type WritingSelection,
+} from "./writing-selection.ts";
 import { replacementFromReply, type WritingTurn } from "./writing-sender.ts";
 
 const buttonClass =
@@ -17,11 +23,8 @@ type Scope = (typeof scopes)[number];
 const actions = ["comment", "preview", "direct"] as const;
 type Action = (typeof actions)[number];
 
-interface Origin {
+interface Origin extends WritingSelection {
   readonly id: number;
-  readonly editor: MintEditor;
-  readonly text: string;
-  readonly range: ReturnType<MintEditor["trackRange"]>;
 }
 
 interface Turn extends WritingTurn {
@@ -42,6 +45,7 @@ type Suggestion = Pick<SelectionEdit, "before" | "after"> & {
 
 interface Props {
   readonly editor: MintEditor | null;
+  readonly tabId: number;
   readonly name: string;
   readonly active: boolean;
   readonly platform: Platform;
@@ -57,6 +61,7 @@ interface Props {
 /** The editor owns its selection and scroll position, while the composer retains the task material. */
 export function WritingAssistant({
   editor,
+  tabId,
   name,
   active,
   platform,
@@ -87,16 +92,9 @@ export function WritingAssistant({
 
   useEffect(() => {
     if (!askRequest || !editor) return;
-    const { anchor, head } = editor.getSelection();
-    if (anchor === head) return;
-    const from = Math.min(anchor, head);
-    const to = Math.max(anchor, head);
-    setOrigin({
-      id: askRequest,
-      editor,
-      text: editor.getText().slice(from, to),
-      range: editor.trackRange({ from, to }),
-    });
+    const selection = captureWritingSelection(editor);
+    if (!selection) return;
+    setOrigin({ id: askRequest, ...selection });
     setPlacement("inline");
   }, [askRequest, editor]);
 
@@ -129,6 +127,7 @@ export function WritingAssistant({
         <Composer
           key={origin.id}
           origin={origin}
+          tabId={tabId}
           name={name}
           placement={placement}
           setPlacement={setPlacement}
@@ -146,6 +145,7 @@ export function WritingAssistant({
 
 function Composer({
   origin,
+  tabId,
   name,
   placement,
   setPlacement,
@@ -157,7 +157,14 @@ function Composer({
   refreshDisk,
 }: Pick<
   Props,
-  "name" | "active" | "platform" | "settingsOpen" | "onSettings" | "externalChange" | "refreshDisk"
+  | "tabId"
+  | "name"
+  | "active"
+  | "platform"
+  | "settingsOpen"
+  | "onSettings"
+  | "externalChange"
+  | "refreshDisk"
 > & {
   readonly origin: Origin;
   readonly placement: "inline" | "sidebar" | null;
@@ -257,11 +264,11 @@ function Composer({
   }
 
   async function applyDirectly(replacement: string): Promise<boolean> {
-    if (!(await refreshDisk()) || !mounted.current || !origin.range.hasBoundaries()) return false;
-    const range = origin.range.current();
-    if (origin.editor.getText().slice(range.from, range.to) !== origin.text) return false;
-    if (replacement !== origin.text) origin.editor.replaceRange(range, replacement);
-    return true;
+    return (
+      (await refreshDisk()) &&
+      mounted.current &&
+      applyWritingSelection(origin, replacement, true).status === "applied"
+    );
   }
 
   function preview(replacement: string): Suggestion[] {
@@ -424,6 +431,23 @@ function Composer({
   const Container = sidebar ? "aside" : "section";
   const messages = sidebar ? turns : turns.slice(-1);
 
+  function renderReplyExcerpt(reply: string, collapsed = false) {
+    const actions = <ReplyExcerpt reply={reply} origin={origin} originId={tabId} />;
+    return (
+      // Selecting and using a reply preserves the current pane as the cursor target.
+      <fieldset className="min-w-0" onFocus={(event) => event.stopPropagation()}>
+        {collapsed ? (
+          <details className="space-y-2">
+            <summary className="cursor-pointer">{t("writing.reply.useExcerpt")}</summary>
+            {actions}
+          </details>
+        ) : (
+          actions
+        )}
+      </fieldset>
+    );
+  }
+
   return (
     <Container
       aria-label={t(sidebar ? "writing.title" : "writing.ask")}
@@ -509,7 +533,7 @@ function Composer({
                       conversation={suggestion.comments?.map(({ id, instruction, reply }) => (
                         <div key={id} className="rounded bg-(--mint-hover) p-2">
                           <p className="font-medium">{instruction}</p>
-                          <pre className="whitespace-pre-wrap wrap-anywhere">{reply}</pre>
+                          {renderReplyExcerpt(reply)}
                         </div>
                       ))}
                       onApply={
@@ -533,11 +557,9 @@ function Composer({
                   <p>{t("writing.edit.applied")}</p>
                   <pre className="whitespace-pre-wrap wrap-anywhere">{turn.reply}</pre>
                 </>
-              ) : (
-                <pre className="whitespace-pre-wrap wrap-anywhere rounded bg-(--mint-hover) p-2">
-                  {turn.reply}
-                </pre>
-              )}
+              ) : null}
+              {!!turn.reply &&
+                renderReplyExcerpt(turn.reply, !!(suggestions || turn.appliedDirectly))}
             </article>
           );
         })}

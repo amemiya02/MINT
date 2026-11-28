@@ -129,7 +129,7 @@ export function TabPanel({
       aria-labelledby={`tab-${id}`}
       hidden={!visible}
       style={{ gridColumn: tab.pane === "primary" ? 1 : 2, gridRow: 1 }}
-      onFocusCapture={() => {
+      onFocus={() => {
         if (!active) store.activate(id);
       }}
       className="flex min-w-0 min-h-0 h-full flex-col"
@@ -167,6 +167,7 @@ export function TabPanel({
         <WritingAssistant
           editor={editor}
           name={tabName(t, tab)}
+          tabId={id}
           active={active}
           platform={platform}
           askRequest={askWriting}

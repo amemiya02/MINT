@@ -99,8 +99,20 @@ test("a manually added Agent receives only the selected unsaved text after conse
       request: { instruction: "Can you shorten this?", selectedText: "Unsaved phrase." },
     },
   ]);
-  await dialog.getByRole("button", { name: "Close" }).click();
-  await expect(editor).toBeFocused();
   await expect(editor).toContainText("Original line. Unsaved phrase.");
+  await expect(editor).toContainText("Private paragraph.");
+
+  await dialog.getByLabel("Agent permissions").selectOption("readOnly");
+  await dialog.getByRole("button", { name: "Send selection" }).click();
+  const reply = dialog.getByRole("textbox", { name: "AI reply" });
+  await expect(reply).toHaveValue("Use a shorter phrase.");
+  await reply.evaluate((field: HTMLTextAreaElement) => {
+    field.focus();
+    field.setSelectionRange("Use a ".length, "Use a shorter".length);
+  });
+  await dialog.getByRole("button", { name: "Replace original selection in draft.md" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(editor).toBeFocused();
+  await expect(editor).toContainText("Original line. shorter");
   await expect(editor).toContainText("Private paragraph.");
 });
