@@ -22,9 +22,11 @@ import { replacementFromReply, type TaskContext } from "./writing-sender.ts";
 import {
   mapReviewRanges,
   type ReviewRange,
+  registerTaskCheckpoint,
   type SavedSuggestion,
   type SavedTurn,
   type SavedWritingTask,
+  writeTaskCheckpoint,
 } from "./writing-tasks.ts";
 
 const buttonClass =
@@ -170,8 +172,12 @@ export function WritingAssistant({
   useEffect(() => () => origin?.range.release(), [origin]);
 
   function openTask(task: SavedWritingTask) {
-    if (!editor) return;
+    if (!editor) return false;
     if (task.id !== origin?.id) {
+      if (task.path === null && task.baseline !== editor.getText()) {
+        if (editor.getText()) return false;
+        editor.replaceText(task.baseline);
+      }
       const mapper = mapReviewRanges(task.baseline, editor.getText());
       setOrigin({
         id: task.id,
@@ -182,6 +188,7 @@ export function WritingAssistant({
       setRestored({ task, mapper });
     }
     setPlacement("sidebar");
+    return true;
   }
 
   return (
@@ -194,14 +201,18 @@ export function WritingAssistant({
     >
       <div className="min-h-0 min-w-0">{children}</div>
       {!placement && active && (hasSelection || origin || hasSavedTasks) && (
-        <div className="absolute right-4 bottom-4 z-10 flex gap-2">
+        <div className="absolute right-4 bottom-4 z-10 flex max-w-[calc(100%-2rem)] flex-wrap justify-end gap-2">
           {hasSavedTasks && (
             <button type="button" className={buttonClass} onClick={onTasks}>
               {t("writing.tasks")}
             </button>
           )}
           {origin && (
-            <button type="button" className={buttonClass} onClick={() => setPlacement("inline")}>
+            <button
+              type="button"
+              className={buttonClass}
+              onClick={() => setPlacement(restored ? "sidebar" : "inline")}
+            >
               {t("writing.resume")}
             </button>
           )}
@@ -318,7 +329,6 @@ function Composer({
   const input = useRef<HTMLInputElement>(null);
   const review = useRef<HTMLElement>(null);
   const reviewScroll = useRef(restored?.task.reviewScroll ?? 0);
-  const saves = useRef(Promise.resolve());
   const readingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pending = useRef(restored?.task.pending);
   const heading = useRef<HTMLSpanElement>(null);
@@ -374,15 +384,14 @@ function Composer({
   const persist = useCallback(
     (taskTitle = title) => {
       if (!taskTitle || !ready) return;
-      const task = snapshot(taskTitle);
-      saves.current = saves.current.then(async () => {
-        try {
-          await platform.writingTasks.update(task);
+      void writeTaskCheckpoint(platform.writingTasks, snapshot(taskTitle)).then(
+        () => {
           if (mounted.current) setSaveFailed(false);
-        } catch {
+        },
+        () => {
           if (mounted.current) setSaveFailed(true);
-        }
-      });
+        },
+      );
     },
     [platform, ready, snapshot, title],
   );
@@ -441,11 +450,16 @@ function Composer({
 
   useEffect(() => {
     if (!active || !placement) return;
-    return origin.editor.subscribe(({ type }) => {
+    const unregister = registerTaskCheckpoint(platform.writingTasks, () => saveCheckpoint());
+    const unsubscribe = origin.editor.subscribe(({ type }) => {
       if (type === "selection") saveCheckpoint();
       if (type === "scroll") saveReadingSoon();
     });
-  }, [active, origin, placement]);
+    return () => {
+      unregister();
+      unsubscribe();
+    };
+  }, [active, origin, placement, platform]);
 
   useEffect(() => {
     if (ready && placement && review.current) review.current.scrollTop = reviewScroll.current;
@@ -766,6 +780,7 @@ function Composer({
         instruction: prompt,
         material: selectedText ?? draftSnapshot?.text,
         context,
+        searchFolder: searchFolder ?? undefined,
         recipient: labelFor(recipient),
         recipientId: recipient.id,
       };
@@ -885,7 +900,7 @@ function Composer({
     );
   }
 
-  function renderSentContext(context: TaskContext | undefined) {
+  function renderSentContext(context: TaskContext | undefined, searchFolder?: string) {
     if (!context) return null;
     const materials = [
       ...(context.currentDraft ? [context.currentDraft] : []),
@@ -897,7 +912,11 @@ function Composer({
     return (
       <fieldset className="space-y-1 rounded border border-(--mint-border) p-2 text-xs">
         <legend className="px-1">{t("writing.tasks.sentContext")}</legend>
-        {context.folderSearch && <p>{t("materials.allowSearch")}</p>}
+        {context.folderSearch && (
+          <p className="wrap-anywhere">
+            {t("writing.tasks.searchedFolder", { folder: searchFolder ?? "" })}
+          </p>
+        )}
         {materials.map(({ name, text }, index) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: A turn keeps its original material order, including duplicates.
           <details key={`${index}:${name}`} className="wrap-anywhere">
@@ -990,7 +1009,7 @@ function Composer({
                   )}
                 </details>
               )}
-              {sidebar && renderSentContext(turn.context)}
+              {sidebar && renderSentContext(turn.context, turn.searchFolder)}
               {sidebar &&
                 turn.direct &&
                 suggestions?.some((suggestion) => isApplied(suggestion, draft)) && (
@@ -1072,7 +1091,7 @@ function Composer({
           <article className="space-y-1">
             <p>{pending.current.instruction}</p>
             <p>{pending.current.recipient}</p>
-            {renderSentContext(pending.current.context)}
+            {renderSentContext(pending.current.context, pending.current.searchFolder)}
           </article>
         )}
         {busy && !materialRequests.pending && <p>{t("agent.working")}</p>}

@@ -13,6 +13,7 @@ import { ExternalAgentDialog } from "./ai/ExternalAgentPanel.tsx";
 import { inlineCompletionSender } from "./ai/inline-completion.ts";
 import { ReplyExcerpt } from "./ai/ReplyExcerpt.tsx";
 import { captureWritingSelection, type WritingSelection } from "./ai/writing-selection.ts";
+import { checkpointOpenWritingTasks, writingTaskWrites } from "./ai/writing-tasks.ts";
 import { AnnotationDialog, AnnotationPanel } from "./annotations/Annotations.tsx";
 import { createAnnotationStorage } from "./annotations/annotation-storage.ts";
 import { createAutosave } from "./autosave/autosave.ts";
@@ -546,9 +547,14 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   useEffect(
     () =>
       platform.onCloseRequested(async () => {
+        await checkpointOpenWritingTasks(platform.writingTasks);
         if (!(await store.closeAll())) return false;
         // Closed tabs need no recovery: let their snapshots be removed before the window goes.
-        await Promise.all([recovery.settled(), annotationStorage.settled()]);
+        await Promise.all([
+          recovery.settled(),
+          annotationStorage.settled(),
+          writingTaskWrites(platform.writingTasks),
+        ]);
         return true;
       }),
     [platform, store, recovery, annotationStorage],

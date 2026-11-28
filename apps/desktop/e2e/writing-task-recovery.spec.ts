@@ -11,7 +11,19 @@ test("a writing task resumes decisions, materials and reading position after a r
   page,
   browser,
 }) => {
-  const source = "First draft.\n\nSecond draft.\n\nThird draft.\n\nLast draft.";
+  const unchanged = Array.from({ length: 60 }, (_, i) => `Background paragraph ${i + 1}.`).join(
+    "\n\n",
+  );
+  const source = ["First draft.", "Second draft.", "Third draft.", unchanged, "Last draft."].join(
+    "\n\n",
+  );
+  const replacement = [
+    "First revision.",
+    "Second revision.",
+    "Third revision.",
+    unchanged,
+    "Last revision.",
+  ].join("\n\n");
   let calls = 0;
   await page.route(endpoint, (route) => {
     calls++;
@@ -21,8 +33,7 @@ test("a writing task resumes decisions, materials and reading position after a r
         choices: [
           {
             message: {
-              content:
-                "<replacement>First revision.\n\nSecond revision.\n\nThird revision.\n\nLast revision.</replacement>",
+              content: `<replacement>${replacement}</replacement>`,
             },
             finish_reason: "stop",
           },
@@ -64,6 +75,9 @@ test("a writing task resumes decisions, materials and reading position after a r
     .getByRole("button", { name: "Dismiss proposed edit" })
     .click();
   await editor.press("ControlOrMeta+End");
+  await expect
+    .poll(() => page.locator(".cm-scroller").evaluate((view) => view.scrollTop))
+    .toBeGreaterThan(0);
   await editor.press("ControlOrMeta+S");
   await review.getByRole("button", { name: "Close", exact: true }).click();
   await editor.press("ControlOrMeta+A");
@@ -86,7 +100,10 @@ test("a writing task resumes decisions, materials and reading position after a r
     });
     const resumed = await rebooted.newPage();
     const changed =
-      "New opening note.\n\nFirst revision.\n\nSecond draft.\n\nExternally changed third.\n\nLast draft.";
+      "New opening note.\n\n" +
+      source
+        .replace("First draft.", "First revision.")
+        .replace("Third draft.", "Externally changed third.");
     await launch(resumed, { ...seed, appData, files: { ...seed.files, [path]: changed } });
     await runMenuItem(resumed, "edit.writingTasks");
     await resumed.getByRole("button", { name: instruction, exact: true }).click();
@@ -103,6 +120,9 @@ test("a writing task resumes decisions, materials and reading position after a r
     await expect(
       edit(4).getByRole("button", { name: "Apply proposed edit", exact: true }),
     ).toBeVisible();
+    await expect
+      .poll(() => resumed.locator(".cm-scroller").evaluate((view) => view.scrollTop))
+      .toBeGreaterThan(0);
     await assistant.getByText("Pasted text", { exact: true }).click();
     await expect(assistant.getByText("Field notes from Tuesday.", { exact: true })).toBeVisible();
     await assistant.getByRole("button", { name: "Close", exact: true }).click();

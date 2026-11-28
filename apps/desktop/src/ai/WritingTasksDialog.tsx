@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react";
 import { useT } from "../i18n/index.ts";
 import { useModalDialog } from "../window/useModalDialog.ts";
-import type { SavedWritingTask, WritingTasksPlatform } from "./writing-tasks.ts";
+import {
+  type SavedWritingTask,
+  type WritingTasksPlatform,
+  writingTaskWrites,
+} from "./writing-tasks.ts";
 
 export function WritingTasksDialog({
   tasks,
@@ -15,26 +19,29 @@ export function WritingTasksDialog({
   readonly path: string | null;
   readonly busyTask: string | null;
   readonly onClose: () => void;
-  readonly onOpen: (task: SavedWritingTask) => void;
+  readonly onOpen: (task: SavedWritingTask) => boolean;
   readonly onDelete: (id: string, remaining: number) => void;
 }) {
   const t = useT();
   const { props, close } = useModalDialog(onClose);
   const [entries, setEntries] = useState<readonly SavedWritingTask[] | null>(null);
   const [failed, setFailed] = useState(false);
+  const [openFailed, setOpenFailed] = useState(false);
   const [confirm, setConfirm] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteFailed, setDeleteFailed] = useState(false);
   useEffect(() => {
     let current = true;
-    void tasks.list(path).then(
-      (items) => {
-        if (current) setEntries(items.sort((a, b) => b.updatedAt - a.updatedAt));
-      },
-      () => {
-        if (current) setFailed(true);
-      },
-    );
+    void writingTaskWrites(tasks)
+      .then(() => tasks.list(path))
+      .then(
+        (items) => {
+          if (current) setEntries(items.sort((a, b) => b.updatedAt - a.updatedAt));
+        },
+        () => {
+          if (current) setFailed(true);
+        },
+      );
     return () => {
       current = false;
     };
@@ -80,6 +87,7 @@ export function WritingTasksDialog({
           {t("settings.close")}
         </button>
       </header>
+      {openFailed && <p role="alert">{t("writing.tasks.openUntitled")}</p>}
       {failed ? (
         <p role="alert">{t("writing.tasks.loadFailed")}</p>
       ) : !entries ? (
@@ -96,8 +104,8 @@ export function WritingTasksDialog({
                   className="min-w-0 flex-1 rounded p-1 text-start wrap-anywhere hover:bg-(--mint-hover)"
                   disabled={deleting || (busyTask !== null && busyTask !== task.id)}
                   onClick={() => {
-                    close();
-                    onOpen(task);
+                    if (onOpen(task)) close();
+                    else setOpenFailed(true);
                   }}
                 >
                   {task.title}

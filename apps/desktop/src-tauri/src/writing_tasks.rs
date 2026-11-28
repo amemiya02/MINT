@@ -10,8 +10,8 @@ use std::sync::Mutex;
 use tauri::AppHandle;
 
 const RECORD: &str = "review.json";
-static TASKS: Mutex<()> = Mutex::new(());
-static ACTIVE_AGENTS: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+// Serialize task directory changes and record which directories have an Agent using them.
+static TASKS: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -114,7 +114,7 @@ impl Drop for AgentScratch {
     fn drop(&mut self) {
         drop(self.scratch.take());
         if let Some(task) = &self.task {
-            if let Ok(mut active) = ACTIVE_AGENTS.lock() {
+            if let Ok(mut active) = TASKS.lock() {
                 active.retain(|directory| directory != task);
             }
         }
@@ -129,8 +129,7 @@ pub fn agent_scratch(app: &AppHandle, id: Option<&str>) -> Result<AgentScratch, 
         });
     };
     let directory = task_directory(&root(app)?, id)?;
-    let _guard = TASKS.lock().map_err(|error| error.to_string())?;
-    let mut active = ACTIVE_AGENTS.lock().map_err(|error| error.to_string())?;
+    let mut active = TASKS.lock().map_err(|error| error.to_string())?;
     if !is_task_directory(&directory)
         || !directory.join(RECORD).is_file()
         || active.contains(&directory)
@@ -150,16 +149,15 @@ pub fn agent_scratch(app: &AppHandle, id: Option<&str>) -> Result<AgentScratch, 
 
 fn delete(root: &Path, id: &str) -> Result<(), String> {
     let directory = task_directory(root, id)?;
-    let _guard = TASKS.lock().map_err(|error| error.to_string())?;
-    if ACTIVE_AGENTS
-        .lock()
-        .map_err(|error| error.to_string())?
-        .contains(&directory)
-    {
+    let active = TASKS.lock().map_err(|error| error.to_string())?;
+    if active.contains(&directory) {
         return Err("writing task still has an active Agent run".to_owned());
     }
-    if !is_task_directory(&directory) {
-        return Ok(());
+    match fs::symlink_metadata(&directory) {
+        Ok(metadata) if metadata.is_dir() => {}
+        Ok(_) => return Err("invalid writing task directory".to_owned()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.to_string()),
     }
 
     // Keep the record available for another deletion attempt if a copy cannot be removed.

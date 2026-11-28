@@ -22,6 +22,7 @@ export interface SavedSuggestion {
 export interface SavedTurn extends WritingTurn {
   readonly material?: string;
   readonly context?: TaskContext;
+  readonly searchFolder?: string;
   readonly recipient: string;
   readonly recipientId: string;
   readonly direct: boolean;
@@ -48,6 +49,37 @@ export interface WritingTasksPlatform {
   create(task: SavedWritingTask): Promise<void>;
   update(task: SavedWritingTask): Promise<void>;
   remove(id: string): Promise<void>;
+}
+
+const writes = new WeakMap<WritingTasksPlatform, Promise<void>>();
+const openCheckpoints = new WeakMap<WritingTasksPlatform, Set<() => void>>();
+
+/** Keep checkpoints ordered and let the desktop wait for them before closing its window. */
+export function writeTaskCheckpoint(tasks: WritingTasksPlatform, task: SavedWritingTask) {
+  const result = (writes.get(tasks) ?? Promise.resolve()).then(() => tasks.update(task));
+  writes.set(
+    tasks,
+    result.catch(() => {}),
+  );
+  return result;
+}
+
+export function writingTaskWrites(tasks: WritingTasksPlatform) {
+  return writes.get(tasks) ?? Promise.resolve();
+}
+
+export function registerTaskCheckpoint(tasks: WritingTasksPlatform, checkpoint: () => void) {
+  const callbacks = openCheckpoints.get(tasks) ?? new Set<() => void>();
+  openCheckpoints.set(tasks, callbacks);
+  callbacks.add(checkpoint);
+  return () => {
+    callbacks.delete(checkpoint);
+  };
+}
+
+export async function checkpointOpenWritingTasks(tasks: WritingTasksPlatform) {
+  for (const checkpoint of openCheckpoints.get(tasks) ?? []) checkpoint();
+  await writingTaskWrites(tasks);
 }
 
 /** Translate file offsets across a restart. Unchanged lines remain independent anchors. */

@@ -1537,8 +1537,10 @@ test("a saved writing review resumes after a native restart without contacting i
       "the accepted text to reach disk",
       async () => (await readFile(draft, "utf8")) === accepted || null,
     ).catch(explain);
-    const history = await invokeNative<number[]>("list_versions", { path: draft });
-    assert.ok(history.length);
+    const history = await until("the accepted document history to be recorded", async () => {
+      const versions = await invokeNative<number[]>("list_versions", { path: draft });
+      return versions.length ? versions : null;
+    }).catch(explain);
     await stopSession();
     const changed = accepted.replace("Third draft.", "External third.");
     await writeFile(draft, changed);
@@ -1574,10 +1576,13 @@ test("a saved writing review resumes after a native restart without contacting i
     assert.equal(await readFile(draft, "utf8"), changed);
     assert.deepEqual(await invokeNative<number[]>("list_versions", { path: draft }), history);
   } finally {
-    if (connectionId && session)
-      await invokeNative("disconnect_model_connection", { id: connectionId });
-    endpoint.closeAllConnections();
-    await new Promise<void>((resolve) => endpoint.close(() => resolve()));
+    try {
+      if (connectionId && session)
+        await invokeNative("disconnect_model_connection", { id: connectionId });
+    } finally {
+      endpoint.closeAllConnections();
+      await new Promise<void>((resolve) => endpoint.close(() => resolve()));
+    }
   }
 });
 
@@ -2237,11 +2242,12 @@ test("external Agent consent gates a real CLI process and keeps the manuscript o
 const fs = require("node:fs");
 const args = process.argv.slice(2);
 const readOnly = args.includes("--sandbox") && args[args.indexOf("--sandbox") + 1] === "read-only";
-const prompt = fs.readFileSync(0, "utf8");
+const prompt = JSON.parse(fs.readFileSync(0, "utf8"));
 const readable = fs.readFileSync(${JSON.stringify(draft)}, "utf8");
 fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify({
-  args, prompt: JSON.parse(prompt), cwd: process.cwd(), entries: fs.readdirSync(process.cwd()), readable,
+  args, prompt, cwd: process.cwd(), entries: fs.readdirSync(process.cwd()), readable,
 }) + "\\n");
+if (prompt.instruction === "Is the selected line clear?") fs.writeFileSync("review-copy.md", prompt.selectedText);
 if (!readOnly) fs.writeFileSync(${JSON.stringify(writeTarget)}, "configured access ran");
 console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "Fixture Agent reply." } }));
 console.log(JSON.stringify({ type: "turn.completed" }));
@@ -2357,7 +2363,8 @@ console.log(JSON.stringify({ type: "turn.completed" }));
     join(process.env.XDG_DATA_HOME, "io.github.amemiya02.mint", "ai", "tasks"),
   );
   assert.equal(dirname(selectedCalls[1].cwd), taskDir);
-  assert.deepEqual(await readdir(taskDir), ["review.json"]);
+  assert.match(await readFile(join(taskDir, "review.json"), "utf8"), /Is the selected line clear/);
+  for (const { cwd } of selectedCalls) await assert.rejects(readdir(cwd), { code: "ENOENT" });
   // Exercise deletion with the kind of scratch directory left by an interrupted native run.
   const abandonedCopy = join(taskDir, ".agent-interrupted");
   await mkdir(abandonedCopy);
