@@ -7,7 +7,10 @@ export interface MemoryExternalAgentOptions {
   readonly endpoint: string;
 }
 
-export function memoryExternalAgent(options?: MemoryExternalAgentOptions): ExternalAgentPlatform {
+export function memoryExternalAgent(
+  options: MemoryExternalAgentOptions | undefined,
+  hasTask: (id: string) => boolean,
+): ExternalAgentPlatform {
   const agents = new Map<string, ExternalAgent>();
   const inspect: ExternalAgentPlatform["inspect"] = async (path) => {
     if (!options?.executables.includes(path)) throw new Error("agentUnavailable");
@@ -48,6 +51,7 @@ export function memoryExternalAgent(options?: MemoryExternalAgentOptions): Exter
       const agent = await inspect(path);
       if (agent.revision !== revision) throw new Error("agentChanged");
       if (!options || !agent.approved.includes(access)) throw new Error("agentAccessRequired");
+      if (control?.taskId && !hasTask(control.taskId)) throw new Error("agentFailed");
       const response = await fetch(options.endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

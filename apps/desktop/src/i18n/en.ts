@@ -166,6 +166,15 @@ export const en = {
   "writing.viewChanges": "View changes",
   "writing.continue": "Continue in sidebar",
   "writing.resume": "Resume conversation",
+  "writing.temporary.label": "Temporary session",
+  "writing.temporary.close": "Close temporary session",
+  "writing.temporary.closeBeforeOpening":
+    "Close the temporary session before opening a saved task in this pane.",
+  "writing.temporary.closePrompt":
+    "MINT clears this conversation, its task copies and review records from this device. It keeps edits already made to the draft and its version history. You will lose the option to revert edits by task.",
+  "writing.temporary.wait": "Wait for the task to finish or stop it before closing the session.",
+  "writing.temporary.cleanupFailed":
+    "MINT could not clear the task copies. Try closing the session again.",
   "writing.tasks": "Writing tasks",
   "writing.tasks.all": "All writing tasks",
   "writing.askFolder": "Ask AI about working folder",
@@ -232,6 +241,8 @@ export const en = {
     "Configured MCP tools and hooks can have their own file and network access. Requests run without interactive command approvals.",
   "agent.usesLogin":
     "Codex uses its existing login and sends the prompt to its provider. MINT starts each request in an empty temporary directory.",
+  "agent.retention":
+    "Codex runs in ephemeral mode, which skips saving its local session transcript. The signed-in service and any configured providers or tools apply their own retention rules.",
   "agent.material": "Task context · selected text only",
   "agent.sampleText": "We are currently in the process of reviewing the draft.",
   "agent.sampleInstruction": "Suggest one concise rewrite of the selected text.",
@@ -494,6 +505,16 @@ export const en = {
   "models.reply": "Model reply",
   "models.partial": "Partial reply",
   "models.capabilities": "Connection capabilities",
+  "models.retention": "Data retention",
+  "models.retention.custom":
+    "Retention depends on the configured service. Ask its operator about logging and any upstream providers. Closing a temporary session clears MINT’s local task data only.",
+  "models.retention.openai":
+    "OpenAI API abuse monitoring logs can include prompts and replies. The default is up to 30 days, with exceptions and account-level data controls.",
+  "models.retention.deepseek":
+    "DeepSeek’s API caches request context on disk by default. Unused cache entries usually expire within hours to days. Other service retention follows DeepSeek’s policies.",
+  "models.retention.ollama":
+    "If this endpoint runs Ollama in local-only mode, prompts stay on the server’s machine. Server settings govern local logs and any use of cloud models.",
+  "models.retention.policy": "Open provider documentation",
   "models.conversation": "Conversation: {state}",
   "models.streaming": "Streaming: {state}",
   "models.proposedEdit": "Proposed edit: {state}",

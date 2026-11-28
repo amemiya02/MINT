@@ -132,9 +132,11 @@ export interface TabStore {
   /** Split this tab, or open its previewed target alongside it. */
   openInOtherPane(id: number, preview?: { path: string | null; fragment?: string }): void;
   focusOtherPane(): void;
-  closeReferencePane(): void;
+  closeReferencePane(): Promise<void>;
   activateNext(): void;
   activatePrevious(): void;
+  /** Let a tab finish an operation that needs review before its editor is removed. */
+  registerCloseGuard(id: number, guard: () => Promise<boolean>): () => void;
   /** Close a tab, asking first if it has unsaved changes. Resolves to whether it closed. */
   close(id: number): Promise<boolean>;
   /** Close every tab (e.g. before the window closes). Resolves to false if the user cancelled. */
@@ -195,6 +197,7 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
   const opening = new Map<string, Promise<void>>();
   /** Ranges to select in tabs whose editor has not mounted yet. */
   const pendingSelections = new Map<number, DocumentLocation>();
+  const closeGuards = new Map<number, () => Promise<boolean>>();
   let nextId = 1;
   /** Numbers untitled documents of this window (Untitled, Untitled 2, …). */
   let nextUntitled = 1;
@@ -642,7 +645,18 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
         editors.get(id)?.focus();
       }
     },
-    closeReferencePane() {
+    async closeReferencePane() {
+      for (const tab of state.tabs) {
+        if (
+          tab.pane === "reference" &&
+          state.tabs.some(
+            ({ pane, documentId }) => pane === "primary" && documentId === tab.documentId,
+          )
+        ) {
+          const guard = closeGuards.get(tab.id);
+          if (guard && !(await guard())) return;
+        }
+      }
       const id = state.selected.primary;
       if (id === null || state.selected.reference === null) return;
       const primary = new Set(
@@ -654,8 +668,16 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
     },
     activateNext: () => step(1),
     activatePrevious: () => step(-1),
+    registerCloseGuard(id, guard) {
+      closeGuards.set(id, guard);
+      return () => {
+        if (closeGuards.get(id) === guard) closeGuards.delete(id);
+      };
+    },
 
     async close(id) {
+      const guard = closeGuards.get(id);
+      if (guard && !(await guard())) return false;
       const tab = state.tabs.find((t) => t.id === id);
       if (!tab) return true;
       const lastView = !state.tabs.some((t) => t.id !== id && t.documentId === tab.documentId);

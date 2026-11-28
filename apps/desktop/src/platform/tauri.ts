@@ -108,6 +108,8 @@ export function createTauriPlatform(): Platform {
       update: (task, expectedUpdatedAt) =>
         invoke("update_writing_task", { task, expectedUpdatedAt }),
       remove: (id) => invoke("delete_writing_task", { id }),
+      createTemporary: (id) => invoke("create_temporary_writing_task", { id }),
+      removeTemporary: (id) => invoke("delete_temporary_writing_task", { id }),
     },
     externalAgent: {
       discover: () => invoke("discover_external_agents"),

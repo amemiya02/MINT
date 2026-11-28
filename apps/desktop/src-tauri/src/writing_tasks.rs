@@ -1,4 +1,4 @@
-//! Ordinary writing reviews and their private task directories.
+//! Saved writing reviews and private Agent task directories.
 
 use crate::{app_data_dir, blocking};
 use serde::{Deserialize, Serialize};
@@ -10,6 +10,8 @@ use std::sync::Mutex;
 use tauri::AppHandle;
 
 const RECORD: &str = "review.json";
+const SAVED_TASKS: &str = "tasks";
+const TEMPORARY_TASKS: &str = "temporary-tasks";
 // Serialize task directory changes and record which directories have an Agent using them.
 static TASKS: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 
@@ -26,9 +28,9 @@ pub struct WritingTask {
     review: serde_json::Map<String, Value>,
 }
 
-fn root(app: &AppHandle) -> Result<PathBuf, String> {
+fn root(app: &AppHandle, kind: &str) -> Result<PathBuf, String> {
     let ai = app_data_dir(app)?.join("ai");
-    let tasks = ai.join("tasks");
+    let tasks = ai.join(kind);
     for directory in [&ai, &tasks] {
         match fs::symlink_metadata(directory) {
             Ok(metadata) if metadata.is_dir() => {}
@@ -146,7 +148,7 @@ pub fn relocate(
     to: &Path,
     commit: impl FnOnce() -> io::Result<()>,
 ) -> io::Result<()> {
-    let root = root(app).map_err(io::Error::other)?;
+    let root = root(app, SAVED_TASKS).map_err(io::Error::other)?;
     let _guard = TASKS
         .lock()
         .map_err(|error| io::Error::other(error.to_string()))?;
@@ -198,11 +200,23 @@ pub fn relocate(
 pub struct AgentScratch {
     scratch: Option<tempfile::TempDir>,
     task: Option<PathBuf>,
+    temporary: bool,
 }
 
 impl AgentScratch {
     pub fn path(&self) -> &Path {
         self.scratch.as_ref().expect("Agent scratch is live").path()
+    }
+
+    pub fn private_spool(&self) -> io::Result<tempfile::TempDir> {
+        // Keep input and output outside the working directory. The temporary task
+        // owns them so closing it can also clear files left by an interrupted run.
+        match self.task.as_ref().filter(|_| self.temporary) {
+            Some(directory) => tempfile::Builder::new()
+                .prefix(".agent-private-")
+                .tempdir_in(directory),
+            None => tempfile::tempdir(),
+        }
     }
 }
 
@@ -222,12 +236,19 @@ pub fn agent_scratch(app: &AppHandle, id: Option<&str>) -> Result<AgentScratch, 
         return Ok(AgentScratch {
             scratch: Some(tempfile::tempdir().map_err(|error| error.to_string())?),
             task: None,
+            temporary: false,
         });
     };
-    let directory = task_directory(&root(app)?, id)?;
+    let saved = task_directory(&root(app, SAVED_TASKS)?, id)?;
     let mut active = TASKS.lock().map_err(|error| error.to_string())?;
+    let temporary = !is_task_directory(&saved);
+    let directory = if temporary {
+        task_directory(&root(app, TEMPORARY_TASKS)?, id)?
+    } else {
+        saved
+    };
     if !is_task_directory(&directory)
-        || !is_task_record(&directory.join(RECORD))
+        || (!temporary && !is_task_record(&directory.join(RECORD)))
         || active.contains(&directory)
     {
         return Err("writing task cannot start an Agent run".to_owned());
@@ -240,6 +261,7 @@ pub fn agent_scratch(app: &AppHandle, id: Option<&str>) -> Result<AgentScratch, 
     Ok(AgentScratch {
         scratch: Some(scratch),
         task: Some(directory),
+        temporary,
     })
 }
 
@@ -275,6 +297,30 @@ fn delete(root: &Path, id: &str) -> Result<(), String> {
     fs::remove_dir_all(directory).map_err(|error| error.to_string())
 }
 
+/// On launch there are no live temporary reviews. Clear directories left by an interrupted exit.
+pub fn discard_abandoned_temporary_tasks(app: &AppHandle) -> Result<(), String> {
+    let root = root(app, TEMPORARY_TASKS)?;
+    let entries = match fs::read_dir(&root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.to_string()),
+    };
+    for entry in entries {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let name = entry.file_name();
+        if let Some(id) = name.to_str().filter(|id| valid_id(id)) {
+            if entry
+                .file_type()
+                .map_err(|error| error.to_string())?
+                .is_dir()
+            {
+                delete(&root, id)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn list_writing_tasks(
     app: AppHandle,
@@ -282,7 +328,7 @@ pub async fn list_writing_tasks(
     all: Option<bool>,
 ) -> Result<Vec<WritingTask>, String> {
     blocking(move || {
-        let root = root(&app)?;
+        let root = root(&app, SAVED_TASKS)?;
         let _guard = TASKS.lock().map_err(|error| error.to_string())?;
         Ok(records(&root)?
             .into_iter()
@@ -307,7 +353,7 @@ pub async fn list_writing_reviews_in_folder(
     folder: String,
 ) -> Result<Vec<ReviewLink>, String> {
     blocking(move || {
-        let root = root(&app)?;
+        let root = root(&app, SAVED_TASKS)?;
         let _guard = TASKS.lock().map_err(|error| error.to_string())?;
         Ok(records(&root)?
             .into_iter()
@@ -338,7 +384,7 @@ pub async fn list_writing_reviews_in_folder(
 
 #[tauri::command]
 pub async fn create_writing_task(app: AppHandle, task: WritingTask) -> Result<(), String> {
-    blocking(move || save(&root(&app)?, task, None)).await
+    blocking(move || save(&root(&app, SAVED_TASKS)?, task, None)).await
 }
 
 #[tauri::command]
@@ -347,10 +393,36 @@ pub async fn update_writing_task(
     task: WritingTask,
     expected_updated_at: u64,
 ) -> Result<(), String> {
-    blocking(move || save(&root(&app)?, task, Some(expected_updated_at))).await
+    blocking(move || save(&root(&app, SAVED_TASKS)?, task, Some(expected_updated_at))).await
 }
 
 #[tauri::command]
 pub async fn delete_writing_task(app: AppHandle, id: String) -> Result<(), String> {
-    blocking(move || delete(&root(&app)?, &id)).await
+    blocking(move || delete(&root(&app, SAVED_TASKS)?, &id)).await
+}
+
+#[tauri::command]
+pub async fn create_temporary_writing_task(app: AppHandle, id: String) -> Result<(), String> {
+    blocking(move || {
+        let root = root(&app, TEMPORARY_TASKS)?;
+        let directory = task_directory(&root, &id)?;
+        let _guard = TASKS.lock().map_err(|error| error.to_string())?;
+        let mut builder = fs::DirBuilder::new();
+        builder.recursive(true);
+        #[cfg(unix)]
+        std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+        builder
+            .create(&directory)
+            .map_err(|error| error.to_string())?;
+        if !is_task_directory(&directory) {
+            return Err("invalid temporary task directory".to_owned());
+        }
+        Ok(())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn delete_temporary_writing_task(app: AppHandle, id: String) -> Result<(), String> {
+    blocking(move || delete(&root(&app, TEMPORARY_TASKS)?, &id)).await
 }

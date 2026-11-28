@@ -1,9 +1,14 @@
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
-import { useT } from "../i18n/index.ts";
+import { type MessageKey, useT } from "../i18n/index.ts";
 import { relativePath } from "../paths.ts";
 import { useModalDialog } from "../window/useModalDialog.ts";
 import { ProposedSelectionEdit } from "./ProposedSelectionEdit.tsx";
-import type { EditStatus, SavedReviewLink, WritingTasksPlatform } from "./writing-tasks.ts";
+import type {
+  EditStatus,
+  SavedReviewLink,
+  WritingTaskOpenResult,
+  WritingTasksPlatform,
+} from "./writing-tasks.ts";
 
 interface ReviewBlock {
   readonly kind: "table" | "formula";
@@ -60,7 +65,7 @@ export function FocusedWritingReview({
   readonly path: string | null;
   readonly folder: string | null;
   readonly tasks: WritingTasksPlatform;
-  readonly onOpenFile: (file: SavedReviewLink) => Promise<boolean>;
+  readonly onOpenFile: (file: SavedReviewLink) => Promise<WritingTaskOpenResult>;
   readonly initialSelection: string | undefined;
   readonly onSelection: (key: string | undefined) => void;
   readonly onCompare: (entry: ReviewEntry) => ReviewBlock | null;
@@ -89,7 +94,7 @@ export function FocusedWritingReview({
   const [files, setFiles] = useState<readonly SavedReviewLink[]>([]);
   const [selectedFile, setSelectedFile] = useState("");
   const [switching, setSwitching] = useState(false);
-  const [fileError, setFileError] = useState<"filesUnavailable" | "fileOpenFailed">();
+  const [fileError, setFileError] = useState<MessageKey>();
   const disabled = busy || deciding || switching;
   const bySection = new Map<string, ReviewEntry[]>();
   for (const entry of entries) {
@@ -140,7 +145,7 @@ export function FocusedWritingReview({
           );
       },
       () => {
-        if (active) setFileError("filesUnavailable");
+        if (active) setFileError("writing.review.filesUnavailable");
       },
     );
     return () => {
@@ -208,13 +213,19 @@ export function FocusedWritingReview({
     if (!target || disabled) return;
     setSwitching(true);
     setFileError(undefined);
+    let result: WritingTaskOpenResult = false;
     try {
-      if (await onOpenFile(target)) return;
+      result = await onOpenFile(target);
+      if (result === true) return;
     } catch {
       // The selected document or its task may have disappeared since listing it.
     }
     setSwitching(false);
-    setFileError("fileOpenFailed");
+    setFileError(
+      result === "temporary"
+        ? "writing.temporary.closeBeforeOpening"
+        : "writing.review.fileOpenFailed",
+    );
   }
 
   return (
@@ -327,7 +338,7 @@ export function FocusedWritingReview({
         )}
       </div>
       {switching && <p role="status">{t("writing.review.openingFile")}</p>}
-      {fileError && <p role="alert">{t(`writing.review.${fileError}`)}</p>}
+      {fileError && <p role="alert">{t(fileError)}</p>}
       {batchCount !== undefined && (
         <p role="status" className="mb-2">
           {t("writing.review.accepted", { count: String(batchCount) })}

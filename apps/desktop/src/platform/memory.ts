@@ -139,6 +139,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
   const appData = new Map(Object.entries(options.appData ?? {}));
   const taskRoot = "ai/tasks/";
   const taskRecord = (id: string) => `${taskRoot}${id}/review.json`;
+  const temporaryTasks = new Set<string>();
   const trash: string[] = [];
   const dialogResults = [...(options.openDialogResults ?? [])];
   const saveDialogResults = [...(options.saveDialogResults ?? [])];
@@ -364,7 +365,10 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
         next: options.zoteroItems.length > start + 50,
       };
     },
-    externalAgent: memoryExternalAgent(options.externalAgent),
+    externalAgent: memoryExternalAgent(
+      options.externalAgent,
+      (id) => temporaryTasks.has(id) || appData.has(taskRecord(id)),
+    ),
     writingTasks: {
       async list(path, all) {
         return [...appData.entries()].flatMap(([key, json]) => {
@@ -403,6 +407,12 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       async remove(id) {
         const prefix = `${taskRoot}${id}/`;
         for (const key of appData.keys()) if (key.startsWith(prefix)) appData.delete(key);
+      },
+      async createTemporary(id) {
+        temporaryTasks.add(id);
+      },
+      async removeTemporary(id) {
+        temporaryTasks.delete(id);
       },
     },
     locale: options.locale ?? navigator.language,
