@@ -12,6 +12,7 @@ import {
   usableMaterialText,
 } from "./material-source.ts";
 import { hasTaskImages, type NamedMaterial } from "./writing-sender.ts";
+import { ZoteroMaterialPicker } from "./ZoteroMaterialPicker.tsx";
 
 const previewClass =
   "max-h-28 overflow-auto whitespace-pre-wrap wrap-anywhere rounded bg-(--mint-hover) p-2";
@@ -22,6 +23,7 @@ export interface MaterialEntry {
   readonly id: string | number;
   readonly material: NamedMaterial;
   readonly revision?: number;
+  readonly tool?: "zotero";
 }
 
 interface RangeEntry {
@@ -76,10 +78,10 @@ export function useNamedMaterials() {
       setEntries((previous) => previous.filter((entry) => entry.id !== id));
       setRanges((previous) => previous.filter((entry) => entry.id !== id));
     },
-    paste(name: string, text: string) {
+    paste(name: string, text: string, tool?: MaterialEntry["tool"]) {
       const valid = usableMaterialText(text);
       if (valid) {
-        const entry = { id: nextId.current++, material: { name, text } };
+        const entry = { id: nextId.current++, material: { name, text }, tool };
         setEntries((previous) => [...previous, entry]);
       }
       setError(!valid);
@@ -140,7 +142,7 @@ export function TaskContextChecklist({
   includeDraft,
   handlingFull = true,
   folder,
-  searchEnabled,
+  searchEnabled = false,
   onSearchChange,
 }: {
   readonly platform: Platform;
@@ -152,9 +154,9 @@ export function TaskContextChecklist({
   readonly emptyDraft?: boolean;
   readonly includeDraft?: (checked: boolean) => void;
   readonly handlingFull?: boolean;
-  readonly folder: string | null;
-  readonly searchEnabled: boolean;
-  readonly onSearchChange: (checked: boolean) => void;
+  readonly folder?: string | null;
+  readonly searchEnabled?: boolean;
+  readonly onSearchChange?: (checked: boolean) => void;
 }) {
   const t = useT();
   return (
@@ -211,9 +213,9 @@ export function TaskContextChecklist({
       </dl>
       {named.entries.length > 0 && (
         <ul className="space-y-1">
-          {named.entries.map(({ id, material }) => (
+          {named.entries.map(({ id, material, tool }) => (
             <li key={id} className="flex items-start justify-between gap-2">
-              <details className="min-w-0 flex-1">
+              <details className="min-w-0 flex-1" open={tool === "zotero" || undefined}>
                 <summary className="cursor-pointer wrap-anywhere">
                   {materialLabel(material, t)}
                 </summary>
@@ -241,7 +243,7 @@ export function TaskContextChecklist({
         </ul>
       )}
       <MaterialPicker platform={platform} named={named} vision={vision} />
-      {folder && (
+      {folder && onSearchChange && (
         <div className="wrap-anywhere">
           <label className="flex items-start gap-2">
             <input
@@ -293,6 +295,16 @@ export function MaterialPicker({
   const [pasted, setPasted] = useState("");
   return (
     <>
+      {named.entries.some(({ tool }) => tool === "zotero") && (
+        <dl className="flex flex-wrap gap-x-2">
+          <dt className="font-medium">{t("materials.tools")}</dt>
+          <dd>{t("materials.zotero.tool")}</dd>
+        </dl>
+      )}
+      <ZoteroMaterialPicker
+        platform={platform}
+        add={(name, text) => named.paste(name, text, "zotero")}
+      />
       <details className="space-y-2">
         <summary className="cursor-pointer">{t("materials.add")}</summary>
         <p className="text-(--mint-muted)">{t("materials.dropHint")}</p>
