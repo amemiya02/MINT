@@ -1,5 +1,6 @@
 import type { WordCount } from "@mint/editor";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { ExternalAgentDialog } from "./ai/ExternalAgentPanel.tsx";
 import { createAutosave } from "./autosave/autosave.ts";
 import { Backlinks } from "./backlinks/Backlinks.tsx";
 import { CommandPalette } from "./command-palette/CommandPalette.tsx";
@@ -126,6 +127,9 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   } = useOverlays();
   const { shortcuts, wikilinkFolders } = useSettings().settings;
   const active = tabs.find((tab) => tab.id === activeId) ?? null;
+  const [agentSelection, setAgentSelection] = useState<{ tabId: number; text: string } | null>(
+    null,
+  );
   const [historyPath, setHistoryPath] = useState<string | null>(null);
   const [toolbarPositions, setToolbarPositions] = useState<Record<Pane, ToolbarPosition>>({
     primary: "top",
@@ -371,6 +375,20 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     "edit.find": () => showFind("find"),
     "edit.replace": () => showFind("replace"),
     "edit.searchFolder": () => setFolderSearch((request) => (request ?? 0) + 1),
+    "edit.askExternalAgent": () => {
+      const editor = activeId === null ? undefined : store.editor(activeId);
+      const range = editor?.getSelection();
+      if (activeId === null || !editor || !range || range.anchor === range.head) {
+        setShellError(t("agent.needSelection"));
+        return;
+      }
+      const { anchor, head } = range;
+      setShellError(null);
+      setAgentSelection({
+        tabId: activeId,
+        text: editor.getText().slice(Math.min(anchor, head), Math.max(anchor, head)),
+      });
+    },
     "edit.pastePlainText": () => {
       const editor = activeId === null ? undefined : store.editor(activeId);
       if (!editor) return;
@@ -704,6 +722,16 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
           onClose={() => {
             setExporting(null);
             if (exportedTab) store.editor(exportedTab.id)?.focus();
+          }}
+        />
+      )}
+      {agentSelection && (
+        <ExternalAgentDialog
+          platform={platform.externalAgent}
+          selection={agentSelection.text}
+          onClose={() => {
+            setAgentSelection(null);
+            if (activeId === agentSelection.tabId) store.editor(activeId)?.focus();
           }}
         />
       )}

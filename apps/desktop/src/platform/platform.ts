@@ -1,3 +1,4 @@
+import type { ExternalAgentPlatform } from "../ai/external-agent.ts";
 import type { NewModelConnection, SavedModelConnection, SendModelMessage } from "../ai/model.ts";
 import type { PrintJob } from "../print/protocol.ts";
 
@@ -9,6 +10,7 @@ import type { PrintJob } from "../print/protocol.ts";
  * packages directly.
  */
 export interface Platform {
+  readonly externalAgent: ExternalAgentPlatform;
   readonly sendModelMessage: SendModelMessage;
   listModelConnections(): Promise<readonly SavedModelConnection[]>;
   saveModelConnection(connection: NewModelConnection): Promise<SavedModelConnection>;
