@@ -71,6 +71,13 @@ export const settingsSchema = {
     maxLength: 128,
     optionsFrom: "models",
   }),
+  proofreading: toggle({ label: "settings.proofreading", default: false }),
+  proofreadingModel: text({
+    label: "settings.proofreadingModel",
+    default: "",
+    maxLength: 128,
+    optionsFrom: "models",
+  }),
   // Extended syntax (ADR-0004), each off by default: the dialect's `extended` switches (see dialect.ts).
   extendedToc: toggle({ label: "settings.extendedToc", default: false }),
   extendedHighlight: toggle({ label: "settings.extendedHighlight", default: false }),
