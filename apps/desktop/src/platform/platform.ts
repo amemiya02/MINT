@@ -106,6 +106,9 @@ export interface Platform {
   /** Rename a file or directory. Rejects rather than replace an existing entry. */
   rename(from: string, to: string): Promise<void>;
 
+  /** Install a move or link edit only if the source still matches the preview. */
+  applyDocumentEdit(edit: DocumentEdit): Promise<void>;
+
   /** Move a file or directory to the system trash (never a permanent delete). */
   moveToTrash(path: string): Promise<void>;
 
@@ -328,3 +331,10 @@ export type MenuItemSpec =
       readonly action: "cut" | "copy" | "paste" | "selectAll" | "quit";
       readonly label: string;
     };
+
+export interface DocumentEdit {
+  from: string;
+  to: string;
+  before: string;
+  after: string;
+}
