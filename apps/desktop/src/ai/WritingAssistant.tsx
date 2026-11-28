@@ -19,7 +19,12 @@ import { useTabStore } from "../tabs/context.ts";
 import { useModalDialog } from "../window/useModalDialog.ts";
 import { FocusedWritingReview, type ReviewEntry } from "./FocusedWritingReview.tsx";
 import { FolderWritingReview } from "./FolderWritingReview.tsx";
-import { isFolderDocumentPath, planFolderChanges } from "./folder-changes.ts";
+import {
+  isFolderDocumentPath,
+  planFolderChanges,
+  revertFolderBatch,
+  writeFolderBatch,
+} from "./folder-changes.ts";
 import {
   type MaterialPlan,
   MaterialPlanPreview,
@@ -136,6 +141,7 @@ interface Task {
   readonly request: WritingRequest;
   readonly authorInstruction?: string;
   readonly folderPaths?: readonly string[];
+  readonly folderDiskBaselines?: ReadonlyMap<string, string>;
   readonly documentBaseline?: string;
   readonly plan?: MaterialPlan;
   readonly action: WritingAction;
@@ -559,7 +565,12 @@ function Composer({
   const [baselineId, setBaselineId] = useState<string | null>(null);
   const [comparisonId, setComparisonId] = useState<string | null>(null);
   const controller = useRef<AbortController | null>(null);
-  const busy = writingAttemptBusy(attempt?.status);
+  const [folderWriting, setFolderWriting] = useState(false);
+  const [folderAuthorization, setFolderAuthorization] = useState<{
+    recipient: string;
+    text: string;
+  }>();
+  const busy = folderWriting || writingAttemptBusy(attempt?.status);
   const store = useTabStore();
   const [error, setError] = useState<
     | "sendFailed"
@@ -583,6 +594,8 @@ function Composer({
   const isVisible = useRef(false);
   isVisible.current = active && !!placement;
   const checkingDisk = useRef(false);
+  const writingBatch = useRef(false);
+  const [folderRevision, setFolderRevision] = useState(0);
   const trackedSuggestions = useRef(new Set<TrackedRange>());
   const [showSource, setShowSource] = useState(restored?.task.showSource ?? false);
   const [reviewSelection, setReviewSelection] = useState(restored?.task.reviewSelection);
@@ -631,16 +644,17 @@ function Composer({
   const skillAction = useWritingSkillAction(platform, skillFolder, skill.id);
   const canSendInstruction =
     !!instruction.trim() && !skill.suggestions?.length && !skillAction.loading;
-  const preferredAction =
-    actionOverride ??
-    (explicitDirect && !canEditFolder ? "direct" : skillAction.action) ??
-    (turns.length && !canEditFolder ? "comment" : "preview");
   const action = !canEdit
     ? "comment"
-    : canEditFolder && preferredAction === "direct"
-      ? "preview"
-      : preferredAction;
-  const folderCopy = canEditFolder && action === "preview" ? origin.folder : undefined;
+    : (actionOverride ??
+      (explicitDirect ? "direct" : skillAction.action) ??
+      (turns.length && !canEditFolder ? "comment" : "preview"));
+  const folderCopy = canEditFolder && action !== "comment" ? origin.folder : undefined;
+  const folderBatch = !!folderCopy && action === "direct";
+  const writeTargetInput =
+    folderAuthorization?.recipient === recipient?.id ? (folderAuthorization?.text ?? "") : "";
+  const writeTargets = [...new Set(writeTargetInput.split("\n").filter((path) => path.trim()))];
+  const invalidWriteTargets = writeTargets.some((path) => !isFolderDocumentPath(path));
 
   const currentDraft = sendDraft
     ? { name, text: canEditDocument && action !== "comment" ? draft : draft.replace(/^\uFEFF/, "") }
@@ -672,13 +686,17 @@ function Composer({
     !!toolPicker.plan ||
     (selectedText?.length ?? 0) >= largeWritingSelection;
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: A completed batch may change the listed documents.
   useEffect(() => {
     if (!origin.folder) return;
     const root = origin.folder;
     let current = true;
     void platform.listFolderFiles(root, documentExtensions).then(
       (paths) => {
-        if (current) setFolderPaths(paths);
+        if (current) {
+          setFolderListingFailed(false);
+          setFolderPaths(paths);
+        }
       },
       () => {
         if (current) setFolderListingFailed(true);
@@ -687,7 +705,7 @@ function Composer({
     return () => {
       current = false;
     };
-  }, [origin.folder, platform]);
+  }, [origin.folder, platform, folderRevision]);
 
   const snapshot = useCallback(
     (taskTitle: string): SavedWritingTask => {
@@ -812,8 +830,9 @@ function Composer({
   }, [busy, onBusyChange, origin.id]);
 
   useEffect(() => {
-    if (!temporary) return;
+    if (!temporary && !origin.folder) return;
     const unregister = store.registerCloseGuard(tabId, () => {
+      if (!temporary) return Promise.resolve(!writingBatch.current);
       if (finishTabClose.current) return Promise.resolve(false);
       store.activate(tabId);
       setPlacement("sidebar");
@@ -827,7 +846,7 @@ function Composer({
       finishTabClose.current?.(false);
       finishTabClose.current = null;
     };
-  }, [setPlacement, store, tabId, temporary]);
+  }, [origin.folder, setPlacement, store, tabId, temporary]);
 
   useEffect(() => {
     if (!active || !placement) return;
@@ -1331,10 +1350,12 @@ function Composer({
       named.unconfirmed ||
       (named.hasImages && !vision?.verified) ||
       (scope === "folder" && (folderCopy ? !folderPaths : !searchFolder)) ||
+      (folderBatch && (!writeTargets.length || invalidWriteTargets)) ||
       checkingDisk.current
     )
       return;
     let folderDocuments: WritingRequest["folderDocuments"];
+    const folderDiskBaselines = new Map<string, string>();
     if (folderCopy && folderPaths) {
       checkingDisk.current = true;
       try {
@@ -1342,9 +1363,24 @@ function Composer({
           folderPaths
             .filter((path) => folderTargets?.has(path))
             .map(async (path) => {
+              const relative = relativePath(folderCopy, path);
+              if (!folderBatch) {
+                const tab = store.getState().tabs.find((tab) => tab.path === path);
+                const live = tab && store.getText(tab.id);
+                if (live != null) return { path: relative, text: live };
+              }
+              const disk = await platform.readTextFile(path);
               const tab = store.getState().tabs.find((tab) => tab.path === path);
-              const text = (tab && store.getText(tab.id)) ?? (await platform.readTextFile(path));
-              return { path: relativePath(folderCopy, path), text };
+              const live = tab && store.getText(tab.id);
+              if (
+                tab &&
+                live != null &&
+                live !== disk &&
+                !tab.external &&
+                store.getDiskBaseline(tab.id) === disk
+              )
+                folderDiskBaselines.set(relative, disk);
+              return { path: relative, text: live ?? disk };
             }),
         );
       } catch {
@@ -1382,6 +1418,7 @@ function Composer({
       authorInstruction: skill.id ? instruction.trim() : undefined,
       plan: capacity.plan,
       folderPaths: folderDocuments && folderPaths,
+      folderDiskBaselines,
       documentBaseline: canEditDocument && action !== "comment" ? draft : undefined,
       request: {
         instruction: skill.id ? writingSkillInstruction(t, skill, action) : instruction.trim(),
@@ -1390,6 +1427,7 @@ function Composer({
         history: history.length ? history : undefined,
         responseFormat: action === "comment" || folderDocuments ? undefined : "replacement",
         folderDocuments,
+        folderWriteTargets: folderBatch ? writeTargets : undefined,
       },
       action,
       scope,
@@ -1405,6 +1443,7 @@ function Composer({
         setInstruction("");
         setActionOverride(null);
         setAllowedFolder(null);
+        setFolderAuthorization(undefined);
         callLimit.setValue("");
       },
       toolPicker.plan,
@@ -1574,7 +1613,24 @@ function Composer({
           result.fileChanges ?? [],
           task.folderPaths,
           dialect,
+          task.request.folderWriteTargets,
+          task.folderDiskBaselines,
         );
+        if (task.action === "direct" && task.request.folderWriteTargets) {
+          writingBatch.current = true;
+          try {
+            folderChanges = await writeFolderBatch(
+              platform,
+              store,
+              origin.folder,
+              folderChanges,
+              signal,
+            );
+            setFolderRevision((revision) => revision + 1);
+          } finally {
+            writingBatch.current = false;
+          }
+        }
       }
       if (editing && status === "complete" && !task.request.folderDocuments)
         finalReplacement = replacementFromReply(result);
@@ -1693,7 +1749,9 @@ function Composer({
       partial: "",
       newDecisions: (suggestions ?? folderChanges)?.filter(({ status }) => status === "preview")
         .length,
-      folderChangeCount: folderChanges?.filter(({ status }) => status !== "outside").length,
+      folderChangeCount: folderChanges?.filter(({ status }) =>
+        task.action === "direct" ? status === "applied" : status !== "outside",
+      ).length,
       capacityRejected,
       localOffline,
     });
@@ -1810,7 +1868,12 @@ function Composer({
     });
   }, [focusedReview, origin.editor, draft]);
 
-  const canRetry = attempt && !busy && !attempt.capacityRejected && attempt.status !== "complete";
+  const canRetry =
+    attempt &&
+    !busy &&
+    !attempt.capacityRejected &&
+    attempt.status !== "complete" &&
+    attempt.folderChangeCount === undefined;
   const sameConnection = canRetry && recipients.find(({ id }) => id === attempt.recipientId);
   const otherRecipients =
     canRetry && !attempt.task.alternativeTo
@@ -2051,6 +2114,49 @@ function Composer({
     );
   }
 
+  function renderWriteTargets(targets: readonly string[]) {
+    if (!targets.length) return null;
+    return (
+      <ul aria-label={t("writing.folder.authorizedFiles")} className="list-disc pl-5 text-xs">
+        {targets.map((path) => (
+          <li key={path} className="wrap-anywhere">
+            {path}
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
+  async function changeFolderBatch(
+    turn: Turn,
+    index: number,
+    operation: "write" | "revert",
+    position?: number,
+  ) {
+    if (checkingDisk.current || controller.current || !origin.folder || !turn.folderChanges) return;
+    checkingDisk.current = true;
+    writingBatch.current = true;
+    taskRunning.current = true;
+    setFolderWriting(true);
+    try {
+      const changes =
+        operation === "write"
+          ? await writeFolderBatch(platform, store, origin.folder, turn.folderChanges)
+          : await revertFolderBatch(platform, store, origin.folder, turn.folderChanges, position);
+      setTurns((previous) =>
+        previous.map((item, turnIndex) =>
+          turnIndex === index ? { ...item, folderChanges: changes } : item,
+        ),
+      );
+      setFolderRevision((revision) => revision + 1);
+    } finally {
+      writingBatch.current = false;
+      checkingDisk.current = false;
+      taskRunning.current = false;
+      setFolderWriting(false);
+    }
+  }
+
   function renderTurnContent(turn: Turn, index: number, inComparison = false) {
     const canRewrite = !loading && recipients.some(({ id }) => id === turn.recipientId);
     const { suggestions } = turn;
@@ -2064,6 +2170,9 @@ function Composer({
             platform={platform}
             source={showSource}
             busy={busy}
+            batch={turn.direct}
+            retry={() => changeFolderBatch(turn, index, "write")}
+            revert={(position) => changeFolderBatch(turn, index, "revert", position)}
             decide={(position, status) =>
               setTurns((previous) =>
                 previous.map((item, turnIndex) =>
@@ -2071,7 +2180,15 @@ function Composer({
                     ? {
                         ...item,
                         folderChanges: item.folderChanges?.map((change, fileIndex) =>
-                          fileIndex === position ? { ...change, status } : change,
+                          fileIndex === position
+                            ? {
+                                ...change,
+                                status,
+                                result: undefined,
+                                undoResult: undefined,
+                                current: undefined,
+                              }
+                            : change,
                         ),
                       }
                     : item,
@@ -2250,6 +2367,7 @@ function Composer({
                   {" · "}
                   {t(`writing.scope.${baseline.scope}`)}
                 </p>
+                {renderWriteTargets(first.folderWriteTargets ?? [])}
                 {first.selectedText !== undefined && (
                   <details className="text-xs">
                     <summary>{t("writing.scope.selection")}</summary>
@@ -2525,6 +2643,7 @@ function Composer({
           {retryHasImages && sameVision && !sameVision.verified && (
             <VisionControl check={sameVision} />
           )}
+          {renderWriteTargets(attempt.task.request.folderWriteTargets ?? [])}
           <button
             type="button"
             className={buttonClass}
@@ -2678,13 +2797,7 @@ function Composer({
                   onChange={(event) => setActionOverride(event.target.value as WritingAction)}
                 >
                   {writingActions.map((id) => (
-                    <option
-                      key={id}
-                      value={id}
-                      disabled={
-                        (!canEdit && id !== "comment") || (canEditFolder && id === "direct")
-                      }
-                    >
+                    <option key={id} value={id} disabled={!canEdit && id !== "comment"}>
                       {t(`writing.${id}`)}
                     </option>
                   ))}
@@ -2730,6 +2843,7 @@ function Composer({
                     if (origin.folder) {
                       setActionOverride(null);
                       setFolderSelection(undefined);
+                      setFolderAuthorization(undefined);
                     }
                     setAllowedFolder(null);
                     setIncludeHistory(false);
@@ -2768,7 +2882,11 @@ function Composer({
             {folderCopy && recipient && (
               <fieldset className="space-y-1">
                 <legend>{t("writing.folder.include")}</legend>
-                <p className="text-xs text-(--mint-muted)">{t("writing.folder.copyDetails")}</p>
+                <p className="text-xs text-(--mint-muted)">
+                  {t(
+                    folderBatch ? "writing.folder.copyBatchDetails" : "writing.folder.copyDetails",
+                  )}
+                </p>
                 <div className="max-h-40 overflow-auto">
                   {folderPaths
                     ?.filter((path) => isFolderDocumentPath(relativePath(folderCopy, path)))
@@ -2789,6 +2907,24 @@ function Composer({
                     ))}
                 </div>
                 {folderListingFailed && <p role="alert">{t("writing.folderRead")}</p>}
+              </fieldset>
+            )}
+            {folderBatch && recipient && (
+              <fieldset className="space-y-1">
+                <label className="grid gap-1">
+                  {t("writing.folder.writeTargets")}
+                  <textarea
+                    className={fieldClass}
+                    rows={3}
+                    value={writeTargetInput}
+                    onChange={(event) =>
+                      setFolderAuthorization({ recipient: recipient.id, text: event.target.value })
+                    }
+                  />
+                </label>
+                <p className="text-xs">{t("writing.folder.writeDetails")}</p>
+                {invalidWriteTargets && <p role="alert">{t("writing.folder.invalidTargets")}</p>}
+                {renderWriteTargets(writeTargets)}
               </fieldset>
             )}
             {!title && (
@@ -2858,6 +2994,7 @@ function Composer({
                   named.loading ||
                   named.unconfirmed ||
                   (named.hasImages && !vision?.verified) ||
+                  (folderBatch && (!writeTargets.length || invalidWriteTargets)) ||
                   (scope === "folder" && (folderCopy ? !folderPaths : !searchFolder))
                 }
               >

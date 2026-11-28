@@ -4175,9 +4175,14 @@ test("Codex provides manuscript and folder reviews from approved task copies", a
   const index = join(fixture, "index.md");
   const old = join(fixture, "old.md");
   const executable = join(fixture, "fixture-codex");
+  const batchReceived = join(dir, "folder-batch-received.json");
+  const batchRelease = join(dir, "folder-batch-release");
+  const appendix = join(fixture, "batch-appendix.md");
   const initial = "First paragraph.  \r\n\r\nOriginal.\r\n";
   const unsaved = initial.replace("Original.", "Original. Unsaved note.");
   const changed = unsaved.replace("Original.", "Revised.");
+  const batchBaseline = changed.replace("Unsaved note.", "Unsaved note. New note.");
+  const batchDraft = batchBaseline.replace("Revised.", "Batch revision.");
   const approved = "Only the approved passage.";
   const skillInstruction = [
     "Correct spelling, punctuation, and grammar.",
@@ -4206,12 +4211,34 @@ const config = args.flatMap((arg, i) =>
   arg === "-c" && args[i + 1].startsWith("permissions.") ? ["-c", args[i + 1]] : []);
 const sample = prompt.instruction.startsWith("Suggest one concise rewrite");
 const folder = prompt.folderDocuments !== undefined;
+const batch = prompt.folderWriteTargets !== undefined;
 if (!sample && !folder && (!prompt.instruction.startsWith(${JSON.stringify(`${skillInstruction}\n\n`)}) ||
   !prompt.instruction.includes("Write the resulting Markdown to draft.md."))) process.exit(12);
-if (folder && JSON.stringify(prompt.folderDocuments) !== JSON.stringify([
+if (folder && !batch && JSON.stringify(prompt.folderDocuments) !== JSON.stringify([
   "documents/index.md", "documents/manuscript.md", "documents/old.md",
 ])) process.exit(11);
-const shell = folder ? ${JSON.stringify(`set -eu
+if (batch) {
+  fs.appendFileSync(${JSON.stringify(batchReceived)}, JSON.stringify(prompt) + "\\n");
+  const deadline = Date.now() + 20000;
+  while (!fs.existsSync(${JSON.stringify(batchRelease)})) {
+    if (Date.now() > deadline) process.exit(12);
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+  }
+}
+const shell = batch ? ${JSON.stringify(`set -eu
+printf '%s' "$6" > expected.txt
+cmp documents/manuscript.md expected.txt
+rm expected.txt
+printf '%s' "$8" > documents/manuscript.md
+printf '%s\\n' '# Agent appendix' > documents/batch-appendix.md
+printf '%s\\n' '# New document' > documents/batch-new.md
+printf '%s\\n' '# Blocked creation' > documents/batch-occupied.md
+printf '%s\\n' 'Unapproved write' > documents/batch-unlisted.md
+printf '%s\\n' '[Blocked](batch-occupied.md)' > documents/index.md
+mkdir documents/next
+mv documents/batch-old.md documents/next/moved.md
+printf '%s' '[{"from":"batch-old.md","to":"next/moved.md"}]' > moves.json
+`)} : folder ? ${JSON.stringify(`set -eu
 test "$(ls -a)" = "$(printf '.\n..\ndocuments')"
 test "$(ls documents)" = "$(printf 'index.md\nmanuscript.md\nold.md')"
 printf '%s' "$6" > expected.txt
@@ -4247,6 +4274,7 @@ const result = spawnSync(codex, [
   ${JSON.stringify(unsaved)}, ${JSON.stringify(changed)},
   ${JSON.stringify(changed.replace("Unsaved note.", "Unsaved note. New note."))},
   ${JSON.stringify(changed.replace("Revised.", "Folder revision.").replace("Unsaved note.", "Unsaved note. New note."))},
+  ${JSON.stringify(batchDraft)},
 ], { stdio: "inherit" });
 if (result.status !== 0) process.exit(result.status ?? 1);
 console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "Edited task copy." } }));
@@ -4524,5 +4552,130 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   );
   assert.equal(await readFile(draft, "utf8"), changed);
   assert.equal(await readFile(sibling, "utf8"), "Private text.");
+  await writeFile(appendix, "# Appendix\n");
+  const batchOld = join(fixture, "batch-old.md");
+  await writeFile(batchOld, "## Section\n");
+  const batchIndex = "[Old](chapter/renamed.md#section) · [Notes](notes.md)\n";
+  const newDocument = join(fixture, "batch-new.md");
+  const occupied = join(fixture, "batch-occupied.md");
+  const unlisted = join(fixture, "batch-unlisted.md");
+  const moved = join(fixture, "next", "moved.md");
+  const instruction = "Write the authorized folder batch.";
+  const writeTargets = [
+    "manuscript.md",
+    "index.md",
+    "batch-appendix.md",
+    "batch-new.md",
+    "batch-occupied.md",
+    "batch-old.md",
+    "next/moved.md",
+  ];
+  await clickPath(`${assistant}//button[normalize-space(.)='Close']`);
+  await nativeShortcut("ctrl+shift+p");
+  await waitForView(
+    "the Command Palette to receive focus for the authorized batch",
+    `return document.activeElement?.matches('dialog[aria-label="Command Palette"] input');`,
+  );
+  await keyActions(typing("Ask AI about working folder"));
+  await shows("Ask AI about working folder");
+  await keyActions(typing(keys.enter));
+  await waitForView(
+    "the folder Agent to load for the authorized batch",
+    `return [...document.querySelectorAll('aside[aria-label="Writing Assistant"] option')]
+      .some(option => option.textContent === ${JSON.stringify(`Codex · ${executable}`)});`,
+  );
+  await select("Recipient", `Codex · ${executable}`);
+  await select("Action", "direct");
+  for (const path of ["manuscript.md", "index.md", "batch-appendix.md", "batch-old.md"]) {
+    await clickPath(`${assistant}//label[normalize-space(.)='${path}']/input[@type='checkbox']`);
+  }
+  await clickPath(
+    `${assistant}//label[normalize-space(.)='Write targets (one relative Markdown path per line)']/textarea`,
+  );
+  for (const [i, path] of writeTargets.entries()) {
+    if (i > 0) await keyActions(typing(keys.enter));
+    await keyActions(typing(path));
+  }
+  await waitForView(
+    "all disk write targets to be displayed before sending",
+    `return JSON.stringify([...document.querySelectorAll('ul[aria-label="Files authorized for writing"] li')]
+      .map(item => item.textContent)) === ${JSON.stringify(JSON.stringify(writeTargets))};`,
+  );
+  await assert.rejects(readFile(batchReceived), { code: "ENOENT" });
+  await clickPath(`${assistant}//label[normalize-space(.)='Instruction']/input`);
+  await keyActions([...typing(instruction), ...typing(keys.enter)]);
+  try {
+    const request = await until("the native Agent to receive its write targets", async () =>
+      JSON.parse(await readFile(batchReceived, "utf8")),
+    );
+    assert.deepEqual(request.folderWriteTargets, writeTargets);
+    assert.deepEqual(request.folderDocuments, [
+      "documents/batch-appendix.md",
+      "documents/batch-old.md",
+      "documents/index.md",
+      "documents/manuscript.md",
+    ]);
+    assert.ok(!JSON.stringify(request).includes(fixture));
+    await writeFile(occupied, "Author's concurrent creation.\n");
+    await writeFile(appendix, "Author's concurrent appendix edit.\n");
+  } finally {
+    await writeFile(batchRelease, "");
+  }
+  const batchReview = 'section[aria-label="Folder changes"]';
+  await showsIn(batchReview, "Written to disk.");
+  await showsIn(batchReview, "Could not apply this file change");
+  await showsIn(batchReview, "The document changed since this task began.");
+  await showsIn(batchReview, "Waiting for required file changes.");
+  await showsIn(batchReview, "Outside the task scope · batch-unlisted.md");
+  assert.equal(await readFile(draft, "utf8"), batchDraft);
+  assert.equal(await readFile(newDocument, "utf8"), "# New document\n");
+  assert.equal(await readFile(moved, "utf8"), "## Section\n");
+  await assert.rejects(readFile(batchOld), { code: "ENOENT" });
+  assert.equal(await readFile(index, "utf8"), batchIndex);
+  assert.equal(await readFile(occupied, "utf8"), "Author's concurrent creation.\n");
+  assert.equal(await readFile(appendix, "utf8"), "Author's concurrent appendix edit.\n");
+  await assert.rejects(readFile(unlisted), { code: "ENOENT" });
+  const laterNote = "\r\nIndependent later author note.\r\n";
+  await writeFile(draft, batchDraft + laterNote);
+  await rm(occupied);
+  await clickPath(`${assistant}//button[normalize-space(.)='Retry unfinished file changes']`);
+  await until(
+    "the deferred native backlink to be written on retry",
+    async () => (await readFile(index, "utf8")) === "[Blocked](batch-occupied.md)\n" || null,
+  );
+  assert.equal(await readFile(draft, "utf8"), batchDraft + laterNote);
+  assert.equal((await readFile(batchReceived, "utf8")).trim().split("\n").length, 1);
+  await clickPath(`${assistant}//button[normalize-space(.)='Close']`);
+  await restart([fixture, draft]);
+  await nativeShortcut("ctrl+shift+p");
+  await waitForView(
+    "the Command Palette to receive focus after restarting",
+    `return document.activeElement?.matches('dialog[aria-label="Command Palette"] input');`,
+  );
+  await keyActions(typing("All writing tasks"));
+  await shows("All writing tasks");
+  await keyActions(typing(keys.enter));
+  await clickPath(
+    `//dialog[@aria-label='All writing tasks']//button[normalize-space(.)='${instruction}']`,
+  );
+  await clickPath(
+    `${assistant}//fieldset[@aria-label='Create batch-new.md']//button[normalize-space(.)='Revert this file change']`,
+  );
+  await showsIn('fieldset[aria-label="Create batch-new.md"]', "Edit reverted.");
+  await assert.rejects(readFile(newDocument), { code: "ENOENT" });
+  await clickPath(`${assistant}//button[normalize-space(.)='Revert all task edits']`);
+  await showsIn(
+    'fieldset[aria-label="Move and rename batch-old.md → next/moved.md"]',
+    "Edit reverted.",
+  );
+  assert.equal(await readFile(draft, "utf8"), batchBaseline + laterNote);
+  assert.equal(await readFile(index, "utf8"), batchIndex);
+  assert.equal(await readFile(batchOld, "utf8"), "## Section\n");
+  for (const file of [moved, newDocument, occupied, unlisted]) {
+    await assert.rejects(readFile(file), { code: "ENOENT" });
+  }
+  assert.equal(await readFile(appendix, "utf8"), "Author's concurrent appendix edit.\n");
+  assert.equal(await readFile(sibling, "utf8"), "Private text.");
+  assert.equal((await readFile(batchReceived, "utf8")).trim().split("\n").length, 1);
   await invokeNative("forget_external_agent", { path: executable });
 });
