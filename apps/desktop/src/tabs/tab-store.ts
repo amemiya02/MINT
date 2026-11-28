@@ -276,9 +276,9 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
     editor.focus();
   }
 
-  /** Select only after React has made this view visible. */
-  function selectWhenVisible(id: number, select: DocumentLocation) {
-    if (editors.has(id)) setTimeout(() => reveal(id, select));
+  /** Apply navigation before the next keystroke, including when opening a new editor. */
+  function selectWhenMounted(id: number, select: DocumentLocation) {
+    if (editors.has(id)) reveal(id, select);
     else pendingSelections.set(id, select);
   }
 
@@ -337,7 +337,7 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
       if (!tab) return;
     }
     const id = showInPane(tab, pane ?? tab.pane);
-    if (select) selectWhenVisible(id, select);
+    if (select) selectWhenMounted(id, select);
   }
 
   /** Watch the tab's document for changes by other programs (replacing any earlier watch). */
@@ -570,7 +570,7 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
           ? { fragment: preview.fragment }
           : { sourceFrom: 0, sourceTo: 0 };
         if (preview.path) void openDocument(preview.path, location, pane);
-        else selectWhenVisible(showInPane(tab, pane), location);
+        else selectWhenMounted(showInPane(tab, pane), location);
         return;
       }
       const neighbour = state.tabs.findLast((t) => t.pane === tab.pane && t.id !== id);
@@ -696,7 +696,7 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
       editors.set(id, editor);
       const select = pendingSelections.get(id);
       pendingSelections.delete(id);
-      if (select) setTimeout(() => reveal(id, select));
+      if (select) reveal(id, select);
     },
 
     markChanged(viewId, fromHistory = false) {
