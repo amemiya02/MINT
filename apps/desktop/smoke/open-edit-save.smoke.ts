@@ -528,6 +528,20 @@ const shows = (text: string) =>
     }).then((found) => (found ? true : null)),
   ).catch(explain);
 
+const chooseSettingsOption = (setting: string, label: string) =>
+  until(`${setting} to offer ${label}`, () =>
+    command<boolean>("POST", `/session/${session}/execute/sync`, {
+      script: `const select = [...document.querySelectorAll('dialog[open] label')]
+        .find(label => label.textContent.trim() === arguments[0])?.control;
+        const option = select && [...select.options].find(item => item.text === arguments[1]);
+        if (!option) return false;
+        select.value = option.value;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;`,
+      args: [setting, label],
+    }).then((chosen) => chosen || null),
+  ).catch(explain);
+
 test("preview, disambiguate, move and undo wikilinks in a native folder", async () => {
   assert.ok(application);
   const folder = await mkdtemp(join(dir, "wikilinks-"));
@@ -1312,20 +1326,6 @@ test("inline completion sends the live manuscript excerpt through the native mod
     endpoint.listen(0, "127.0.0.1", resolve);
   });
 
-  const chooseCompletionModel = (label: string) =>
-    until(`the Inline completion setting to have an option for ${label}`, () =>
-      command<boolean>("POST", `/session/${session}/execute/sync`, {
-        script: `const select = [...document.querySelectorAll('dialog[open] label')]
-          .find(label => label.textContent.trim() === 'Inline completion')?.control;
-          const option = select && [...select.options].find(item => item.text === arguments[0]);
-          if (!option) return false;
-          select.value = option.value;
-          select.dispatchEvent(new Event('change', { bubbles: true }));
-          return true;`,
-        args: [label],
-      }).then((chosen) => chosen || null),
-    ).catch(explain);
-
   try {
     const address = endpoint.address();
     assert.ok(address && typeof address !== "string");
@@ -1342,7 +1342,7 @@ test("inline completion sends the live manuscript excerpt through the native mod
       await keyActions(typing(value));
     }
     await clickPath("//button[not(@disabled) and normalize-space(.)='Use for this launch']");
-    await chooseCompletionModel(name);
+    await chooseSettingsOption("Inline completion", name);
     await click("Close");
     await clickPath("//main//div[@role='textbox']");
     await keyActions([...chord(keys.control, keys.end), ...typing(" trail")]);
@@ -1375,7 +1375,7 @@ test("inline completion sends the live manuscript excerpt through the native mod
     ).catch(explain);
 
     await openSettings();
-    await chooseCompletionModel("Off");
+    await chooseSettingsOption("Inline completion", "Off");
     await click("Close");
     await clickPath("//main//div[@role='textbox']");
     await keyActions([...chord(keys.control, keys.end), ...typing(" Today.")]);
@@ -1387,6 +1387,112 @@ test("inline completion sends the live manuscript excerpt through the native mod
     ).catch(explain);
     await new Promise((resolve) => setTimeout(resolve, 800));
     assert.equal(requests.length, 1, "switching inline completion off stops subsequent requests");
+  } finally {
+    endpoint.closeAllConnections();
+    await new Promise<void>((resolve) => endpoint.close(() => resolve()));
+  }
+});
+
+test("automatic proofreading sends only the active passage and undo restores the native file", async () => {
+  const path = join(dir, "proofreading.md");
+  const original = "\uFEFFA speeling error.  \r\n\r\nPrivate appendix.\n";
+  await writeFile(path, original);
+  const requests: { url?: string; authorization?: string; body: unknown }[] = [];
+  const endpoint = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(chunk);
+    requests.push({
+      url: request.url,
+      authorization: request.headers.authorization,
+      body: JSON.parse(Buffer.concat(chunks).toString("utf8")),
+    });
+    response.writeHead(200, { "Content-Type": "application/json" }).end(
+      JSON.stringify({
+        choices: [
+          {
+            message: { content: '{"original":"speeling","replacement":"spelling"}' },
+            finish_reason: "stop",
+          },
+        ],
+      }),
+    );
+  });
+  await new Promise<void>((resolve, reject) => {
+    endpoint.once("error", reject);
+    endpoint.listen(0, "127.0.0.1", resolve);
+  });
+  const address = endpoint.address();
+  assert.ok(address && typeof address !== "string");
+  const api = `http://127.0.0.1:${address.port}/v1`;
+  const secret = "native-proofreading-fixture-key";
+  const checkbox =
+    "//input[@type='checkbox' and @id=//label[normalize-space(.)='Automatic proofreading']/@for]";
+
+  try {
+    await restart([path]);
+    await clickPath("//div[contains(@class,'cm-content') and contains(.,'A speeling error.')]");
+    await keyActions(chord(keys.control, keys.home));
+    await openSettings();
+    await click("Model connections");
+    await shows("Sample prompt");
+    for (const [label, value] of [
+      ["Connection name", "Native proofreading fixture"],
+      ["API address", api],
+      ["Model name", "native-proofreader"],
+      ["API key", secret],
+    ]) {
+      const input = await command<Record<string, string>>("POST", `/session/${session}/element`, {
+        using: "xpath",
+        value: `//dialog[@open]//label[normalize-space(.)='${label}']/input`,
+      });
+      await command("POST", `/session/${session}/element/${input[elementKey]}/value`, {
+        text: value,
+      });
+    }
+    await clickPath("//button[not(@disabled) and normalize-space(.)='Use for this launch']");
+    await chooseSettingsOption("Proofreading model", "Native proofreading fixture");
+    assert.deepEqual(requests, [], "setting up a model does not send the manuscript");
+    await clickPath(checkbox);
+    await click("Close");
+    await clickPath(
+      "//section[@aria-label='Proofreading suggestion']//button[normalize-space(.)='Apply correction']",
+    );
+    assert.ok(requests[0], "the correction arrived from the fixture endpoint");
+    const { url, authorization, body } = requests[0];
+    assert.equal(url, "/v1/chat/completions");
+    assert.equal(authorization, `Bearer ${secret}`);
+    const { model, messages } = body as { model: string; messages: { content: string }[] };
+    assert.equal(model, "native-proofreader");
+    assert.equal(messages.length, 1);
+    const [message] = messages;
+    assert.ok(message);
+    assert.equal(JSON.parse(message.content).selectedText, "A speeling error.");
+    await nativeShortcut("ctrl+s");
+    await until(
+      "only the corrected fragment to reach disk",
+      async () =>
+        (await readFile(path, "utf8")) === original.replace("speeling", "spelling") || null,
+    ).catch(explain);
+    await keyActions(chord(keys.control, "z"));
+    await nativeShortcut("ctrl+s");
+    await until(
+      "Undo to restore the exact native bytes",
+      async () => (await readFile(path)).equals(Buffer.from(original)) || null,
+    ).catch(explain);
+
+    await openSettings();
+    await clickPath(checkbox);
+    await click("Close");
+    const sentBeforeTyping = requests.length;
+    await clickPath("//main//div[@role='textbox']");
+    await keyActions([...typing(keys.end), ...typing(" More notes.")]);
+    await nativeShortcut("ctrl+s");
+    await until(
+      "ordinary writing to reach disk after turning proofreading off",
+      async () => (await readFile(path, "utf8")).includes("More notes.") || null,
+    ).catch(explain);
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    assert.equal(requests.length, sentBeforeTyping);
   } finally {
     endpoint.closeAllConnections();
     await new Promise<void>((resolve) => endpoint.close(() => resolve()));

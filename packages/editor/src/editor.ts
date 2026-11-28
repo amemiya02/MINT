@@ -70,6 +70,7 @@ import { tableOfContents } from "./live-preview/toc.ts";
 import { markupContinuation } from "./markup-continuation.ts";
 import { type OutlineHeading, outline, sameOutline } from "./outline.ts";
 import { editorPreferences } from "./preferences.ts";
+import { type ProsePassage, prosePassageAtCursor } from "./prose-passage.ts";
 import { pasteText, richPaste } from "./rich-paste.ts";
 import type { SharedDocument } from "./shared-document.ts";
 import { type TableCommands, tableCommands } from "./table/commands.ts";
@@ -196,6 +197,8 @@ export type EditorCommand = keyof EditorCommands;
 export type EditorEvent =
   | { readonly type: "change"; readonly remote?: boolean; readonly fromHistory?: boolean }
   | { readonly type: "selection" }
+  /** An input method finished composing, even if its final text was already visible. */
+  | { readonly type: "compositionEnd" }
   | { readonly type: "mode" }
   /** The headings returned by {@link MintEditor.getOutline} changed. */
   | { readonly type: "outline" }
@@ -212,6 +215,8 @@ export interface MintEditor {
   replaceText(text: string): void;
   /** Replace one range in its own undo step, preserving the surrounding file text. */
   replaceRange(range: TextRange, text: string): void;
+  /** Capture a bounded passage of ordinary prose at the cursor for proofreading. */
+  getProofreadingPassage(): ProsePassage | null;
   /** The main selection range. */
   getSelection(): TextSelection;
   /** Capture the selected manuscript content for a new annotation. */
@@ -262,7 +267,7 @@ export interface MintEditor {
   setDialect(dialect: EditorDialect): void;
   /** Run a named command. Returns whether it did anything. */
   execute<C extends EditorCommand>(command: C, ...args: EditorCommands[C]): boolean;
-  /** Listen for text, selection, mode, outline and scroll changes. Returns an unsubscribe function. */
+  /** Listen for editor events. Returns an unsubscribe function. */
   subscribe(listener: (event: EditorEvent) => void): () => void;
   focus(): void;
   destroy(): void;
@@ -355,7 +360,10 @@ export function createEditor(options: EditorOptions): MintEditor {
         typewriter.of(typewriterExtension()),
         linkOpening(host.openLink, host.previewLink),
         EditorView.lineWrapping,
-        EditorView.domEventObservers({ scroll: () => emit({ type: "scroll" }) }),
+        EditorView.domEventObservers({
+          scroll: () => emit({ type: "scroll" }),
+          compositionend: () => emit({ type: "compositionEnd" }),
+        }),
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
             for (const range of trackedRanges) {
@@ -448,6 +456,8 @@ export function createEditor(options: EditorOptions): MintEditor {
         annotations: isolateHistory.of("full"),
       });
     },
+    getProofreadingPassage: () =>
+      view.compositionStarted ? null : prosePassageAtCursor(view.state),
     getSelection() {
       const { anchor, head } = view.state.selection.main;
       return { anchor: toFileOffset(view.state, anchor), head: toFileOffset(view.state, head) };

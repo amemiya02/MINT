@@ -187,6 +187,7 @@ function SettingControl({
         control = <ThemeSelect id={id} value={String(value)} onChange={set} />;
       } else if (definition.optionsFrom === "models") {
         const selected = models?.find((model) => model.id === value);
+        const proofreading = settingKey === "proofreadingModel";
         control = (
           <select
             id={id}
@@ -196,7 +197,11 @@ function SettingControl({
             value={String(value)}
             onChange={(event) => set(event.target.value)}
           >
-            <option value="">{t("settings.inlineCompletion.off")}</option>
+            <option value="">
+              {t(
+                proofreading ? "settings.proofreadingModel.none" : "settings.inlineCompletion.off",
+              )}
+            </option>
             {models?.map((model) => (
               <option key={model.id} value={model.id} title={model.address}>
                 {model.name}
@@ -204,17 +209,17 @@ function SettingControl({
             ))}
             {Boolean(value) && !selected && (
               <option value={String(value)} disabled>
-                {t("settings.inlineCompletion.unavailable")}
+                {t("settings.modelUnavailable")}
               </option>
             )}
           </select>
         );
         help = (
           <p id={`${id}-hint`} className="text-xs text-(--mint-muted) wrap-anywhere">
-            {t("settings.inlineCompletion.hint")}
+            {t(proofreading ? "settings.proofreadingModel.hint" : "settings.inlineCompletion.hint")}
             {selected && (
               <span className="block">
-                {t("settings.inlineCompletion.recipient", { address: selected.address })}
+                {t("settings.modelRecipient", { address: selected.address })}
               </span>
             )}
           </p>

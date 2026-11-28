@@ -477,6 +477,11 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     },
     "edit.toggleSpellcheck": () =>
       void settings.set("spellcheck", !settings.getSnapshot().settings.spellcheck),
+    "edit.toggleProofreading": () => {
+      const { proofreading, proofreadingModel } = settings.getSnapshot().settings;
+      void settings.set("proofreading", !proofreading);
+      if (!proofreading && !proofreadingModel) setSettingsOpen(true);
+    },
     "view.toggleVimMode": () =>
       void settings.set("vimMode", !settings.getSnapshot().settings.vimMode),
     "tab.close": () => {

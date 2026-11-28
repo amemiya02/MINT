@@ -1,14 +1,15 @@
 import type { CodeBlockRenderer, DocumentLink, LinkTarget, WordCount } from "@mint/editor";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { Proofreading } from "../ai/Proofreading.tsx";
 import { WritingAssistant } from "../ai/WritingAssistant.tsx";
 import { createImageHost, type ImageSaveFailure } from "../assets/image-host.ts";
 import { EditorPane } from "../EditorPane.tsx";
 import { resolveDocumentLink } from "../folder/wikilinks.ts";
 import { useT } from "../i18n/index.ts";
-import { isAbsolutePath } from "../paths.ts";
+import { isAbsolutePath, isDocumentPath } from "../paths.ts";
 import type { Platform } from "../platform/platform.ts";
 import { useDialect } from "../settings/useDialect.ts";
-import { useSettingsStore } from "../settings/useSettings.ts";
+import { useSettings, useSettingsStore } from "../settings/useSettings.ts";
 import { useTabStore } from "../tabs/context.ts";
 import { ExternalChangeNotice } from "../tabs/ExternalChangeNotice.tsx";
 import { tabName } from "../tabs/tab-name.ts";
@@ -83,6 +84,15 @@ export function TabPanel({
   const dialect = useDialect(wikilinkFolder !== null);
   const t = useT();
   const settings = useSettingsStore();
+  const { proofreading, proofreadingModel } = useSettings().settings;
+  const editor = store.editor(id);
+  const canProofread =
+    active &&
+    !settingsOpen &&
+    !tab.external &&
+    (path === null || isDocumentPath(path)) &&
+    proofreading &&
+    proofreadingModel;
   const [imageFailure, setImageFailure] = useState<ImageSaveFailure | null>(null);
   const [imageHost] = useState(() =>
     createImageHost(
@@ -142,12 +152,20 @@ export function TabPanel({
         <ImageSaveNotice failure={imageFailure} onDismiss={() => setImageFailure(null)} />
       )}
       {drafting}
+      {editor && canProofread && (
+        <Proofreading
+          key={proofreadingModel}
+          editor={editor}
+          platform={platform}
+          modelId={proofreadingModel}
+        />
+      )}
       <div
         className={`flex min-h-0 min-w-0 flex-1 ${toolbarPosition === "side" ? "flex-row" : "flex-col"}`}
       >
         {toolbarPosition !== "hidden" && <FormattingToolbar tab={tab} position={toolbarPosition} />}
         <WritingAssistant
-          editor={store.editor(id)}
+          editor={editor}
           name={tabName(t, tab)}
           path={path}
           active={active}
