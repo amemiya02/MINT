@@ -22,6 +22,7 @@ const suffixLimit = 1_000;
 const suggestionLimit = 320;
 
 const showCompletion = StateEffect.define<{ from: number; text: string } | null>();
+export const requestCompletion = StateEffect.define<RequestInlineCompletion>();
 
 class CompletionWidget extends WidgetType {
   constructor(readonly text: string) {
@@ -66,6 +67,7 @@ export function inlineCompletion(request: RequestInlineCompletion) {
         }
         for (const tr of update.transactions) {
           for (const effect of tr.effects) {
+            if (effect.is(requestCompletion)) this.schedule(update.view, effect.value, 0);
             if (!effect.is(showCompletion)) continue;
             const result = effect.value;
             this.suggestion = result?.text ?? null;
@@ -87,10 +89,10 @@ export function inlineCompletion(request: RequestInlineCompletion) {
         }
       }
 
-      schedule(view: EditorView) {
+      schedule(view: EditorView, send = request, delay = pause) {
         this.invalidate();
         const version = this.version;
-        this.timer = setTimeout(() => void this.complete(view, version), pause);
+        this.timer = setTimeout(() => void this.complete(view, version, send), delay);
       }
 
       private invalidate() {
@@ -107,14 +109,14 @@ export function inlineCompletion(request: RequestInlineCompletion) {
         return true;
       }
 
-      private async complete(view: EditorView, version: number) {
+      private async complete(view: EditorView, version: number, send: RequestInlineCompletion) {
         const from = insertionPoint(view);
         if (version !== this.version || from === null) return;
         const running = new AbortController();
         this.running = running;
         let text: string | null;
         try {
-          text = await request({
+          text = await send({
             before: view.state.sliceDoc(Math.max(0, from - prefixLimit), from),
             after: view.state.sliceDoc(from, from + suffixLimit),
             signal: running.signal,

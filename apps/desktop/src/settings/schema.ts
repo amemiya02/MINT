@@ -64,12 +64,30 @@ export const settingsSchema = {
   vimMode: toggle({ label: "settings.vimMode", default: false }),
   /** The system spellchecker underlines misspelled words (not in code, math or URLs). */
   spellcheck: toggle({ label: "settings.spellcheck", default: true }),
-  /** Model connection for inline completion. Empty to keep it off. */
+  defaultWritingConnection: text({
+    label: "settings.writingConnection.default",
+    default: "",
+    maxLength: 4096,
+    optionsFrom: "writingConnections",
+  }),
+  /** Empty keeps inline completion off. */
   inlineCompletionModel: text({
     label: "settings.inlineCompletion",
     default: "",
-    maxLength: 128,
-    optionsFrom: "models",
+    maxLength: 4096,
+    optionsFrom: "writingConnections",
+  }),
+  reviewWritingConnection: text({
+    label: "settings.writingConnection.review",
+    default: "",
+    maxLength: 4096,
+    optionsFrom: "writingConnections",
+  }),
+  multiFileWritingConnection: text({
+    label: "settings.writingConnection.multiFile",
+    default: "",
+    maxLength: 4096,
+    optionsFrom: "writingConnections",
   }),
   proofreading: toggle({ label: "settings.proofreading", default: false }),
   proofreadingModel: text({
@@ -156,7 +174,7 @@ export interface TextSetting extends BaseSetting<string> {
   readonly maxLength: number;
   /** Shown in the empty field. */
   readonly placeholder?: MessageKey;
-  readonly optionsFrom?: "themes" | "models";
+  readonly optionsFrom?: "themes" | "models" | "writingConnections";
 }
 
 /** Shortcut overrides: a command id to an accelerator, or to `null` for no shortcut. */

@@ -1,7 +1,10 @@
 import { useEffect, useId, useState } from "react";
 import { ExternalAgentSettings } from "../ai/ExternalAgentPanel.tsx";
+import type { ExternalAgent } from "../ai/external-agent.ts";
 import { ModelConnections, useModelConnections } from "../ai/ModelConnections.tsx";
 import type { SavedModelConnection } from "../ai/model.ts";
+import { WritingConnectionControl } from "../ai/WritingConnectionControl.tsx";
+import { type WritingConnectionSetting, writingRecipients } from "../ai/writing-recipients.ts";
 import { useT } from "../i18n/index.ts";
 import type { Platform } from "../platform/platform.ts";
 import { PluginSettings } from "../plugins/Plugins.tsx";
@@ -39,6 +42,34 @@ export function SettingsDialog({
   const t = useT();
   const { path } = useSettings();
   const models = useModelConnections(platform);
+  const [agents, setAgents] = useState<ExternalAgent[] | null>(null);
+  const [agentLoadFailed, setAgentLoadFailed] = useState(false);
+  useEffect(() => {
+    let current = true;
+    void platform.externalAgent.saved().then(
+      (saved) => {
+        if (!current) return;
+        setAgentLoadFailed(false);
+        setAgents(saved);
+      },
+      () => {
+        if (!current) return;
+        setAgentLoadFailed(true);
+        setAgents([]);
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [platform]);
+  const available =
+    models.connections && agents
+      ? writingRecipients(platform, models.connections, agents).available
+      : null;
+  const readOnly =
+    models.connections && agents
+      ? writingRecipients(platform, models.connections, agents, "readOnly").available
+      : null;
   const { close, props: dialogProps } = useModalDialog(onClose);
   const titleId = useId();
 
@@ -62,20 +93,41 @@ export function SettingsDialog({
       </div>
       <div className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto px-5 py-4">
         <ModelConnections platform={platform} models={models} />
-        <ExternalAgentSettings platform={platform.externalAgent} />
+        <ExternalAgentSettings
+          platform={platform.externalAgent}
+          onConnectionsChanged={(connections) => {
+            setAgentLoadFailed(false);
+            setAgents(connections);
+          }}
+        />
+        {agentLoadFailed && <p role="alert">{t("agent.loadFailed")}</p>}
         <PluginSettings platform={platform} />
-        {(Object.keys(settingsSchema) as SettingKey[]).map((key) =>
-          settingsSchema[key].kind === "shortcuts" ? (
-            <ShortcutsSettings key={key} onRecording={onRecordingShortcut} />
-          ) : (
+        {(Object.keys(settingsSchema) as SettingKey[]).map((key) => {
+          const definition = settingsSchema[key];
+          if (definition.kind === "shortcuts")
+            return <ShortcutsSettings key={key} onRecording={onRecordingShortcut} />;
+          if (definition.kind === "text" && definition.optionsFrom === "writingConnections")
+            return (
+              <WritingConnectionControl
+                key={key}
+                setting={key as WritingConnectionSetting}
+                platform={platform}
+                available={
+                  key === "inlineCompletionModel" || key === "reviewWritingConnection"
+                    ? readOnly
+                    : available
+                }
+              />
+            );
+          return (
             <SettingControl
               key={key}
               settingKey={key}
               folder={folder}
               models={models.connections}
             />
-          ),
-        )}
+          );
+        })}
       </div>
       <div className="flex items-center justify-between gap-3 border-t border-(--mint-border) px-5 py-3 text-xs text-(--mint-muted)">
         <span className="truncate" title={path}>
@@ -187,7 +239,6 @@ function SettingControl({
         control = <ThemeSelect id={id} value={String(value)} onChange={set} />;
       } else if (definition.optionsFrom === "models") {
         const selected = models?.find((model) => model.id === value);
-        const proofreading = settingKey === "proofreadingModel";
         control = (
           <select
             id={id}
@@ -197,11 +248,7 @@ function SettingControl({
             value={String(value)}
             onChange={(event) => set(event.target.value)}
           >
-            <option value="">
-              {t(
-                proofreading ? "settings.proofreadingModel.none" : "settings.inlineCompletion.off",
-              )}
-            </option>
+            <option value="">{t("settings.proofreadingModel.none")}</option>
             {models?.map((model) => (
               <option key={model.id} value={model.id} title={model.address}>
                 {model.name}
@@ -216,7 +263,7 @@ function SettingControl({
         );
         help = (
           <p id={`${id}-hint`} className="text-xs text-(--mint-muted) wrap-anywhere">
-            {t(proofreading ? "settings.proofreadingModel.hint" : "settings.inlineCompletion.hint")}
+            {t("settings.proofreadingModel.hint")}
             {selected && (
               <span className="block">
                 {t("settings.modelRecipient", { address: selected.address })}

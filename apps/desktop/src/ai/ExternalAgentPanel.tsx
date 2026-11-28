@@ -47,12 +47,18 @@ export function ExternalAgentAccessNotice({ access }: { readonly access: AgentAc
   );
 }
 
-export function ExternalAgentSettings({ platform }: { readonly platform: ExternalAgentPlatform }) {
+export function ExternalAgentSettings({
+  platform,
+  onConnectionsChanged,
+}: {
+  readonly platform: ExternalAgentPlatform;
+  readonly onConnectionsChanged: (agents: ExternalAgent[]) => void;
+}) {
   const t = useT();
   return (
     <ConnectionSection title={t("agent.title")} preserveContent>
       <div className="px-3 pb-3">
-        <ExternalAgentPanel platform={platform} />
+        <ExternalAgentPanel platform={platform} onConnectionsChanged={onConnectionsChanged} />
       </div>
     </ConnectionSection>
   );
@@ -153,12 +159,14 @@ export function ExternalAgentDialog({
 
 function ExternalAgentPanel({
   platform,
+  onConnectionsChanged,
   materialsPlatform,
   selection,
   renderReply,
   target,
 }: {
   readonly platform: ExternalAgentPlatform;
+  readonly onConnectionsChanged?: (agents: ExternalAgent[]) => void;
   readonly selection?: string;
   readonly materialsPlatform?: Platform;
   readonly renderReply?: (reply: string) => ReactNode;
@@ -390,7 +398,12 @@ function ExternalAgentPanel({
         if (!mounted.current) return;
         if (approve) {
           setAgent(connection);
-          setSaved((list) => [connection, ...list.filter((item) => item.path !== connection.path)]);
+          const connections = [
+            connection,
+            ...saved.filter((item) => item.path !== connection.path),
+          ];
+          setSaved(connections);
+          onConnectionsChanged?.(connections);
         }
         if (signal?.aborted) throw "stopped";
         const sender = externalAgentSender(platform, connection, access);
@@ -432,7 +445,9 @@ function ExternalAgentPanel({
               : connection.verified,
         };
         setAgent(verified);
-        setSaved((list) => [verified, ...list.filter((item) => item.path !== verified.path)]);
+        const connections = [verified, ...saved.filter((item) => item.path !== verified.path)];
+        setSaved(connections);
+        onConnectionsChanged?.(connections);
         setReply(result.taskCopy ?? result.text);
         target?.record(entry.id, {
           instruction: request.instruction,
@@ -492,6 +507,7 @@ function ExternalAgentPanel({
                   await platform.forget(agent.path);
                   const remaining = saved.filter((item) => item.path !== agent.path);
                   setSaved(remaining);
+                  onConnectionsChanged?.(remaining);
                   select(remaining[0] ?? null);
                 })
               }

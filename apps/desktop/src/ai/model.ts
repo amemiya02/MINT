@@ -157,6 +157,21 @@ type ModelTransport = (
 export const modelTimeoutMs = 120_000;
 export const modelResponseLimit = 2 * 1024 * 1024;
 
+function isLoopbackHost(host: string) {
+  return host === "localhost" || host === "[::1]" || /^127\.(\d+\.){2}\d+$/.test(host);
+}
+
+/** A validated endpoint on the author's machine. */
+export function isLocalModelEndpoint(endpoint: string) {
+  return isLoopbackHost(new URL(endpoint).hostname);
+}
+
+export function isLocalModelOffline(endpoint: string | undefined, problem: unknown) {
+  return (
+    !!endpoint && (problem === "network" || problem === "timeout") && isLocalModelEndpoint(endpoint)
+  );
+}
+
 export function modelEndpoint(address: string): string {
   let url: URL;
   try {
@@ -168,13 +183,7 @@ export function modelEndpoint(address: string): string {
     url.username ||
     url.password ||
     url.hash ||
-    (url.protocol !== "https:" &&
-      !(
-        url.protocol === "http:" &&
-        (url.hostname === "localhost" ||
-          url.hostname === "[::1]" ||
-          /^127\.(\d+\.){2}\d+$/.test(url.hostname))
-      ))
+    (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopbackHost(url.hostname)))
   ) {
     throw "invalidAddress";
   }
