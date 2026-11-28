@@ -358,6 +358,15 @@ async fn read_directory(app: AppHandle, path: PathBuf) -> Result<Vec<folder::Ent
 }
 
 #[tauri::command]
+async fn ensure_document(app: AppHandle, path: PathBuf, initial_text: String) -> Result<(), String> {
+    blocking(move || {
+        granted(&app.state::<Grants>(), &path)?;
+        fs::ensure_document(&path, initial_text.as_bytes()).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
 async fn create_file(app: AppHandle, path: PathBuf) -> Result<(), String> {
     blocking(move || {
         granted(&app.state::<Grants>(), &path)?;
@@ -683,6 +692,7 @@ pub fn run() {
             write_settings,
             updates_supported,
             read_directory,
+            ensure_document,
             create_file,
             create_directory,
             rename_path,

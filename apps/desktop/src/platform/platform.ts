@@ -105,6 +105,9 @@ export interface Platform {
   /** Create an empty file. Rejects if anything already exists at `path`. */
   createFile(path: string): Promise<void>;
 
+  /** Create a regular document with its initial text, or keep an existing regular file intact. */
+  ensureDocument(path: string, initialText: string): Promise<void>;
+
   /** Create a directory. Rejects if anything already exists at `path`. */
   createDirectory(path: string): Promise<void>;
 

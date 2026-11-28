@@ -729,3 +729,59 @@ test("only granted Zotero reads reach the local service and the chosen item is s
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+test("the daily journal creates one ordinary Markdown file only after permission is granted", async () => {
+  const folder = await mkdtemp(join(dir, "journal-"));
+  const draft = join(folder, "draft.md");
+  await writeFile(draft, "Another manuscript.  \r\n");
+  await restart([folder, draft]);
+  const plugin = "//fieldset[@aria-label='Daily journal']";
+  const chooseJournal = async () => {
+    await nativeShortcut("ctrl+shift+p");
+    await keyActions(typing("journal"));
+    await shows("Open today’s journal");
+    await keyActions(typing(keys.enter));
+  };
+  await clickPath("//*[@role='treeitem' and @aria-label='draft.md']");
+  await nativeShortcut("ctrl+comma");
+  await clickPath(`${plugin}//button[normalize-space(.)='Install']`);
+  await shows("Create today’s Markdown journal in the current folder and open it");
+  await click("Deny access");
+  await click("Close");
+  await chooseJournal();
+  await until("the journal permission denial", () =>
+    command<Record<string, string>>("POST", `/session/${session}/element`, {
+      using: "xpath",
+      value: "//*[@role='alert' and contains(., 'Journal access was denied')]",
+    }).then((el) => el[elementKey] ?? null),
+  ).catch(explain);
+  assert.deepEqual(await readdir(folder), ["draft.md"]);
+  await nativeShortcut("ctrl+comma");
+  await clickPath(`${plugin}//button[normalize-space(.)='Allow access']`);
+  await click("Close");
+  await chooseJournal();
+  const filename = await until(
+    "today’s Markdown file on disk",
+    async () =>
+      (await readdir(folder)).find((name) => /^\d{4}-\d{2}-\d{2}\.md$/.test(name)) ?? null,
+  ).catch(explain);
+  const path = join(folder, filename);
+  assert.equal(await readFile(path, "utf8"), `# ${filename.slice(0, -3)}\n\n`);
+  await click(`Close ${filename}`, "aria-label");
+  const external = Buffer.from("\uFEFF# Field notes\r\n\r\nFrom another editor.  \r\n");
+  await writeFile(path, external);
+  await chooseJournal();
+  await until("the externally edited journal to open", () =>
+    command<boolean>("POST", `/session/${session}/execute/sync`, {
+      script:
+        "return document.activeElement?.matches('.cm-content') && document.activeElement.innerText.includes('From another editor.')",
+      args: [],
+    }).then((opened) => opened || null),
+  ).catch(explain);
+  assert.deepEqual(await readFile(path), external);
+  assert.equal(await readFile(draft, "utf8"), "Another manuscript.  \r\n");
+  assert.deepEqual((await readdir(folder)).sort(), [filename, "draft.md"]);
+  await nativeShortcut("ctrl+comma");
+  await clickPath(`${plugin}//button[normalize-space(.)='Uninstall']`);
+  await click("Close");
+});

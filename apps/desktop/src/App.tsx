@@ -20,9 +20,9 @@ import { useRecent } from "./folder/recent.ts";
 import { NavigationRail, Sidebar, type SidebarTool } from "./folder/Sidebar.tsx";
 import { HistoryDialog } from "./history/HistoryDialog.tsx";
 import { type Translate, useT } from "./i18n/index.ts";
-import { documentExtensions, isWithin } from "./paths.ts";
+import { documentExtensions, isWithin, joinPath } from "./paths.ts";
 import type { DocumentEdit, Platform } from "./platform/platform.ts";
-import { insertTemplate } from "./plugins/host.ts";
+import { insertTemplate, journalTemplate } from "./plugins/host.ts";
 import { KanbanBoard } from "./plugins/KanbanBoard.tsx";
 import { PluginEntries, pluginName, useInstallations } from "./plugins/Plugins.tsx";
 import { PropertyTable } from "./plugins/PropertyTable.tsx";
@@ -268,6 +268,31 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     },
     [platform, t, addRecent, setFolderSearch],
   );
+
+  async function openJournal(id: string) {
+    const template = journalTemplate(id);
+    if (template === undefined) {
+      setShellError(t("journal.denied"));
+      return;
+    }
+    if (!folder) {
+      setShellError(t("journal.needFolder"));
+      return;
+    }
+    const today = new Date();
+    const month = String(today.getMonth() + 1).padStart(2, "0");
+    const day = String(today.getDate()).padStart(2, "0");
+    const date = `${today.getFullYear()}-${month}-${day}`;
+    const path = joinPath(folder, `${date}.md`);
+    const request = openFolderState.current.request;
+    setShellError(null);
+    try {
+      await platform.ensureDocument(path, template.replaceAll("{{date}}", date));
+      if (request === openFolderState.current.request) await store.openDocument(path);
+    } catch (error) {
+      setShellError(t("journal.failed", { path, reason: reasonOf(error) }));
+    }
+  }
 
   const pickFolder = useCallback(async () => {
     const path = await platform.showOpenFolderDialog({ title: t("dialog.openFolder.title") });
@@ -613,6 +638,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
       {paletteVisible && (
         <CommandPalette
           onRun={(id) => run.current(id)}
+          onJournal={openJournal}
           onTemplate={(id, name) => {
             const result = insertTemplate(id, name, insertAtSelection);
             setShellError(

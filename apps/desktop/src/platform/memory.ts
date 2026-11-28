@@ -427,6 +427,13 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       }
       return url;
     },
+    async ensureDocument(path, initialText) {
+      if (isFile(path)) return;
+      if (isDirectory(path)) throw new Error(`Is a directory: ${path}`);
+      requireParent(path);
+      files.set(path, initialText);
+      notify(path);
+    },
     async createFile(path) {
       if (exists(path)) throw new Error(`${path} already exists`);
       requireParent(path);

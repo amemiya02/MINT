@@ -138,3 +138,19 @@ Install **LaTeX export** in Settings → Plugins and grant access to the current
 Install **Relationship graph** in Settings → Plugins and allow it to read Markdown documents in the current folder. Open its sidebar to see which documents cite each other. Arrows point from the citing document to its target. Select a document to open it, or use the references below the graph to select the exact citation in the source or jump to the cited heading.
 
 The graph reads the same on-disk references as Backlinks. It includes links whose targets resolve to documents in the folder and recognizes wikilinks when enabled for that folder. A package can contribute this view with `"sidebar": "graph"` and `"permissions": ["folder.read"]`.
+
+## Daily journal
+
+Install **Daily journal** in Settings → Plugins and grant permission to create and open today’s journal in the current folder. Choose **Open today’s journal** in the Command Palette. MINT uses the local date for the filename (for example, `2026-11-28.md`). A new entry starts with a date heading. Running the command again opens the same document, including any edits already in its tab.
+
+A package can provide its own starting Markdown. The host expands `{{date}}` to the local date when creating the file. An existing journal keeps its original contents.
+
+```json
+{
+  "apiVersion": 1,
+  "id": "example.field-journal",
+  "name": "Field journal",
+  "permissions": ["folder.journal.create"],
+  "journalTemplate": "# {{date}}\n\n## Observations\n\n"
+}
+```

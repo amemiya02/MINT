@@ -2,6 +2,7 @@ import { type KeyboardEvent, useEffect, useId, useMemo, useState } from "react";
 import { type Command, type CommandId, commands, shortcutOf } from "../commands.ts";
 import { useT } from "../i18n/index.ts";
 import { ariaKeyShortcut, formatAccelerator } from "../keys.ts";
+import { dailyJournal } from "../plugins/host.ts";
 import { useInstallations } from "../plugins/Plugins.tsx";
 import { type FuzzyMatch, fuzzyMatch } from "../quick-open/fuzzy.ts";
 import { useSettings } from "../settings/useSettings.ts";
@@ -10,6 +11,7 @@ import { useModalDialog } from "../window/useModalDialog.ts";
 export interface CommandPaletteProps {
   /** Run the chosen command; called after the palette has closed. */
   readonly onRun: (id: CommandId) => void;
+  readonly onJournal: (id: string) => void;
   readonly onTemplate: (id: string, name: string) => void;
   readonly onClose: () => void;
 }
@@ -23,7 +25,7 @@ interface Result {
 }
 
 /** Command palette: fuzzy-search every registered command by name and run one. */
-export function CommandPalette({ onRun, onTemplate, onClose }: CommandPaletteProps) {
+export function CommandPalette({ onRun, onJournal, onTemplate, onClose }: CommandPaletteProps) {
   const t = useT();
   const plugins = useInstallations();
   const { shortcuts } = useSettings().settings;
@@ -48,8 +50,22 @@ export function CommandPalette({ onRun, onTemplate, onClose }: CommandPalettePro
         });
     }
     for (const { enabled, manifest } of plugins) {
-      if (!enabled || !manifest.templates) continue;
-      for (const template of manifest.templates) {
+      if (!enabled) continue;
+      if (manifest.journalTemplate !== undefined) {
+        const title =
+          manifest.id === dailyJournal.id
+            ? t("journal.open")
+            : t("journal.openPackage", { name: manifest.name });
+        const match = fuzzyMatch(query, title);
+        if (match)
+          found.push({
+            id: `journal:${manifest.id}`,
+            title,
+            match,
+            run: () => onJournal(manifest.id),
+          });
+      }
+      for (const template of manifest.templates ?? []) {
         const title = t("plugin.insertTemplate", { name: template.name });
         const match = fuzzyMatch(query, title);
         if (match)
@@ -63,7 +79,7 @@ export function CommandPalette({ onRun, onTemplate, onClose }: CommandPalettePro
     }
     // Registry order without a query; best match first with one.
     return query.trim() === "" ? found : found.sort((a, b) => b.match.score - a.match.score);
-  }, [t, query, onRun, onTemplate, plugins, shortcuts]);
+  }, [t, query, onRun, onJournal, onTemplate, plugins, shortcuts]);
   const current = Math.min(selected, results.length - 1);
 
   useEffect(() => {
