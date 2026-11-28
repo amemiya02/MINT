@@ -61,7 +61,10 @@ function startOfMatch(text: string, range: LineRange): number | null {
   return matches === 1 || range.text === undefined ? candidate : null;
 }
 
-type DocumentLocation = LineRange | { readonly fragment: string };
+type DocumentLocation =
+  | LineRange
+  | { readonly sourceFrom: number; readonly sourceTo: number }
+  | { readonly fragment: string };
 
 export interface TabsState {
   readonly tabs: readonly Tab[];
@@ -235,6 +238,11 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
 
   function reveal(id: number, editor: MintEditor, range: DocumentLocation) {
     if (state.activeId !== id || editors.get(id) !== editor) return;
+    if ("sourceFrom" in range) {
+      editor.setSelection({ anchor: range.sourceFrom, head: range.sourceTo, scrollIntoView: true });
+      editor.focus();
+      return;
+    }
     if ("fragment" in range) {
       const matches = matchingHeadings(editor.getOutline(), range.fragment);
       const heading = matches[0];
