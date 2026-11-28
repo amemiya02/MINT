@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import { externalWrite, launch, readFile, runMenuItem } from "./memory-platform.ts";
+import { externalWrite, launch, pickFile, readFile, runMenuItem } from "./memory-platform.ts";
 
 const name = "Task summary";
 const report = "/notes/research/report.markdown";
@@ -88,7 +88,7 @@ test("an imported task sidebar follows its folder, read grant, and installation"
   });
   await page.keyboard.press("ControlOrMeta+,");
   const settings = page.getByRole("dialog", { name: "Settings" });
-  await settings.getByLabel("Install a MINT plugin file").setInputFiles({
+  await pickFile(page, settings.getByRole("button", { name: "Install a MINT plugin file" }), {
     name: "research-checklist.mint.json",
     mimeType: "application/json",
     buffer: Buffer.from(

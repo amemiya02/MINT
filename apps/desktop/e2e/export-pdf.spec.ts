@@ -17,6 +17,8 @@ const longCode = Array.from({ length: 30 }, (_, i) => `const line${i} = ${i};`).
 const doc = [
   "# Quarterly report",
   "",
+  "<style>h1 {visibility:hidden}</style>",
+  "",
   "Growth was $e^{i\\pi}+1=0$ percent.",
   "",
   "$$",
@@ -86,6 +88,7 @@ test("prints the document with formulas, diagrams and highlighted code", async (
   await view.emulateMedia({ media: "print" });
   await view.setContent(html, { waitUntil: "load" });
   await expect(view.locator("html")).toHaveCSS("background-color", "rgb(243, 242, 238)");
+  await expect(view.getByRole("heading", { name: "Quarterly report" })).toBeVisible();
   await expect(view.locator(".katex").first()).toBeVisible();
   await expect(view.locator(".katex-display")).toBeVisible();
   await expect(view.locator(".cm-mint-code-keyword").first()).toHaveText("const");

@@ -3,14 +3,14 @@ import JSZip from "jszip";
 import { launch, readBinaryFile, readFile, savedDialogs, settingsPath } from "./memory-platform.ts";
 
 const manuscript =
-  "# Field notes\n\n- First item\n\n| City |\n| --- |\n| Tokyo |\n\n![Map](map.png)\n";
+  "# Field notes\n\n- First item\n\n| City |\n| --- |\n| Tokyo |\n\n![Map](local%20map.png)\n";
 const png =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
 
 async function chooseWord(page: Page, destination: string | null) {
   await launch(page, {
     files: { "/notes/report.md": manuscript, [settingsPath]: '{"autosave":false}' },
-    binaryFiles: { "/notes/map.png": png },
+    binaryFiles: { "/notes/local map.png": png },
     openDialogResults: ["/notes/report.md"],
     saveDialogResults: [destination],
     locale: "en-US",

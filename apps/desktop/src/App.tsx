@@ -15,7 +15,13 @@ import { FindBar, type FindMode } from "./find/FindBar.tsx";
 import { Bookmarks } from "./folder/Bookmarks.tsx";
 import { FolderTree } from "./folder/file-tree.ts";
 import { MoveDialog } from "./folder/MoveDialog.tsx";
-import { applyMove, inverse, type MovePreview, previewMove } from "./folder/move-links.ts";
+import {
+  applyMove,
+  inverse,
+  type MovePreview,
+  previewMove,
+  validateMovePreview,
+} from "./folder/move-links.ts";
 import { useRecent } from "./folder/recent.ts";
 import { NavigationRail, Sidebar, type SidebarTool } from "./folder/Sidebar.tsx";
 import { HistoryDialog } from "./history/HistoryDialog.tsx";
@@ -62,7 +68,7 @@ export function App({ platform }: { readonly platform: Platform }) {
     createTabStore({
       platform,
       askUnsaved: (tab) => askUnsaved(platform, translate.current, tab),
-      askSavePath: (tab) => askSavePath(platform, translate.current, tab),
+      askSavePath: (tab, knownPaths) => askSavePath(platform, translate.current, tab, knownPaths),
     }),
   );
   const [autosave] = useState(() =>
@@ -193,13 +199,17 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   const [preview, setPreview] = useState<MovePreview | null>(null);
   const [undoMove, setUndoMove] = useState<DocumentEdit[] | null>(null);
   const moving = useRef(false);
-  async function performMove(edits: DocumentEdit[], undo = false) {
+  async function performMove(edits: DocumentEdit[], undo = false, confirmed?: MovePreview) {
     if (moving.current) return;
     moving.current = true;
     setPreview(null);
     try {
-      await applyMove(platform, edits, (path) =>
-        store.getState().tabs.some((tab) => tab.path === path && tab.dirty),
+      if (confirmed) await validateMovePreview(platform, confirmed, t);
+      await applyMove(
+        platform,
+        edits,
+        (path) => store.getState().tabs.some((tab) => tab.path === path && tab.dirty),
+        t,
       );
       const relocated = edits.find((edit) => edit.from !== edit.to);
       if (relocated) store.pathRenamed(relocated.from, relocated.to);
@@ -472,7 +482,9 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
           preview={preview}
           folder={folder}
           onClose={() => setPreview(null)}
-          onChoose={(edits) => void performMove(edits)}
+          onChoose={(edits, updateLinks) =>
+            void performMove(edits, false, updateLinks ? preview : undefined)
+          }
         />
       )}
       {(shellError || error) && (
@@ -516,9 +528,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
             tree={tree}
             wikilinks={wikilinkFolder !== null}
             targetPath={activePath}
-            onOpen={(link) =>
-              void store.openDocument(link.sourcePath, { sourceFrom: link.from, sourceTo: link.to })
-            }
+            onOpen={(link) => void store.openDocument(link.sourcePath, { citation: link })}
           />
         )}
         {folderSearch === null && sidebarVisible && selectedPlugin && (
@@ -699,6 +709,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
       )}
       {settingsOpen && (
         <SettingsDialog
+          platform={platform}
           folder={folder}
           onClose={() => {
             setSettingsOpen(false);
@@ -713,7 +724,9 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
 }
 
 function errorMessage(t: Translate, error: TabError): string {
-  if (error.kind === "staleSearchResult") return t("error.staleSearchResult");
+  if (error.kind === "staleSearchResult" || error.kind === "staleCitation")
+    return t(`error.${error.kind}`);
+  if (error.kind === "alreadyOpen") return t("error.alreadyOpen", { path: error.path });
   if ("fragment" in error) return t(`error.${error.kind}`, { fragment: error.fragment });
   const params = { path: error.path, reason: error.reason };
   return t(`error.${error.kind}`, params);

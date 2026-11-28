@@ -9,7 +9,9 @@ import { archiveLinks } from "./notion-links.ts";
 function validSegment(segment: string) {
   return (
     !!segment &&
-    !segment.startsWith(".") &&
+    segment !== "." &&
+    segment !== ".." &&
+    !/^\.git$/i.test(segment) &&
     !/[. ]$/.test(segment) &&
     !/[<>:"/\\|?*]/.test(segment) &&
     !Array.from(segment).some((c) => c.charCodeAt(0) < 32) &&
@@ -65,7 +67,8 @@ export async function importNotion(
     if (!canImportArchive(id)) throw new Error(t("notion.denied"));
   };
   checkGrant();
-  if (!validSegment(name)) throw new Error(t("notion.invalid", { path: name }));
+  if (name.startsWith(".") || !validSegment(name))
+    throw new Error(t("notion.invalid", { path: name }));
   const raw = await readExport(file, t);
   checkGrant();
   const pages = new Map<string, string>();

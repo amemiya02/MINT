@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 import JSZip from "jszip";
-import { launch, readBinaryFile, readFile } from "./memory-platform.ts";
+import { launch, pickFile, readBinaryFile, readFile } from "./memory-platform.ts";
 
 async function installImporter(page: Page, grant = true) {
   await page.keyboard.press("ControlOrMeta+,");
@@ -38,9 +38,9 @@ test("imports a Notion ZIP into a new folder and opens the converted manuscript"
   const zip = new JSZip();
   const source = "# Notebook\n\n[Child](Pages/Field%20notes.md)\n";
   zip.file("Home.md", source);
-  zip.file("Pages/Field notes.md", "# Observations\n\n![Map](map.png)\n");
-  zip.file("Pages/map.png", Uint8Array.of(137, 80, 78, 71, 0, 255));
-  await dialog.getByLabel("Notion export (.zip)").setInputFiles({
+  zip.file("Pages/Field notes.md", "# Observations\n\n![Map](.attachments/map.png)\n");
+  zip.file("Pages/.attachments/map.png", Uint8Array.of(137, 80, 78, 71, 0, 255));
+  await pickFile(page, dialog.getByRole("button", { name: "Notion export (.zip)" }), {
     name: "Notebook.zip",
     mimeType: "application/zip",
     buffer: await zip.generateAsync({ type: "nodebuffer" }),
@@ -50,7 +50,7 @@ test("imports a Notion ZIP into a new folder and opens the converted manuscript"
   await page.getByRole("treeitem", { name: "Home.md", exact: true }).click();
   await expect(page.locator(".cm-content")).toContainText("Notebook");
   expect(await readFile(page, "/chosen/Notebook/Home.md")).toEqual(source);
-  expect(await readBinaryFile(page, "/chosen/Notebook/Pages/map.png")).toEqual([
+  expect(await readBinaryFile(page, "/chosen/Notebook/Pages/.attachments/map.png")).toEqual([
     137, 80, 78, 71, 0, 255,
   ]);
 });
@@ -77,7 +77,7 @@ test("converts HTML pages and Notion page links and locates missing references",
     "Pages/Checklist.md",
     `# Checklist\n[Research](https://www.notion.so/Research-${id})\n![Scan](missing.png)\n[Old page](deleted.md)\n[Missing section](Child.html#removed)\n\n\`[Example](not-a-link)\`\n`,
   );
-  await dialog.getByLabel("Notion export (.zip)").setInputFiles({
+  await pickFile(page, dialog.getByRole("button", { name: "Notion export (.zip)" }), {
     name: "Transfer.zip",
     mimeType: "application/zip",
     buffer: await zip.generateAsync({ type: "nodebuffer" }),
@@ -113,7 +113,7 @@ test("unpacks Notion's numbered ZIP parts and resolves links across parts", asyn
   const wrapper = new JSZip()
     .file("ExportBlock-123-Part-1.zip", await first.generateAsync({ type: "nodebuffer" }))
     .file("ExportBlock-123-Part-2.zip", await second.generateAsync({ type: "nodebuffer" }));
-  await dialog.getByLabel("Notion export (.zip)").setInputFiles({
+  await pickFile(page, dialog.getByRole("button", { name: "Notion export (.zip)" }), {
     name: "Workspace.zip",
     mimeType: "application/zip",
     buffer: await wrapper.generateAsync({ type: "nodebuffer" }),
@@ -132,14 +132,14 @@ test("a live import loses access when revoked and disappears when disabled", asy
   await installImporter(page, false);
   const dialog = await formats(page);
   await expect(dialog.getByRole("alert")).toContainText("Allow archive import");
-  await expect(dialog.getByLabel("Notion export (.zip)")).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: "Notion export (.zip)" })).toHaveCount(0);
   const manager = await context.newPage();
   await manager.goto("/");
   await expect(manager.getByText("No document open")).toBeVisible();
   await manager.keyboard.press("ControlOrMeta+,");
   const plugin = manager.getByRole("group", { name: "Notion import" });
   await plugin.getByRole("button", { name: "Allow access" }).click();
-  await expect(dialog.getByLabel("Notion export (.zip)")).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Notion export (.zip)" })).toBeVisible();
   await plugin.getByRole("button", { name: "Revoke access" }).click();
   await expect(dialog.getByRole("alert")).toContainText("Allow archive import");
   await plugin.getByRole("button", { name: "Disable" }).click();
@@ -155,7 +155,7 @@ test("cancelling and retrying never replaces an existing folder", async ({ page 
   await installImporter(page);
   const dialog = await formats(page);
   const zip = new JSZip().file("Home.md", "# New");
-  await dialog.getByLabel("Notion export (.zip)").setInputFiles({
+  await pickFile(page, dialog.getByRole("button", { name: "Notion export (.zip)" }), {
     name: "Notebook.zip",
     mimeType: "application/zip",
     buffer: await zip.generateAsync({ type: "nodebuffer" }),

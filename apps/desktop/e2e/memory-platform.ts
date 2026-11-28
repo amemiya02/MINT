@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import type { MemoryPlatform, MemoryPlatformOptions } from "../src/platform/memory.ts";
 
 export {
@@ -192,4 +192,22 @@ export function printedDocuments(page: Page): Promise<{ html: string; title: str
   return page.evaluate(() => [
     ...(window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.printed,
   ]);
+}
+
+/** Supply the selected package through the same in-memory disk as document dialogs. */
+export async function pickFile(
+  page: Page,
+  button: Locator,
+  file: { name: string; buffer: Buffer; mimeType: string },
+) {
+  await page.evaluate(
+    ({ name, bytes }) => {
+      const disk = (window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__;
+      const path = `/packages/${name}`;
+      disk.binaryFiles.set(path, Uint8Array.from(bytes));
+      disk.fileDialogResults.push(path);
+    },
+    { name: file.name, bytes: [...file.buffer] },
+  );
+  await button.click();
 }

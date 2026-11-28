@@ -4,6 +4,13 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
+pub fn same_entry(a: &Path, b: &Path) -> bool {
+    match (fs::canonicalize(a), fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
+
 /// Read a file as UTF-8 text. A byte order mark is kept as a leading U+FEFF and
 /// line endings are untouched, so the front end sees the exact file content.
 pub fn read_text(path: &Path) -> io::Result<String> {
@@ -84,7 +91,7 @@ fn resolve_link(path: &Path) -> io::Result<PathBuf> {
 }
 
 /// Make the rename itself durable. Best effort: not every platform allows it.
-fn sync_dir(dir: &Path) {
+pub(crate) fn sync_dir(dir: &Path) {
     #[cfg(unix)]
     if let Ok(handle) = fs::File::open(dir) {
         let _ = handle.sync_all();

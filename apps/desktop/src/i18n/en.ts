@@ -297,7 +297,7 @@ export const en = {
   "export.format": "Format",
   "export.html.title": "Export as HTML",
   "export.docx.saveTitle": "Export as DOCX",
-  "export.docx.chooseAnotherFile": "Choose a file different from the manuscript.",
+  "export.chooseAnotherFile": "Choose a file different from the manuscript.",
   "export.html.saveTitle": "Export as HTML",
   "export.html.embedImages": "Embed images",
   "export.html.export": "Export",
@@ -383,6 +383,10 @@ export const en = {
   "status.characters.other": "{count} characters",
   "status.readingTime": "{minutes} min read",
 
+  "error.staleCitation": "The citation could not be located in the current draft.",
+  "error.alreadyOpen": "{path} is already open. Choose a different destination.",
+  "move.dirty": "{path} has unsaved changes.",
+  "move.changed": "References changed in {path}. Preview the move again.",
   "error.staleSearchResult":
     "The document changed. This search result can no longer be located in the open draft.",
   "error.missingHeading": "Heading not found: {fragment}",

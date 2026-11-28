@@ -273,7 +273,11 @@ test("two views of one manuscript share edits and undo while keeping their selec
   await page.keyboard.type("!");
   await expect(page.getByTitle("Unsaved changes")).toHaveCount(2);
   await expect(left).toContainText("Conclusion!");
+  await page.keyboard.press("Home");
+  await page.keyboard.type("Last ");
   await page.getByRole("tab", { name: "manuscript.md" }).first().click();
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(right).toContainText("Conclusion!");
   await page.keyboard.press("ControlOrMeta+z");
   await expect(right).not.toContainText("Conclusion!");
   await expect(page.getByTitle("Unsaved changes")).toHaveCount(0);
@@ -286,7 +290,7 @@ test("two views of one manuscript share edits and undo while keeping their selec
   expect(await questionsAsked(page)).toEqual([]);
   await page.keyboard.type("!");
   await page.keyboard.press("ControlOrMeta+s");
-  await expect.poll(() => readFile(page, path)).toBe("Term\n\nConclusion!");
+  await expect.poll(() => readFile(page, path)).toBe("Term\n\n!Conclusion");
 });
 
 test("each view of a long manuscript keeps its chapter while editing and undoing", async ({
@@ -344,4 +348,25 @@ test("a split keeps the manuscript's line ending after its last line break was e
   await page.getByRole("button", { name: "Close crlf.md", exact: true }).first().click();
   await page.keyboard.press("ControlOrMeta+s");
   await expect.poll(() => readFile(page, path)).toBe("new\r\n");
+});
+
+test("Save As protects both drafts when the destination already has an open tab", async ({
+  page,
+}) => {
+  await launch(page, {
+    files,
+    openDialogResults: ["/notes/a.md", "/notes/b.md"],
+    saveDialogResults: ["/notes/a.md"],
+    locale: "en-US",
+  });
+  await page.keyboard.press("ControlOrMeta+O");
+  await page.getByRole("textbox").fill("Unsaved A");
+  await page.keyboard.press("ControlOrMeta+O");
+  await page.getByRole("textbox").fill("Unsaved B");
+  await page.keyboard.press("ControlOrMeta+Shift+s");
+  await expect(page.getByRole("alert")).toContainText("already open");
+  expect(await readFile(page, "/notes/a.md")).toBe(files["/notes/a.md"]);
+  await expect(page.getByRole("textbox")).toHaveText("Unsaved B");
+  await page.getByRole("tab", { name: "a.md" }).click();
+  await expect(page.getByRole("textbox")).toHaveText("Unsaved A");
 });

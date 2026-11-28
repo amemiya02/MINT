@@ -10,7 +10,7 @@ import { SKIP, visit } from "unist-util-visit";
 import { codeTokenCss, codeTokens } from "./code-tokens.ts";
 import type { Dialect } from "./dialect.ts";
 import { documentCss } from "./document-styles.ts";
-import { renderExportHtml } from "./export.ts";
+import { renderExportHtml, renderHtml } from "./export.ts";
 
 /**
  * The standalone HTML document a Markdown document exports to: one file with
@@ -20,6 +20,8 @@ import { renderExportHtml } from "./export.ts";
  */
 export interface ExportOptions {
   readonly dialect: Dialect;
+  /** Apply the app DOM schema before adding trusted typesetting and theme styles. */
+  readonly forPreview?: boolean;
   /** The `<title>` of a document without headings; otherwise it is the text of the first one. */
   readonly title?: string;
   /**
@@ -53,7 +55,7 @@ export interface ExportImage {
 export async function exportHtml(markdown: string, options: ExportOptions): Promise<string> {
   const tree = unified()
     .use(rehypeParse, { fragment: true })
-    .parse(renderExportHtml(markdown, options.dialect));
+    .parse((options.forPreview ? renderHtml : renderExportHtml)(markdown, options.dialect));
 
   const work: Promise<void>[] = [];
   let math = false;

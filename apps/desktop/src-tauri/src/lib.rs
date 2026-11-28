@@ -129,6 +129,7 @@ async fn show_save_dialog(
     title: String,
     default_path: PathBuf,
     filters: Vec<DialogFilter>,
+    known_paths: Option<Vec<PathBuf>>,
 ) -> Result<Option<PathBuf>, String> {
     let mut dialog = file_dialog(&window, title, &filters);
     if let Some(dir) = default_path.parent().filter(|d| d.is_absolute()) {
@@ -144,6 +145,14 @@ async fn show_save_dialog(
     )?;
     if let Some(path) = &path {
         grant_document(&app, path)?;
+        let grants = app.state::<Grants>();
+        if let Some(known) = known_paths
+            .unwrap_or_default()
+            .into_iter()
+            .find(|known| grants.check(known).is_ok() && fs::same_entry(known, path))
+        {
+            return Ok(Some(known));
+        }
     }
     Ok(path)
 }
@@ -215,6 +224,20 @@ async fn write_text_file(app: AppHandle, path: PathBuf, text: String) -> Result<
     blocking(move || {
         granted(&app.state::<Grants>(), &path)?;
         fs::write_atomic(&path, text.as_bytes()).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+async fn read_binary_file(app: AppHandle, path: PathBuf) -> Result<tauri::ipc::Response, String> {
+    blocking(move || {
+        let resolved = app
+            .state::<Grants>()
+            .check(&path)
+            .map_err(|e| e.to_string())?;
+        std::fs::read(resolved)
+            .map(tauri::ipc::Response::new)
+            .map_err(|e| e.to_string())
     })
     .await
 }
@@ -358,7 +381,11 @@ async fn read_directory(app: AppHandle, path: PathBuf) -> Result<Vec<folder::Ent
 }
 
 #[tauri::command]
-async fn ensure_document(app: AppHandle, path: PathBuf, initial_text: String) -> Result<(), String> {
+async fn ensure_document(
+    app: AppHandle,
+    path: PathBuf,
+    initial_text: String,
+) -> Result<(), String> {
     blocking(move || {
         granted(&app.state::<Grants>(), &path)?;
         fs::ensure_document(&path, initial_text.as_bytes()).map_err(|e| e.to_string())
@@ -384,6 +411,26 @@ async fn create_directory(app: AppHandle, path: PathBuf) -> Result<(), String> {
     .await
 }
 
+fn relocate_entry(
+    app: &AppHandle,
+    from: &std::path::Path,
+    to: &std::path::Path,
+    commit: impl FnOnce() -> std::io::Result<()>,
+) -> Result<(), String> {
+    let grants = app.state::<Grants>();
+    let old = grants.check(from).map_err(|e| e.to_string())?;
+    granted(&grants, to)?;
+    // A symlink names its target's history. Renaming the link leaves that target intact.
+    if from == to || from.is_symlink() {
+        return commit().map_err(|e| e.to_string());
+    }
+    // Keep a case-only rename's requested leaf spelling on case-insensitive volumes.
+    let new = grants::resolve(to.parent().ok_or("missing parent")?)
+        .map_err(|e| e.to_string())?
+        .join(to.file_name().ok_or("missing file name")?);
+    history::relocate(&app_data_dir(app)?, &old, &new, commit).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn apply_document_edit(
     app: AppHandle,
@@ -393,24 +440,17 @@ async fn apply_document_edit(
     after: String,
 ) -> Result<(), String> {
     blocking(move || {
-        let grants = app.state::<Grants>();
-        granted(&grants, &from)?;
-        granted(&grants, &to)?;
-        document_edit::apply(&from, &to, before.as_bytes(), after.as_bytes())
-            .map_err(|e| format!("{} → {}: {e}", from.display(), to.display()))
+        relocate_entry(&app, &from, &to, || {
+            document_edit::apply(&from, &to, before.as_bytes(), after.as_bytes())
+        })
+        .map_err(|e| format!("{} → {}: {e}", from.display(), to.display()))
     })
     .await
 }
 
 #[tauri::command]
 async fn rename_path(app: AppHandle, from: PathBuf, to: PathBuf) -> Result<(), String> {
-    blocking(move || {
-        let grants = app.state::<Grants>();
-        granted(&grants, &from)?;
-        granted(&grants, &to)?;
-        folder::rename(&from, &to).map_err(|e| e.to_string())
-    })
-    .await
+    blocking(move || relocate_entry(&app, &from, &to, || folder::rename(&from, &to))).await
 }
 
 #[tauri::command]
@@ -678,6 +718,7 @@ pub fn run() {
             printing::print_pages,
             read_text_file,
             write_text_file,
+            read_binary_file,
             write_binary_file,
             record_version,
             list_versions,

@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit -p . && tsc --noEmit -p tsconfig.node.json"
   },
   "dependencies": {
+    "@jest/diff-sequences": "30.0.1",
     "@lezer/markdown": "1.8.1",
     "@mint/editor": "workspace:*",
     "@mint/markdown": "workspace:*",

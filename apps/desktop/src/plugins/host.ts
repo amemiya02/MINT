@@ -1,6 +1,6 @@
 import type { WordCount } from "@mint/editor";
 
-import { isPluginFormat, type PluginFormat } from "./export-formats.ts";
+import { codecFor, isPluginFormat, type PluginFormat } from "./export-formats.ts";
 
 export type Permission =
   | "document.read"
@@ -379,16 +379,15 @@ export function canImportArchive(id: string): boolean {
   );
 }
 
-export function activeExportFormats(items = installations()): PluginFormat[] {
-  return [
-    ...new Set(
-      items.flatMap(({ manifest, enabled, grants }) =>
-        enabled && grants.includes("document.read") && manifest.exportFormat
-          ? [manifest.exportFormat]
-          : [],
-      ),
-    ),
-  ];
+export function activeExportFormats(items = installations()) {
+  const formats = new Map<string, ReturnType<typeof codecFor> & { definition: PluginFormat }>();
+  for (const { manifest, enabled, grants } of items) {
+    const definition = manifest.exportFormat;
+    if (!enabled || !grants.includes("document.read") || !definition) continue;
+    const key = typeof definition === "string" ? definition : `plugin:${manifest.id}`;
+    formats.set(key, { ...codecFor(definition), definition });
+  }
+  return formats;
 }
 
 export function canPresentSlides(items = installations()): boolean {

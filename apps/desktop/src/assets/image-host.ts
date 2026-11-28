@@ -22,9 +22,23 @@ export function documentImageUrl(
   document: string | null,
   path: string,
 ): string | null {
+  const resolved = documentImagePath(document, path);
+  return resolved ? platform.assetUrl(resolved) : null;
+}
+
+/** Exported HTML contains URL-encoded src attributes; the editor already decodes them. */
+export function exportImagePath(document: string, src: string) {
+  try {
+    return documentImagePath(document, decodeURIComponent(src));
+  } catch {
+    return documentImagePath(document, src);
+  }
+}
+
+function documentImagePath(document: string | null, path: string): string | null {
   const local = fileUrlPath(path) ?? path;
-  if (document === null) return isAbsolutePath(local) ? platform.assetUrl(local) : null;
-  return platform.assetUrl(resolveFrom(document, local));
+  if (document === null) return isAbsolutePath(local) ? local : null;
+  return resolveFrom(document, local);
 }
 
 /**

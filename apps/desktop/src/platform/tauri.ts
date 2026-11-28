@@ -15,6 +15,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
 import { type PrintJob, printEvents } from "../print/protocol.ts";
+import { pickBrowserFile } from "./pick-file.ts";
 import type {
   DirectoryEntry,
   FileMatches,
@@ -45,6 +46,7 @@ export function createTauriPlatform(): Platform {
     listZoteroItems: (start) => invoke("list_zotero_items", { start }),
     savesPdfDirectly: /Windows/.test(navigator.userAgent),
     readTextFile: (path) => invoke<string>("read_text_file", { path }),
+    readBinaryFile: (path) => invoke<ArrayBuffer>("read_binary_file", { path }),
     writeBinaryFile: (path, bytes) =>
       invoke<void>("write_binary_file", { path, data: toBase64(bytes) }),
     writeTextFile: (path, text) => invoke<void>("write_text_file", { path, text }),
@@ -57,12 +59,12 @@ export function createTauriPlatform(): Platform {
       const id = await invoke<number>("watch_file", { path, onChange: channel });
       return () => void invoke<void>("unwatch_folder", { id });
     },
-    // The backend shows the file dialogs itself: what the user picks becomes a granted root,
-    // and the file commands refuse paths outside the granted roots.
+    pickFile: pickBrowserFile,
+    // A document dialog grants the directory of the file the user chooses.
     showOpenDialog: ({ title, filters }) =>
       invoke<string | null>("show_open_dialog", { title, filters }),
-    showSaveDialog: ({ title, defaultPath, filters }) =>
-      invoke<string | null>("show_save_dialog", { title, defaultPath, filters }),
+    showSaveDialog: ({ title, defaultPath, filters, knownPaths = [] }) =>
+      invoke<string | null>("show_save_dialog", { title, defaultPath, filters, knownPaths }),
     async printDocument(html, options) {
       // A window of its own shows the document and opens the print dialog on it (src/print/main.ts).
       const label = `print-${crypto.randomUUID()}`;

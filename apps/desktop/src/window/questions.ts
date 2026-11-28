@@ -37,8 +37,14 @@ export async function askUnsaved(platform: Platform, t: Translate, tab: Tab) {
   return answer === "yes" ? "save" : answer === "no" ? "discard" : "cancel";
 }
 
-export async function askSavePath(platform: Platform, t: Translate, tab: Tab) {
+export async function askSavePath(
+  platform: Platform,
+  t: Translate,
+  tab: Tab,
+  knownPaths: string[],
+) {
   return platform.showSaveDialog({
+    knownPaths,
     title: t("dialog.saveAs.title"),
     defaultPath: tab.path ?? t("dialog.saveAs.defaultName"),
     filters: [{ name: t("dialog.filter.markdown"), extensions: documentExtensions }],

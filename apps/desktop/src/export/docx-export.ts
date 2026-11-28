@@ -1,7 +1,7 @@
 import { renderHtml } from "@mint/markdown";
 import { Document, Packer } from "docx";
 import { htmlToContent } from "docx/html";
-import { createImageHost } from "../assets/image-host.ts";
+import { exportImagePath } from "../assets/image-host.ts";
 import type { Platform } from "../platform/platform.ts";
 import { dialectOf } from "../settings/dialect.ts";
 import type { Settings } from "../settings/schema.ts";
@@ -15,12 +15,6 @@ export async function documentDocx(
 ) {
   const content = document.createElement("template");
   content.innerHTML = renderHtml(text, dialectOf(settings));
-  const host = createImageHost(
-    platform,
-    () => path,
-    () => settings,
-    () => {},
-  );
   const images = new Map<string, ArrayBuffer>();
   for (const image of content.content.querySelectorAll("img")) {
     const src = image.getAttribute("src") ?? "";
@@ -33,10 +27,9 @@ export async function documentDocx(
       image.replaceWith(link);
       continue;
     }
-    const url = host.resolveImageUrl(src);
-    const response = url ? await fetch(url) : null;
-    if (!response?.ok) throw new Error(src);
-    images.set(src, await response.arrayBuffer());
+    const resolved = exportImagePath(path, src);
+    if (!resolved) throw new Error(src);
+    images.set(src, await platform.readBinaryFile(resolved));
   }
   const children = htmlToContent(content.innerHTML, { images: (src) => images.get(src) });
   const file = new Document({ creator: "MINT", sections: [{ children }] });

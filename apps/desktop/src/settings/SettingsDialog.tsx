@@ -1,5 +1,6 @@
 import { useEffect, useId, useState } from "react";
 import { useT } from "../i18n/index.ts";
+import type { Platform } from "../platform/platform.ts";
 import { PluginSettings } from "../plugins/Plugins.tsx";
 import { findBuiltinTheme } from "../theme/catalog.ts";
 import { ThemeOptions } from "../theme/ThemeOptions.tsx";
@@ -15,6 +16,7 @@ import {
 import { useSettings, useSettingsStore } from "./useSettings.ts";
 
 interface SettingsDialogProps {
+  readonly platform: Platform;
   readonly folder: string | null;
   readonly onClose: () => void;
   /** Open settings.json as a document. */
@@ -25,6 +27,7 @@ interface SettingsDialogProps {
 
 /** The settings window: one control per entry of `settingsSchema`. */
 export function SettingsDialog({
+  platform,
   folder,
   onClose,
   onOpenFile,
@@ -54,7 +57,7 @@ export function SettingsDialog({
         </button>
       </div>
       <div className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto px-5 py-4">
-        <PluginSettings />
+        <PluginSettings platform={platform} />
         {(Object.keys(settingsSchema) as SettingKey[]).map((key) =>
           settingsSchema[key].kind === "shortcuts" ? (
             <ShortcutsSettings key={key} onRecording={onRecordingShortcut} />

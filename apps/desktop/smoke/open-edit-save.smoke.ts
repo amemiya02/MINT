@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { promisify } from "node:util";
+import JSZip from "jszip";
 
 const driver = process.env.TAURI_DRIVER_URL ?? "http://127.0.0.1:4444";
 const application = process.env.MINT_APP;
@@ -82,6 +83,38 @@ const exec = promisify(execFile);
 async function nativeShortcut(chord: string) {
   await exec("xdotool", ["search", "--onlyvisible", "--name", "MINT$", "windowfocus", "--sync"]);
   await exec("xdotool", ["key", chord]);
+}
+
+/** GTK file pickers are native windows outside the WebDriver DOM. */
+async function chooseNativePath(button: string, titlePattern: string, path: string) {
+  const choose = async () => {
+    const id = await until(`native chooser ${titlePattern}`, async () => {
+      const { stdout } = await exec("xdotool", ["search", "--onlyvisible", "--name", titlePattern]);
+      return stdout.trim().split(/\s+/).at(-1) || null;
+    });
+    await exec("xdotool", ["windowfocus", "--sync", id], { timeout: 5000 });
+    await exec("xdotool", ["key", "--clearmodifiers", "ctrl+l", "ctrl+a"]);
+    await exec("xdotool", ["type", "--clearmodifiers", "--", path]);
+    await exec("xdotool", ["key", "Return"]);
+  };
+  await Promise.all([
+    clickPath(`//button[not(@disabled) and normalize-space(.)='${button}']`),
+    choose(),
+  ]);
+}
+
+async function invokeNative<T>(name: string, args: object): Promise<T> {
+  const result = await command<{ value: T } | { error: string }>(
+    "POST",
+    `/session/${session}/execute/async`,
+    {
+      script: `const [name, params, done] = arguments;
+      window.__TAURI_INTERNALS__.invoke(name, params).then(value => done({value}), error => done({error: String(error)}));`,
+      args: [name, args],
+    },
+  );
+  if ("error" in result) throw new Error(result.error);
+  return result.value;
 }
 
 /** Fail with what the window shows, which says which step went missing. */
@@ -375,6 +408,9 @@ test("preview, disambiguate, move and undo wikilinks in a native folder", async 
     ).catch(explain);
     await click("Close");
   };
+  await invokeNative("record_version", { path: target, text: "Earlier native report" });
+  const [version] = await invokeNative<number[]>("list_versions", { path: target });
+  assert.ok(version);
   await toggleSetting(true);
   // Place the caret on the visible alias and use the same Preview Link shortcut as the UI.
   const alias = await until("the wikilink label", async () => {
@@ -426,6 +462,11 @@ test("preview, disambiguate, move and undo wikilinks in a native folder", async 
   assert.deepEqual(await readFile(moved), report);
   assert.deepEqual(await readFile(other), otherBytes);
   await assert.rejects(readFile(target), { code: "ENOENT" });
+  assert.equal(
+    await invokeNative("read_version", { path: moved, id: version }),
+    "Earlier native report",
+  );
+  assert.deepEqual(await invokeNative("list_versions", { path: target }), []);
   await click("Undo move");
   await until(
     "undo to restore the native file path",
@@ -433,6 +474,11 @@ test("preview, disambiguate, move and undo wikilinks in a native folder", async 
   ).catch(explain);
   await assert.rejects(readFile(moved), { code: "ENOENT" });
   assert.deepEqual(await readFile(other), otherBytes);
+  assert.equal(
+    await invokeNative("read_version", { path: target, id: version }),
+    "Earlier native report",
+  );
+  assert.deepEqual(await invokeNative("list_versions", { path: moved }), []);
   await toggleSetting(false);
   assert.deepEqual(await readFile(source), draft);
   assert.deepEqual(await readFile(target), report);
@@ -538,18 +584,13 @@ test("declining a plugin update keeps its native read grant and withholds its wr
     templates: [{ name: "Smoke marker", text: "SMOKE WRITE" }],
   };
   const upload = async (manifest: object) => {
-    await until("plugin file chooser", () =>
-      command<boolean>("POST", `/session/${session}/execute/sync`, {
-        script: `const input = document.querySelector('dialog[open] input[type=file][accept*=json]');
-          if (!input) return false;
-          const transfer = new DataTransfer();
-          transfer.items.add(new File([JSON.stringify(arguments[0])], 'smoke.mint.json', {type: 'application/json'}));
-          input.files = transfer.files;
-          input.dispatchEvent(new Event('change', {bubbles: true}));
-          return true;`,
-        args: [manifest],
-      }).then((ready) => ready || null),
-    ).catch(explain);
+    const path = join(dir, "smoke.mint.json");
+    await writeFile(path, JSON.stringify(manifest));
+    await chooseNativePath(
+      "Install a MINT plugin file",
+      "^(Open|Choose|Select|Upload|File Upload)",
+      path,
+    );
   };
   await nativeShortcut("ctrl+n");
   await until("the new plugin update draft to receive focus", () =>
@@ -885,4 +926,59 @@ test("the daily journal creates one ordinary Markdown file only after permission
   await nativeShortcut("ctrl+comma");
   await clickPath(`${plugin}//button[normalize-space(.)='Uninstall']`);
   await click("Close");
+});
+
+test("import a hidden Notion attachment and embed its granted bytes in a native DOCX", async () => {
+  const folder = await mkdtemp(join(dir, "publication-"));
+  const archive = join(folder, "Notebook.zip");
+  const doc = "# Map\n\n![Field map](.attachments/map.png)\n";
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+    "base64",
+  );
+  const input = await new JSZip()
+    .file("Map.md", doc)
+    .file(".attachments/map.png", png)
+    .generateAsync({ type: "nodebuffer" });
+  await writeFile(archive, input);
+  await restart([folder]);
+  await shows("Notebook.zip");
+  await nativeShortcut("ctrl+comma");
+  await clickPath("//fieldset[@aria-label='Notion import']//button[normalize-space(.)='Install']");
+  await click("Allow access");
+  await click("Close");
+  const formats = async () => {
+    await nativeShortcut("ctrl+shift+p");
+    await keyActions(typing("Import / Export"));
+    await shows("Import / Export…");
+    await keyActions(typing(keys.enter));
+  };
+  await formats();
+  await clickPath("//dialog//select/option[normalize-space(.)='Notion import']");
+  await chooseNativePath(
+    "Notion export (.zip)",
+    "^(Open|Choose|Select|Upload|File Upload)",
+    archive,
+  );
+  await chooseNativePath("Import", "^Choose the parent folder for the import$", folder);
+  await click("Open imported folder");
+  await clickPath("//*[@role='treeitem' and @aria-label='Map.md']");
+  const imported = join(folder, "Notebook");
+  assert.equal(await readFile(join(imported, "Map.md"), "utf8"), doc);
+  assert.deepEqual(await readFile(join(imported, ".attachments", "map.png")), png);
+  assert.deepEqual(await readFile(archive), input);
+  const denied = join(imported, "ungranted.png");
+  await symlink("/etc/hosts", denied);
+  await assert.rejects(
+    invokeNative("read_binary_file", { path: denied }),
+    /outside the documents and folders/,
+  );
+  await formats();
+  await clickPath("//dialog//select/option[normalize-space(.)='DOCX']");
+  const out = join(imported, "share.docx");
+  await chooseNativePath("Export", "^Export as DOCX$", out);
+  const bytes = await until("the DOCX on disk", () => readFile(out));
+  const word = await JSZip.loadAsync(bytes);
+  assert.match((await word.file("word/document.xml")?.async("string")) ?? "", /<w:drawing>/);
+  assert.deepEqual(await word.file(/^word\/media\/.+\.png$/i)[0]?.async("nodebuffer"), png);
 });

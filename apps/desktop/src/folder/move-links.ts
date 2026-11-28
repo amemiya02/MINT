@@ -1,4 +1,5 @@
 import { type DocumentReference, documentReferences, type EditorDialect } from "@mint/editor";
+import type { Translate } from "../i18n/index.ts";
 import {
   baseName,
   documentExtensions,
@@ -26,6 +27,8 @@ interface MoveReference {
 }
 
 export interface MovePreview {
+  root: string;
+  dialect: EditorDialect;
   moveOnly: DocumentEdit;
   documents: { path: string; before: string; references: MoveReference[] }[];
 }
@@ -169,7 +172,31 @@ export async function previewMove(
     }
     if (references.length) documents.push({ path, before, references });
   }
-  return { moveOnly: { from, to, before: movedText, after: movedText }, documents };
+  return { root, dialect, moveOnly: { from, to, before: movedText, after: movedText }, documents };
+}
+
+/** A newly discovered reference or a changed set of wiki choices invalidates confirmation. */
+export async function validateMovePreview(platform: Platform, preview: MovePreview, t: Translate) {
+  const {
+    root,
+    dialect,
+    moveOnly: { from, to },
+  } = preview;
+  const current = await previewMove(platform, root, from, to, dialect);
+  const previous = new Map(preview.documents.map((doc) => [doc.path, doc]));
+  for (const doc of current.documents) {
+    const seen = previous.get(doc.path);
+    if (
+      !seen ||
+      seen.before !== doc.before ||
+      JSON.stringify(seen.references) !== JSON.stringify(doc.references)
+    ) {
+      throw new Error(t("move.changed", { path: doc.path }));
+    }
+    previous.delete(doc.path);
+  }
+  const removed = previous.keys().next().value;
+  if (removed !== undefined) throw new Error(t("move.changed", { path: removed }));
 }
 
 export type TargetChoices = ReadonlyMap<DocumentReference, string>;
@@ -207,34 +234,39 @@ export function inverse(edits: DocumentEdit[]) {
     .map(({ from, to, before, after }) => ({ from: to, to: from, before: after, after: before }));
 }
 
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export async function applyMove(
   platform: Platform,
   edits: DocumentEdit[],
   dirty: (path: string) => boolean,
+  t: Translate,
 ) {
   async function apply(edit: DocumentEdit) {
     try {
       await platform.applyDocumentEdit(edit);
     } catch (error) {
       const paths = edit.from === edit.to ? edit.from : `${edit.from} → ${edit.to}`;
-      throw new Error(`${paths}: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(`${paths}: ${errorMessage(error)}`);
     }
   }
   const applied: DocumentEdit[] = [];
   try {
     for (const edit of edits) {
       if (dirty(edit.from) && edit.before !== edit.after)
-        throw new Error(`${edit.from}: unsaved changes`);
+        throw new Error(t("move.dirty", { path: edit.from }));
       await apply(edit);
       applied.push(edit);
     }
   } catch (error) {
-    const failures = [String(error)];
+    const failures = [errorMessage(error)];
     for (const edit of inverse(applied)) {
       try {
         await apply(edit);
       } catch (rollbackError) {
-        failures.push(String(rollbackError));
+        failures.push(errorMessage(rollbackError));
       }
     }
     throw new Error(failures.join("\n"));

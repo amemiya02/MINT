@@ -61,20 +61,25 @@ export function NotionImport({ id, platform, busy, setBusy, onOpenFolder }: Prop
     );
   return (
     <>
-      <label className="grid gap-1">
-        {t("notion.archive")}
-        <input
-          type="file"
-          accept=".zip,application/zip"
-          disabled={busy}
-          onChange={(e) => {
-            const archive = e.target.files?.[0] ?? null;
+      <button
+        type="button"
+        className={button}
+        disabled={busy}
+        onClick={async () => {
+          try {
+            const archive = await platform.pickFile(".zip,application/zip");
+            if (!archive) return;
             setFile(archive);
-            setName(archive?.name.replace(/\.zip$/i, "") ?? "");
+            setName(archive.name.replace(/\.zip$/i, ""));
             setError("");
-          }}
-        />
-      </label>
+          } catch (e) {
+            setError(e instanceof Error ? e.message : String(e));
+          }
+        }}
+      >
+        {t("notion.archive")}
+      </button>
+      {file && <span>{file.name}</span>}
       <label className="grid gap-1">
         {t("notion.folder")}
         <input

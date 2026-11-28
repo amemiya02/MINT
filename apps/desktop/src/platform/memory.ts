@@ -1,5 +1,6 @@
 import { baseName, parentPath } from "../paths.ts";
 import { createIgnoreRules } from "./gitignore.ts";
+import { pickBrowserFile } from "./pick-file.ts";
 import type {
   DirectoryEntry,
   FolderSearchQuery,
@@ -33,6 +34,8 @@ export interface MemoryPlatformOptions {
   readonly directories?: readonly string[];
   /** Paths the open dialog returns, in order; `null` simulates cancelling. */
   readonly openDialogResults?: readonly (string | null)[];
+  /** Paths selected as import packages, in order. */
+  readonly fileDialogResults?: readonly (string | null)[];
   /** Paths the save dialog returns, in order; `null` simulates cancelling. */
   readonly saveDialogResults?: readonly (string | null)[];
   /** Paths the open folder dialog returns, in order; `null` simulates cancelling. */
@@ -89,6 +92,8 @@ export interface MemoryPlatform extends Platform {
   externalRename(from: string, to: string): void;
   /** Messages of the question dialogs shown so far. */
   readonly questions: readonly string[];
+  /** Pending file-picker selections. */
+  readonly fileDialogResults: (string | null)[];
   /** The paths each save dialog suggested, in order. */
   readonly saveDialogs: readonly string[];
   /** The directories listed with `readDirectory` so far, in order. */
@@ -239,6 +244,25 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     }
   }
 
+  function moveHistory(from: string, to: string) {
+    if (from === to) return;
+    const restoring: [string, string][] = [];
+    const detached = crypto.randomUUID();
+    for (const [key, value] of [...appData]) {
+      const match = /^(history:|snapshot:\d+:)([\s\S]+)$/.exec(key);
+      const path = match?.[2];
+      if (!match || !path) continue;
+      if (within(path, from) && isFile(path)) {
+        restoring.push([match[1] + to + path.slice(from.length), value]);
+        appData.delete(key);
+      } else if (within(path, to) && isFile(from + path.slice(to.length))) {
+        appData.set(`detached:${detached}:${key}`, value);
+        appData.delete(key);
+      }
+    }
+    for (const [key, value] of restoring) appData.set(key, value);
+  }
+
   function move(from: string, to: string): void {
     const moved = (p: string) => to + p.slice(from.length);
     for (const map of [files, binaryFiles] as Map<string, unknown>[]) {
@@ -302,6 +326,11 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       appData.set(`snapshot:${id}:${path}`, text);
       appData.set(key, JSON.stringify([...ids, id]));
     },
+    async readBinaryFile(path) {
+      const bytes = binaryFiles.get(path);
+      if (bytes) return bytes.slice().buffer;
+      return new TextEncoder().encode(await this.readTextFile(path)).buffer;
+    },
     async writeBinaryFile(path, data) {
       requireParent(path);
       if (isDirectory(path)) throw new Error(`Is a directory: ${path}`);
@@ -322,6 +351,12 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     },
     get closed() {
       return closed;
+    },
+    fileDialogResults: [...(options.fileDialogResults ?? [])],
+    async pickFile(accept) {
+      const path = this.fileDialogResults.shift();
+      if (path === undefined) return pickBrowserFile(accept);
+      return path ? new File([await this.readBinaryFile(path)], baseName(path)) : null;
     },
     async showOpenDialog() {
       return dialogResults.shift() ?? null;
@@ -450,6 +485,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       if (files.get(from) !== before) throw new Error(`${from}: file changed`);
       if (from !== to && exists(to)) throw new Error(`${to} already exists`);
       requireParent(to);
+      moveHistory(from, to);
       files.delete(from);
       files.set(to, after);
       notify(from, to);
@@ -458,6 +494,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       if (!exists(from)) throw new Error(`No such file or directory: ${from}`);
       if (exists(to)) throw new Error(`${to} already exists`);
       requireParent(to);
+      moveHistory(from, to);
       move(from, to);
       notify(from, to);
     },

@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
-import { launch, listPaths, readFile } from "./memory-platform.ts";
+import { launch, listPaths, pickFile, readFile } from "./memory-platform.ts";
 
 const folder = "/notebook";
 const draft = `${folder}/draft.md`;
@@ -93,7 +93,7 @@ test("a local package supplies its journal template only while its command is en
   await setup(page);
   await page.keyboard.press("ControlOrMeta+,");
   const dialog = settings(page);
-  await dialog.getByLabel("Install a MINT plugin file").setInputFiles({
+  await pickFile(page, dialog.getByRole("button", { name: "Install a MINT plugin file" }), {
     name: "field-journal.mint.json",
     mimeType: "application/json",
     buffer: Buffer.from(
