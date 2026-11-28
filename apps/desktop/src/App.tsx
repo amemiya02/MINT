@@ -28,6 +28,7 @@ import { PluginEntries, pluginName, useInstallations } from "./plugins/Plugins.t
 import { PropertyTable } from "./plugins/PropertyTable.tsx";
 import { TagBrowser } from "./plugins/TagBrowser.tsx";
 import { timingRenderer } from "./plugins/timing-diagrams.ts";
+import { ZoteroCitation } from "./plugins/ZoteroCitation.tsx";
 import { QuickOpen } from "./quick-open/QuickOpen.tsx";
 import { createRecovery, type Recovery } from "./recovery/recovery.ts";
 import { FolderSearch } from "./search/FolderSearch.tsx";
@@ -412,6 +413,14 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     void platform.setWindowTitle(title);
   }, [name, dirty, platform, t]);
 
+  function insertAtSelection(text: string) {
+    const editor = activeId === null ? null : store.editor(activeId);
+    if (!editor) return false;
+    editor.execute("pastePlainText", text);
+    editor.focus();
+    return true;
+  }
+
   return (
     <div className="flex h-full flex-col bg-(--mint-bg) text-(--mint-fg)">
       <UpdateNotice updates={updates} />
@@ -578,6 +587,18 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
           )}
         </div>
       </div>
+      {activeId !== null &&
+        plugins
+          .filter((i) => i.enabled && i.manifest.citation === "zotero")
+          .map((i) => (
+            <ZoteroCitation
+              key={JSON.stringify([activeId, i.manifest.id])}
+              id={i.manifest.id}
+              platform={platform}
+              granted={i.grants.includes("zotero.read") && i.grants.includes("document.write")}
+              insert={insertAtSelection}
+            />
+          ))}
       <PluginEntries
         readDocument={() =>
           activeId === null ? null : (store.editor(activeId)?.getWordCount() ?? null)
@@ -587,13 +608,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
         <CommandPalette
           onRun={(id) => run.current(id)}
           onTemplate={(id, name) => {
-            const result = insertTemplate(id, name, (text) => {
-              const editor = activeId === null ? null : store.editor(activeId);
-              if (!editor) return false;
-              editor.execute("pastePlainText", text);
-              editor.focus();
-              return true;
-            });
+            const result = insertTemplate(id, name, insertAtSelection);
             setShellError(
               result === "ok"
                 ? null

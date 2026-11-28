@@ -12,7 +12,10 @@
     "clipboard-manager:allow-read-text",
     "clipboard-manager:allow-write-text",
     "dialog:allow-message",
-    "opener:allow-open-url",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "zotero://select/library/items/*" }]
+    },
     "opener:allow-default-urls",
     "updater:default",
     "process:allow-restart"

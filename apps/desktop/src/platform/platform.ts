@@ -8,6 +8,7 @@ import type { PrintJob } from "../print/protocol.ts";
  * packages directly.
  */
 export interface Platform {
+  listZoteroItems(start: number): Promise<ZoteroPage>;
   /** The user's preferred UI language as a BCP 47 tag, e.g. `zh-CN` or `en-US`. */
   readonly locale: string;
   /** Whether PDF export uses a save dialog and writes the selected file directly. */
@@ -291,6 +292,15 @@ export type SettingsFile =
   | { readonly status: "ok"; readonly values: SettingsValues }
   /** Unreadable or not a JSON object; `message` says why (e.g. a syntax error and its line). */
   | { readonly status: "invalid"; readonly message: string };
+
+export interface ZoteroItem {
+  key: string;
+  title: string;
+}
+export interface ZoteroPage {
+  items: ZoteroItem[];
+  next: boolean;
+}
 
 /** A document or folder to open, handed to MINT from outside the window. */
 export interface OpenedPath {

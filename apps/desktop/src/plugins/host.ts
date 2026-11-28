@@ -7,7 +7,8 @@ export type Permission =
   | "document.write"
   | "folder.read"
   | "folder.status.write"
-  | "archive.import";
+  | "archive.import"
+  | "zotero.read";
 
 /** Packages declare the host operations they use. */
 export interface PluginManifest {
@@ -20,8 +21,17 @@ export interface PluginManifest {
   exportFormat?: PluginFormat;
   sidebar?: "tags" | "properties" | "kanban";
   diagram?: "timing";
+  citation?: "zotero";
   importer?: "notion";
 }
+
+export const zotero: PluginManifest = {
+  apiVersion: 1,
+  id: "mint.zotero",
+  name: "Zotero",
+  permissions: ["zotero.read", "document.write"],
+  citation: "zotero",
+};
 
 export const notionImporter: PluginManifest = {
   apiVersion: 1,
@@ -126,6 +136,11 @@ export function isManifest(value: unknown): value is PluginManifest {
   )
     return false;
   const required = new Set<Permission>();
+  if ("citation" in m) {
+    if (m.citation !== "zotero") return false;
+    required.add("zotero.read");
+    required.add("document.write");
+  }
   if ("importer" in m) {
     if (m.importer !== "notion") return false;
     required.add("archive.import");
@@ -283,6 +298,16 @@ export function canMoveCard(id: string): boolean {
       item.manifest.sidebar === "kanban" &&
       item.grants.includes("folder.read") &&
       item.grants.includes("folder.status.write"),
+  );
+}
+
+export function canCite(id: string) {
+  const item = installed(id);
+  return Boolean(
+    item?.enabled &&
+      item.manifest.citation === "zotero" &&
+      item.grants.includes("zotero.read") &&
+      item.grants.includes("document.write"),
   );
 }
 
