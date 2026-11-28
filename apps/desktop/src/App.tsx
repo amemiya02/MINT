@@ -12,6 +12,7 @@ import {
 } from "./commands.ts";
 import { ExportDialog } from "./export/ExportDialog.tsx";
 import { FindBar, type FindMode } from "./find/FindBar.tsx";
+import { Bookmarks } from "./folder/Bookmarks.tsx";
 import { FolderTree } from "./folder/file-tree.ts";
 import { MoveDialog } from "./folder/MoveDialog.tsx";
 import { applyMove, inverse, type MovePreview, previewMove } from "./folder/move-links.ts";
@@ -465,6 +466,9 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
               if (activeId !== null) store.editor(activeId)?.focus();
             }}
           />
+        )}
+        {sidebarTool === "bookmarks" && (
+          <Bookmarks activePath={activePath} onOpen={(path) => void store.openDocument(path)} />
         )}
         {folderSearch === null && sidebarVisible && sidebarView === "backlinks" && (
           <Backlinks
