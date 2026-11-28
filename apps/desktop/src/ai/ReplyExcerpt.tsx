@@ -13,12 +13,14 @@ export function ReplyExcerpt({
   originPath,
   originalText,
   onReplace,
+  onUsed,
 }: {
   readonly reply: string;
   readonly originName: string;
   readonly originPath: string | null;
   readonly originalText: string;
   readonly onReplace: (excerpt: string) => string | null;
+  readonly onUsed?: () => void;
 }) {
   const t = useT();
   const store = useTabStore();
@@ -45,6 +47,7 @@ export function ReplyExcerpt({
     const { head } = editor.getSelection();
     editor.replaceRange({ from: head, to: head }, excerpt);
     editor.focus();
+    onUsed?.();
   }
 
   return (
@@ -77,6 +80,7 @@ export function ReplyExcerpt({
           onClick={() => {
             const current = onReplace(excerpt);
             setComparison(current === null ? null : { current, excerpt });
+            if (current === null) onUsed?.();
           }}
         >
           {t("writing.reply.replace", { name: originName })}
@@ -85,7 +89,10 @@ export function ReplyExcerpt({
           type="button"
           className={buttonClass}
           disabled={!excerpt}
-          onClick={() => store.restoreDocument(null, excerpt)}
+          onClick={() => {
+            store.restoreDocument(null, excerpt);
+            onUsed?.();
+          }}
         >
           {t("writing.reply.newDraft")}
         </button>

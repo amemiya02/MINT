@@ -5,6 +5,11 @@ import type { Platform } from "../platform/platform.ts";
 import { type EditStatus, ProposedSelectionEdit } from "./ProposedSelectionEdit.tsx";
 import { ReplyExcerpt } from "./ReplyExcerpt.tsx";
 import { loadWritingRecipients, type WritingRecipient } from "./writing-recipients.ts";
+import {
+  applyWritingSelection,
+  captureWritingSelection,
+  type WritingSelection,
+} from "./writing-selection.ts";
 import { replacementFromReply, type WritingTurn } from "./writing-sender.ts";
 
 const buttonClass =
@@ -17,11 +22,8 @@ type Scope = (typeof scopes)[number];
 const actions = ["comment", "preview", "direct"] as const;
 type Action = (typeof actions)[number];
 
-interface Origin {
+interface Origin extends WritingSelection {
   readonly id: number;
-  readonly editor: MintEditor;
-  readonly text: string;
-  readonly range: ReturnType<MintEditor["trackRange"]>;
 }
 
 interface Turn extends WritingTurn {
@@ -77,16 +79,9 @@ export function WritingAssistant({
 
   useEffect(() => {
     if (!askRequest || !editor) return;
-    const { anchor, head } = editor.getSelection();
-    if (anchor === head) return;
-    const from = Math.min(anchor, head);
-    const to = Math.max(anchor, head);
-    setOrigin({
-      id: askRequest,
-      editor,
-      text: editor.getText().slice(from, to),
-      range: editor.trackRange({ from, to }),
-    });
+    const selection = captureWritingSelection(editor);
+    if (!selection) return;
+    setOrigin({ id: askRequest, ...selection });
     setPlacement("inline");
   }, [askRequest, editor]);
 
@@ -231,11 +226,7 @@ function Composer({
   }
 
   function apply(replacement: string) {
-    const range = origin.range.current();
-    const current = origin.editor.getText().slice(range.from, range.to);
-    if (!canApply() || current !== origin.text) return { status: "conflict", current } as const;
-    if (replacement !== origin.text) origin.editor.replaceRange(range, replacement);
-    return { status: "applied" } as const;
+    return applyWritingSelection(origin, replacement, canApply());
   }
 
   function replaceWithExcerpt(excerpt: string) {
