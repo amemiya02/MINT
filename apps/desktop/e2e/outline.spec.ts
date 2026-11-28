@@ -183,10 +183,10 @@ test("the navigation rail keeps the reading position while switching and collaps
   await expect(sidebar).toBeHidden();
   await expect(page.getByRole("main").getByRole("textbox")).toHaveCount(1);
 
-  const scroller = page.locator(".cm-scroller");
-  await scroller.evaluate((element) => element.scrollTo(0, 1200));
-  const paragraph = content(page).getByText("Paragraph 22.", { exact: true }).first();
-  await paragraph.scrollIntoViewIfNeeded();
+  await showOutline(page);
+  await entry(page, "Usage basics").click();
+  const readingPosition = content(page).getByRole("heading", { name: /Usage/ });
+  await expect(readingPosition).toBeInViewport();
   const files = rail.getByRole("button", { name: "Files" });
   await files.click();
   await expect(sidebar.getByRole("button", { name: "Open Folder…" })).toBeVisible();
@@ -197,7 +197,7 @@ test("the navigation rail keeps the reading position while switching and collaps
   await expect(outline(page)).toBeVisible();
   await outlineButton.press("Enter");
   await expect(sidebar).toBeHidden();
-  await expect(paragraph).toBeInViewport();
+  await expect(readingPosition).toBeInViewport();
 });
 
 test("the Chinese dark-theme rail supports visible keyboard focus and repeated activation", async ({
