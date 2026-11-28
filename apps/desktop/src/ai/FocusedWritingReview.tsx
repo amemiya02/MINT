@@ -27,6 +27,7 @@ export interface ReviewEntry {
   readonly note?: string | undefined;
   readonly blocked?: "disk" | "boundaries" | undefined;
   readonly section: { readonly id: string; readonly name: string };
+  readonly spansSections: boolean;
 }
 
 const buttonClass =
@@ -115,7 +116,7 @@ export function FocusedWritingReview({
   const position = current ? visible.indexOf(current) : -1;
   const locatedSection = bySection.get(section)?.[0]?.section;
   const canAcceptSection = pending.some(
-    (entry) => !entry.blocked && entry.current === entry.before,
+    (entry) => !entry.spansSections && !entry.blocked && entry.current === entry.before,
   );
   const currentKey = current?.key;
   const changeType = current
@@ -341,7 +342,9 @@ export function FocusedWritingReview({
       {fileError && <p role="alert">{t(fileError)}</p>}
       {batchCount !== undefined && (
         <p role="status" className="mb-2">
-          {t("writing.review.accepted", { count: String(batchCount) })}
+          {batchCount === 1
+            ? t("writing.review.acceptedOne")
+            : t("writing.review.accepted", { count: String(batchCount) })}
         </p>
       )}
       <h3 ref={heading} tabIndex={-1} className="mb-2 font-medium">
@@ -386,6 +389,9 @@ export function FocusedWritingReview({
               {t("writing.edit.source")}
             </label>
           </div>
+          {current.status === "preview" && current.spansSections && (
+            <p className="mb-2">{t("writing.review.spansSections")}</p>
+          )}
           <ProposedSelectionEdit
             label={t("writing.edit.position", {
               index: String(entries.indexOf(current) + 1),
@@ -413,22 +419,17 @@ export function FocusedWritingReview({
               current.status === "preview" && !current.blocked ? () => void decide(true) : undefined
             }
             onDiscard={current.status === "preview" ? () => void decide(false) : undefined}
+            onRestore={
+              current.status === "discarded"
+                ? () => {
+                    onRestore(current);
+                    setFilter(current.note ? "commented" : "pending");
+                    move(current);
+                  }
+                : undefined
+            }
           />
           {current.note && <p className="mt-2 whitespace-pre-wrap wrap-anywhere">{current.note}</p>}
-          {current.status === "discarded" && (
-            <button
-              type="button"
-              className={`mt-2 ${buttonClass}`}
-              disabled={disabled}
-              onClick={() => {
-                onRestore(current);
-                setFilter(current.note ? "commented" : "pending");
-                move(current);
-              }}
-            >
-              {t("writing.review.restore")}
-            </button>
-          )}
           {current.status === "preview" && comment === null && (
             <button
               type="button"

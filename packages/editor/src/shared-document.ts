@@ -12,6 +12,7 @@ import { DocumentAnnotations } from "./annotations.ts";
 import { copyFileDocument, sharedFileEffects } from "./file-text.ts";
 
 import { ManualReview } from "./manual-review.ts";
+import { rangeHistoryEffect } from "./range-history.ts";
 
 const viewOwner = Facet.define<symbol, symbol | undefined>({ combine: (owners) => owners[0] });
 const historyOwner = StateEffect.define<symbol>();
@@ -91,7 +92,10 @@ export class SharedDocument {
       for (const change of changed) {
         const update = state.update({
           changes: change.changes,
-          effects: sharedFileEffects(change),
+          effects: [
+            ...sharedFileEffects(change),
+            ...change.effects.filter((e) => e.is(rangeHistoryEffect)),
+          ],
           annotations: [Transaction.remote.of(true), Transaction.addToHistory.of(false)],
           filter: false,
         });

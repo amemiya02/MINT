@@ -53,6 +53,8 @@ export const zhCN: Messages = {
   "writing.review.filter.all": "所有改动",
   "writing.review.acceptSection": "接受「{section}」中剩余改动",
   "writing.review.accepted": "已接受 {count} 处改动。",
+  "writing.review.acceptedOne": "已接受 1 处改动。",
+  "writing.review.spansSections": "这项改动跨越多个章节，请单独审阅。",
   "writing.review.restore": "恢复为待审",
   "writing.review.empty": "当前视图没有改动。",
   "writing.review.previous": "上一处改动",

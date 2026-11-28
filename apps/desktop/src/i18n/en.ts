@@ -52,6 +52,8 @@ export const en = {
   "writing.review.filter.all": "All edits",
   "writing.review.acceptSection": "Accept remaining edits in {section}",
   "writing.review.accepted": "Accepted {count} edits.",
+  "writing.review.acceptedOne": "Accepted 1 edit.",
+  "writing.review.spansSections": "This edit spans sections. Review it individually.",
   "writing.review.restore": "Return to pending",
   "writing.review.empty": "No edits match this view.",
   "writing.review.previous": "Previous edit",
