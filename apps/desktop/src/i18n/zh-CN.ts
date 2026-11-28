@@ -10,6 +10,12 @@ export const zhCN: Messages = {
   "plugin.file": "从文件安装 MINT 插件",
   "plugin.invalid": "插件包不受支持，或插件已安装。",
   "plugin.title": "插件",
+  "plugin.exampleMarkdown": "Markdown 示例",
+  "plugin.timingSyntax":
+    "时序图第 {line} 行格式有误。请在信号名后加上冒号和二进制采样值，例如 CLK: 0101。",
+  "plugin.timingWidth": "时序图第 {line} 行有误。各信号的采样数应一致。",
+  "plugin.timingEmpty": "时序图为空。请添加信号，例如 CLK: 0101。",
+  "plugin.timing": "数字时序图",
   "plugin.tags": "标签浏览",
   "plugin.folderRead": "读取当前工作文件夹中的 Markdown 文档",
   "plugin.folderDenied": "读取当前工作文件夹的请求已被拒绝。",

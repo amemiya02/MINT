@@ -22,7 +22,24 @@ interface SidebarManifest extends ManifestBase {
   sidebar: "tags";
 }
 
-export type PluginManifest = StatisticsManifest | TemplatesManifest | SidebarManifest;
+interface DiagramManifest extends ManifestBase {
+  permissions: ["document.read"];
+  diagram: "timing";
+}
+
+export type PluginManifest =
+  | StatisticsManifest
+  | TemplatesManifest
+  | SidebarManifest
+  | DiagramManifest;
+
+export const timingDiagrams: DiagramManifest = {
+  apiVersion: 1,
+  id: "mint.timing-diagrams",
+  name: "Digital timing diagrams",
+  permissions: ["document.read"],
+  diagram: "timing",
+};
 
 export const tagBrowser: SidebarManifest = {
   apiVersion: 1,
@@ -88,6 +105,15 @@ export function isManifest(value: unknown): value is PluginManifest {
     m.permissions.length !== 1
   )
     return false;
+  if ("diagram" in m) {
+    return (
+      m.diagram === "timing" &&
+      m.permissions[0] === "document.read" &&
+      !("sidebar" in m) &&
+      !("statistics" in m) &&
+      !("templates" in m)
+    );
+  }
   if ("sidebar" in m) {
     return (
       m.sidebar === "tags" &&

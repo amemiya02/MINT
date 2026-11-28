@@ -1,4 +1,4 @@
-import type { LinkTarget, WordCount } from "@mint/editor";
+import type { CodeBlockRenderer, LinkTarget, WordCount } from "@mint/editor";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createImageHost, type ImageSaveFailure } from "../assets/image-host.ts";
 import { EditorPane } from "../EditorPane.tsx";
@@ -15,6 +15,7 @@ import { FormattingToolbar, type ToolbarPosition } from "./FormattingToolbar.tsx
 /** Every open tab keeps its editor mounted, so undo history and selection survive switching. */
 export function TabPanel({
   tab,
+  codeBlockRenderers,
   active,
   visible,
   toolbarPosition,
@@ -25,6 +26,7 @@ export function TabPanel({
   onWordCount,
 }: {
   readonly tab: Tab;
+  readonly codeBlockRenderers: readonly CodeBlockRenderer[];
   readonly active: boolean;
   readonly visible: boolean;
   readonly toolbarPosition: ToolbarPosition;
@@ -107,6 +109,7 @@ export function TabPanel({
         {toolbarPosition !== "hidden" && <FormattingToolbar tab={tab} position={toolbarPosition} />}
         <div className="min-h-0 min-w-0 flex-1">
           <EditorPane
+            codeBlockRenderers={codeBlockRenderers}
             text={tab.text}
             document={tab.document}
             active={active}
