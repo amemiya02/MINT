@@ -2,6 +2,11 @@ import type { CodeBlockRenderer, DocumentLink, LinkTarget, WordCount } from "@mi
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { Proofreading } from "../ai/Proofreading.tsx";
 import { WritingAssistant } from "../ai/WritingAssistant.tsx";
+import type {
+  SavedWritingTask,
+  WritingTaskOpenRequest,
+  WritingTaskOpenResult,
+} from "../ai/writing-tasks.ts";
 import { createImageHost, type ImageSaveFailure } from "../assets/image-host.ts";
 import { EditorPane } from "../EditorPane.tsx";
 import { resolveDocumentLink } from "../folder/wikilinks.ts";
@@ -30,10 +35,12 @@ export function TabPanel({
   platform,
   folder,
   askWriting,
-  writingTasksRequest,
+  writingTaskRestore,
+  writingTaskListRevision,
   settingsOpen,
   onAskWriting,
   onWritingTasks,
+  onOpenWritingReview,
   onOpenSettings,
   onModeChange,
   onEditorChange,
@@ -50,11 +57,16 @@ export function TabPanel({
   readonly toolbarPosition: ToolbarPosition;
   readonly platform: Platform;
   readonly folder: string | null;
-  readonly askWriting: number | null;
-  readonly writingTasksRequest: number | null;
+  readonly askWriting: { readonly folder?: string } | null;
+  readonly writingTaskRestore: WritingTaskOpenRequest | null;
+  readonly writingTaskListRevision: number;
   readonly settingsOpen: boolean;
   readonly onAskWriting: () => void;
   readonly onWritingTasks: () => void;
+  readonly onOpenWritingReview: (
+    task: SavedWritingTask,
+    returnToTab: number,
+  ) => Promise<WritingTaskOpenResult>;
   readonly onOpenSettings: () => void;
   readonly onModeChange: () => void;
   /** The tab's editor was created or destroyed. */
@@ -180,10 +192,12 @@ export function TabPanel({
           platform={platform}
           folder={folder}
           askRequest={askWriting}
-          tasksRequest={writingTasksRequest}
+          taskRestore={writingTaskRestore}
+          taskListRevision={writingTaskListRevision}
           settingsOpen={settingsOpen}
           onAsk={onAskWriting}
           onTasks={onWritingTasks}
+          onOpenReview={onOpenWritingReview}
           onActivate={activate}
           onSettings={onOpenSettings}
           externalChange={!!tab.external}

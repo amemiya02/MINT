@@ -8,7 +8,12 @@ export type WritingRecipient = {
   readonly send: WritingSender;
 } & (
   | { readonly kind: "agent"; readonly path: string; readonly access: AgentAccess }
-  | { readonly kind: "model"; readonly name: string; readonly endpoint: string }
+  | {
+      readonly kind: "model";
+      readonly modelId: string;
+      readonly name: string;
+      readonly endpoint: string;
+    }
 );
 
 /** Bind native-approved Agent policies and saved model IDs to the shared text sender. */
@@ -38,6 +43,7 @@ export async function loadWritingRecipients(platform: Platform, agentAccess?: Ag
         available.push({
           id: `model:${model.id}`,
           kind: "model",
+          modelId: model.id,
           name: model.name,
           endpoint: modelEndpoint(model.address),
           send: modelWritingSender(platform.sendModelMessage, { id: model.id }),

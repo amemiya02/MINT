@@ -2,7 +2,7 @@
 //! configuration. The renderer owns the message format and reply interpretation.
 use crate::writing_requests::Registration;
 use reqwest::header::{HeaderValue, CONTENT_TYPE};
-use reqwest::{Client, Url};
+use reqwest::{Client, StatusCode, Url};
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use std::time::Duration;
@@ -35,7 +35,52 @@ pub(crate) struct ConnectedCompletion {
 #[derive(Deserialize, Serialize)]
 struct Message {
     role: String,
-    content: String,
+    content: MessageContent,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(untagged)]
+enum MessageContent {
+    Text(String),
+    Parts(Vec<MessagePart>),
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+enum MessagePart {
+    Text { text: String },
+    ImageUrl { image_url: ImageUrl },
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ImageUrl {
+    url: String,
+}
+
+fn validate_images(messages: &[Message]) -> Result<(), ModelError> {
+    let mut total = 0;
+    for message in messages {
+        if let MessageContent::Parts(parts) = &message.content {
+            if message.role != "user" || parts.is_empty() {
+                return Err(ModelError::Request("invalidRequest"));
+            }
+            for part in parts {
+                let MessagePart::ImageUrl { image_url } = part else {
+                    continue;
+                };
+                let url = &image_url.url;
+                total += url.len();
+                if url.len() > 4 * 1024 * 1024
+                    || total > 12 * 1024 * 1024
+                    || !url.starts_with("data:image/png;base64,")
+                {
+                    return Err(ModelError::Request("invalidRequest"));
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 #[derive(Serialize)]
@@ -200,6 +245,7 @@ async fn send(
     completion: Completion,
     on_event: Channel<ModelEvent>,
 ) -> Result<(), ModelError> {
+    validate_images(&completion.messages)?;
     let mut client = Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(10))
@@ -221,7 +267,13 @@ async fn send(
     }
     let mut response = post.send().await.map_err(network_error)?;
     if !response.status().is_success() {
-        return Err(ModelError::Status(response.status().as_u16()));
+        let status = response.status();
+        if status == StatusCode::PAYLOAD_TOO_LARGE
+            || status == StatusCode::BAD_REQUEST && rejects_context(&mut response).await
+        {
+            return Err(ModelError::Request("materialCapacity"));
+        }
+        return Err(ModelError::Status(status.as_u16()));
     }
     let send = |event| {
         on_event
@@ -247,4 +299,21 @@ async fn send(
         })?;
     }
     Ok(())
+}
+
+/// Some compatible services report context-window overflow as a structured HTTP 400.
+async fn rejects_context(response: &mut reqwest::Response) -> bool {
+    let mut body = Vec::new();
+    while let Ok(Some(chunk)) = response.chunk().await {
+        if body.len() + chunk.len() > 16 * 1024 {
+            return false;
+        }
+        body.extend_from_slice(&chunk);
+    }
+    serde_json::from_slice::<serde_json::Value>(&body)
+        .ok()
+        .is_some_and(|value| {
+            value.pointer("/error/code").and_then(|code| code.as_str())
+                == Some("context_length_exceeded")
+        })
 }

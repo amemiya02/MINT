@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { launch, readFile, savedDialogs } from "./memory-platform.ts";
+import { launch, readFile, runMenuItem, savedDialogs } from "./memory-platform.ts";
 
 test("draft from the welcome screen, keep editing after cancelling Save, then choose a path", async ({
   page,
@@ -37,6 +37,14 @@ test("draft from the welcome screen, keep editing after cancelling Save, then ch
   await expect(editor).toBeFocused();
   expect(await savedDialogs(page)).toEqual([]);
 
+  await runMenuItem(page, "edit.writingTasks");
+  const current = page.getByRole("dialog", { name: "Writing tasks" });
+  await current.getByRole("button", { name: instruction, exact: true }).click();
+  const draftResult = page.getByRole("region", { name: "Draft with AI" });
+  await expect(draftResult.getByRole("textbox", { name: "AI reply" })).toHaveValue(generated);
+  await expect(page.getByRole("tab", { name: "Untitled" })).toHaveCount(1);
+  await draftResult.getByRole("button", { name: "Close", exact: true }).click();
+
   await page.keyboard.press("ControlOrMeta+S");
   await expect.poll(() => savedDialogs(page)).toHaveLength(1);
   await expect(editor).toHaveText(generated);
@@ -48,6 +56,17 @@ test("draft from the welcome screen, keep editing after cancelling Save, then ch
   await page.keyboard.press("ControlOrMeta+S");
   await expect(page.getByRole("tab", { name: "field-notes.md" })).toBeVisible();
   expect(await readFile(page, path)).toBe("Field notes from the ridge. Author's addition.");
+
+  await runMenuItem(page, "tab.close");
+  await expect(page.getByRole("tab", { name: "field-notes.md" })).toHaveCount(0);
+  await runMenuItem(page, "edit.allWritingTasks");
+  const tasks = page.getByRole("dialog", { name: "All writing tasks" });
+  const result = tasks.getByRole("listitem").filter({ hasText: instruction });
+  await expect(result).toContainText("field-notes.md");
+  await result.getByRole("button", { name: instruction, exact: true }).click();
+  await expect(page.getByRole("tab", { name: "field-notes.md", selected: true })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "AI reply" })).toHaveValue(generated);
+  await expect(editor).toHaveText("Field notes from the ridge. Author's addition.");
 });
 
 test("a blank draft can be written by hand while an approved Agent generates text", async ({

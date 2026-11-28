@@ -6,7 +6,7 @@ import {
   redo,
   undo,
 } from "@codemirror/commands";
-import { syntaxTree } from "@codemirror/language";
+import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
 import { selectNextOccurrence } from "@codemirror/search";
 import {
   type ChangeDesc,
@@ -16,6 +16,7 @@ import {
   EditorState,
   type Extension,
   MapMode,
+  type StateEffect,
   Text,
   Transaction,
 } from "@codemirror/state";
@@ -26,6 +27,7 @@ import {
   keymap,
   rectangularSelection,
 } from "@codemirror/view";
+import type { SyntaxNode } from "@lezer/common";
 import { defaultDialect, renderHtml } from "@mint/markdown";
 import {
   type Annotation,
@@ -75,6 +77,7 @@ import { markupContinuation } from "./markup-continuation.ts";
 import { type OutlineHeading, outline, sameOutline } from "./outline.ts";
 import { editorPreferences } from "./preferences.ts";
 import { type ProsePassage, prosePassageAtCursor } from "./prose-passage.ts";
+import { rangeHistory, rangeHistoryEffect } from "./range-history.ts";
 import { pasteText, richPaste } from "./rich-paste.ts";
 import type { SharedDocument } from "./shared-document.ts";
 import { type TableCommands, tableCommands } from "./table/commands.ts";
@@ -200,6 +203,12 @@ export type EditorCommand = keyof EditorCommands;
 
 export type EditorEvent =
   | { readonly type: "change"; readonly remote?: boolean; readonly fromHistory?: boolean }
+  | {
+      readonly type: "rangeHistory";
+      readonly id: string;
+      readonly direction: "undo" | "redo";
+      readonly ranges: readonly TextRange[];
+    }
   | { readonly type: "selection"; readonly restored?: true }
   /** An input method finished composing, even if its final text was already visible. */
   | { readonly type: "compositionEnd" }
@@ -237,6 +246,8 @@ export interface MintEditor {
     options?: {
       readonly collapseSelection?: TextRange;
       readonly lineEndings?: "match" | "preserve";
+      /** Identify the step and its resulting ranges in undo and redo events. */
+      readonly historyId?: string;
     },
   ): readonly TextRange[];
   /** Capture a bounded passage of ordinary prose at the cursor for proofreading. */
@@ -245,6 +256,8 @@ export interface MintEditor {
   getSelection(): TextSelection;
   /** Capture a file-text range or the current selection for a new annotation. */
   getAnnotationTarget(range?: TextRange): AnnotationTarget | null;
+  /** A table or formula containing this range, in file-text offsets. */
+  getComparisonBlock(range: TextRange): (TextRange & { readonly kind: "table" | "formula" }) | null;
   /** Scroll to and focus an existing annotation target. */
   revealAnnotation(annotation: Annotation): void;
   /** Every selection range (several when there are several cursors), in document order. */
@@ -290,6 +303,12 @@ export interface MintEditor {
   restoreReadingPosition(position: { anchor: number; head: number; top: number }): void;
   /** Capture the current scroll anchor and pixel offset for restoration after a modal view. */
   captureScrollPosition(): () => void;
+  /** Follow the current selection and scroll anchor while a review navigates the document. */
+  captureReadingPosition(): {
+    current(): TextSelection & { readonly top: number };
+    restore(): void;
+    release(): void;
+  };
   /** Matches of the find query set with the `setFindQuery` command. */
   getFindStatus(): FindStatus;
   /**
@@ -357,6 +376,7 @@ export function createEditor(options: EditorOptions): MintEditor {
         completion.of([]),
         preferences.extension,
         history(),
+        rangeHistory,
         options.document?.initialHistory() ?? [],
         // Several cursors: typed text goes to all of them. Alt-drag selects a rectangle.
         EditorState.allowMultipleSelections.of(true),
@@ -400,6 +420,21 @@ export function createEditor(options: EditorOptions): MintEditor {
         }),
         EditorView.updateListener.of((update) => {
           if (update.docChanged) for (const track of rangeTrackers) track(update.changes);
+          for (const transaction of update.transactions) {
+            for (const effect of transaction.effects) {
+              if (!effect.is(rangeHistoryEffect) || effect.value.phase === "apply") continue;
+              const { id, phase, after } = effect.value;
+              emit({
+                type: "rangeHistory",
+                id,
+                direction: phase,
+                ranges: after.map(({ from, to }) => ({
+                  from: toFileOffset(transaction.state, from),
+                  to: toFileOffset(transaction.state, to),
+                })),
+              });
+            }
+          }
           if (update.docChanged || update.transactions.some((t) => sharedFileEffects(t).length > 0))
             emit(
               update.transactions.some((tr) => tr.annotation(Transaction.remote))
@@ -474,9 +509,11 @@ export function createEditor(options: EditorOptions): MintEditor {
     {
       collapseSelection,
       lineEndings,
+      historyId,
     }: {
       readonly collapseSelection?: TextRange;
       readonly lineEndings?: "match" | "preserve";
+      readonly historyId?: string;
     } = {},
   ) {
     if (!replacements.length) return [];
@@ -496,19 +533,34 @@ export function createEditor(options: EditorOptions): MintEditor {
       main.to === fromFileOffset(state, collapseSelection.to)
         ? changes.mapPos(main.to, 1)
         : undefined;
+    let delta = 0;
+    const inserted = entries.map(({ from, to, insert }) => {
+      const start = from + delta;
+      delta += insert.length - (to - from);
+      return { from: start, to: start + insert.length };
+    });
+    const effects: StateEffect<unknown>[] = lineEndings
+      ? replacementLineEndings(state, entries, lineEndings)
+      : [];
+    if (historyId)
+      effects.push(
+        rangeHistoryEffect.of({
+          id: historyId,
+          phase: "apply",
+          before: entries.map(({ from, to }) => ({ from, to })),
+          after: inserted,
+        }),
+      );
     view.dispatch({
       changes,
       selection: end === undefined ? undefined : { anchor: end },
-      effects: lineEndings ? replacementLineEndings(state, entries, lineEndings) : undefined,
+      effects,
       annotations: isolateHistory.of("full"),
     });
-    let delta = 0;
-    return entries.map(({ from, to, insert }) => {
-      const start = from + delta;
-      const end = start + insert.length;
-      delta += insert.length - (to - from);
-      return { from: toFileOffset(view.state, start), to: toFileOffset(view.state, end) };
-    });
+    return inserted.map(({ from, to }) => ({
+      from: toFileOffset(view.state, from),
+      to: toFileOffset(view.state, to),
+    }));
   }
 
   const commands: { [C in EditorCommand]: (...args: EditorCommands[C]) => boolean } = {
@@ -571,6 +623,34 @@ export function createEditor(options: EditorOptions): MintEditor {
       const cell = annotationCellAt(state, from, to);
       if (cell) return cellTarget(state, cell.table, cell.address);
       return from === to ? null : textTarget(state, from, to);
+    },
+    getComparisonBlock(range) {
+      const { state } = view;
+      const from = fromFileOffset(state, range.from);
+      const to = fromFileOffset(state, range.to);
+      const tree = ensureSyntaxTree(state, to, 50) ?? syntaxTree(state);
+      for (const side of [1, -1] as const) {
+        for (
+          let node: SyntaxNode | null = tree.resolveInner(from, side);
+          node;
+          node = node.parent
+        ) {
+          const kind =
+            node.name === "Table"
+              ? "table"
+              : node.name === "InlineMath" || node.name === "BlockMath"
+                ? "formula"
+                : null;
+          if (!kind || from < node.from || from > node.to) continue;
+          if (to > node.to && state.sliceDoc(node.to, to) !== "\n") continue;
+          return {
+            kind,
+            from: toFileOffset(state, node.from),
+            to: Math.max(range.to, toFileOffset(state, node.to)),
+          };
+        }
+      }
+      return null;
     },
     revealAnnotation({ range, kind, implicitColumn }) {
       if (!range) return;
@@ -666,6 +746,28 @@ export function createEditor(options: EditorOptions): MintEditor {
     captureScrollPosition() {
       const snapshot = view.scrollSnapshot();
       return () => view.dispatch({ effects: snapshot });
+    },
+    captureReadingPosition() {
+      let selection = view.state.selection;
+      let scroll = view.scrollSnapshot();
+      let top = fromFileOffset(view.state, this.getVisibleRange().from);
+      const track = (changes: ChangeDesc) => {
+        selection = selection.map(changes);
+        scroll = scroll.map(changes) ?? scroll;
+        top = changes.mapPos(top);
+      };
+      rangeTrackers.add(track);
+      return {
+        current: () => ({
+          anchor: toFileOffset(view.state, selection.main.anchor),
+          head: toFileOffset(view.state, selection.main.head),
+          top: toFileOffset(view.state, top),
+        }),
+        restore() {
+          view.dispatch({ selection, effects: scroll, userEvent: "select.restoreReading" });
+        },
+        release: () => rangeTrackers.delete(track),
+      };
     },
     getVisibleRange() {
       // The part of the scroller inside the window, in document coordinates.

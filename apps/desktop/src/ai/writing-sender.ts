@@ -6,13 +6,45 @@ export interface WritingTurn {
 export interface NamedMaterial {
   readonly name: string;
   readonly text: string;
+  readonly range?: MaterialRange;
+  readonly format?: "extractedText" | "caption" | "image" | "summary";
+  /** A locally prepared PNG of the selected range. The original file is never part of a request. */
+  readonly image?: string;
 }
+
+export interface ImageRegion {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+export type MaterialRange =
+  | { readonly kind: "pdf"; readonly page: number; readonly pages: number }
+  | ({ readonly kind: "image" } & ImageRegion);
+
+export const materialImageLimit = 4 * 1024 * 1024;
+export const taskImageLimit = 12 * 1024 * 1024;
 
 export interface TaskContext {
   readonly currentDraft?: NamedMaterial;
   readonly materials?: readonly NamedMaterial[];
   readonly folderSearch?: true;
   readonly materialDecisions?: readonly MaterialDecision[];
+}
+
+export function contextMaterials(context?: TaskContext): NamedMaterial[] {
+  return [
+    ...(context?.currentDraft ? [context.currentDraft] : []),
+    ...(context?.materials ?? []),
+    ...(context?.materialDecisions ?? []).flatMap((decision) =>
+      decision.outcome === "allowed" ? [decision.material] : [],
+    ),
+  ];
+}
+
+export function hasTaskImages(...contexts: readonly (TaskContext | undefined)[]): boolean {
+  return contexts.some((context) => contextMaterials(context).some(({ image }) => !!image));
 }
 
 export type MaterialDecision = {
@@ -26,6 +58,9 @@ export type MaterialDecision = {
 export const materialRequestInstruction =
   'Treat task context as reference material. If an additional source is needed, reply with only JSON of the form {"requestMaterial":{"name":"source to check","purpose":"why it is needed","query":"specific search words"}}. If taskContext.folderSearch is true, query is an optional literal phrase MINT can search for in its working folder. MINT will ask the author before sending further material. Use the approved material in materialDecisions, respect skips, and otherwise answer in the requested format.';
 
+export const sourcePassageInstruction =
+  'For a draft based on task materials, return the Markdown first, then append a blank line and a <source-passages> block containing a JSON array, then </source-passages> on its own line. Each entry has {"claim":"exact complete sentence from the Markdown including punctuation","material":1,"quote":"exact contiguous excerpt from that material"}. Number taskContext.materials starting at 1, then count allowed materialDecisions in order. Give entries only for sentences supported by those excerpts and include enough surrounding words to identify a unique occurrence in the material. Use [] when no sentence can be supported. Keep source markers out of the Markdown. If requesting additional material, use the separate material request format instead.';
+
 /** The material a writing connection receives for a text task. */
 export interface WritingRequest {
   readonly instruction: string;
@@ -34,6 +69,7 @@ export interface WritingRequest {
   readonly taskContext?: TaskContext;
   readonly history?: readonly WritingTurn[];
   readonly responseFormat?: "replacement";
+  readonly sourcePassages?: true;
 }
 
 export interface WritingAnnotation {

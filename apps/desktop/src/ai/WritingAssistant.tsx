@@ -1,33 +1,52 @@
-import type { MintEditor, TextRange } from "@mint/editor";
+import type { EditorEvent, MintEditor, TextRange } from "@mint/editor";
 import {
   type FormEvent,
   type ReactNode,
   useCallback,
   useEffect,
   useEffectEvent,
+  useId,
   useMemo,
   useRef,
   useState,
 } from "react";
 import { useT } from "../i18n/index.ts";
+import { isWithin, parentPath } from "../paths.ts";
 import type { Platform } from "../platform/platform.ts";
 import { useTabStore } from "../tabs/context.ts";
+import { useModalDialog } from "../window/useModalDialog.ts";
+import { FocusedWritingReview, type ReviewEntry } from "./FocusedWritingReview.tsx";
+import {
+  type MaterialPlan,
+  MaterialPlanPreview,
+  useMaterialCapacity,
+} from "./MaterialCapacity.tsx";
 import { MaterialRequestNotice, useMaterialRequests } from "./MaterialRequest.tsx";
+import { useModelVision, VisionControl } from "./ModelVision.tsx";
+import { materialLabel } from "./material-display.ts";
 import { ProposedSelectionEdit } from "./ProposedSelectionEdit.tsx";
 import { ReplyExcerpt } from "./ReplyExcerpt.tsx";
+import { SourcePassageReview } from "./SourcePassageReview.tsx";
 import { type SelectionEdit, selectionEdits } from "./selection-edits.ts";
-import { TaskContextChecklist, useNamedMaterials } from "./TaskContext.tsx";
+import {
+  MaterialPreview,
+  materialDropHandlers,
+  TaskContextChecklist,
+  useNamedMaterials,
+} from "./TaskContext.tsx";
 import { useWritingTask, WritingTaskMaterials } from "./WritingTasks.tsx";
-import { WritingTasksDialog } from "./WritingTasksDialog.tsx";
 import {
   type AttemptStatus,
   failureStatus,
+  isMaterialCapacityError,
   replyStatus,
   writingMaterialNames,
 } from "./writing-attempt.ts";
 import { loadWritingRecipients, type WritingRecipient } from "./writing-recipients.ts";
 import { captureWritingSelection, type WritingSelection } from "./writing-selection.ts";
 import {
+  contextMaterials,
+  hasTaskImages,
   type NamedMaterial,
   replacementFromReply,
   splitWritingProgress,
@@ -39,10 +58,14 @@ import {
   openWritingReviews,
   type ReviewRange,
   registerTaskCheckpoint,
+  type SavedReviewLink,
   type SavedSuggestion,
   type SavedTurn,
   type SavedWritingTask,
+  type WritingTaskOpenRequest,
+  type WritingTaskOpenResult,
   writeTaskCheckpoint,
+  writingTaskWrites,
 } from "./writing-tasks.ts";
 
 const buttonClass =
@@ -51,7 +74,7 @@ const fieldClass =
   "min-w-0 rounded-md border border-(--mint-border) bg-(--mint-bg) px-2 py-1 focus-visible:outline-2 focus-visible:outline-(--mint-accent)";
 
 const scopes = ["selection", "document", "instruction"] as const;
-type Scope = (typeof scopes)[number];
+type Scope = (typeof scopes)[number] | "folder";
 const actions = ["comment", "preview", "direct"] as const;
 type Action = (typeof actions)[number];
 const proposedEditTracking = { followReplacedEdges: true };
@@ -62,10 +85,12 @@ function editKey({ from, to, before, after }: SelectionEdit) {
 
 interface Origin extends WritingSelection {
   readonly id: string;
+  readonly folder?: string;
 }
 
 interface Task {
   readonly request: WritingRequest;
+  readonly plan?: MaterialPlan;
   readonly action: Action;
   readonly scope: Scope;
   readonly searchFolder: string | null;
@@ -74,12 +99,15 @@ interface Task {
 }
 
 interface Attempt {
+  readonly id: string;
   readonly task: Task;
   readonly recipientId: string;
   readonly recipient: string;
   readonly status: AttemptStatus;
   readonly partial: string;
   readonly approved: readonly NamedMaterial[];
+  readonly newDecisions?: number;
+  readonly capacityRejected?: boolean;
 }
 
 interface Turn extends Omit<SavedTurn, "suggestions"> {
@@ -94,6 +122,7 @@ type Suggestion = Omit<SavedSuggestion, "range"> & {
 interface RestoredReview {
   readonly task: SavedWritingTask;
   readonly mapper: ReturnType<typeof mapReviewRanges>;
+  readonly restoreReading: boolean;
 }
 
 function savedRange(range: TrackedRange): ReviewRange {
@@ -114,15 +143,22 @@ function currentText({ range }: Suggestion, draft: string) {
   return draft.slice(from, to);
 }
 
+function reviewStatus(suggestion: Suggestion, draft: string) {
+  return suggestion.batchApplied &&
+    suggestion.status === "applied" &&
+    currentText(suggestion, draft) === suggestion.before
+    ? "preview"
+    : suggestion.status;
+}
+
 function canRevert(suggestion: Suggestion) {
   return suggestion.status === "applied" && suggestion.appliedText !== undefined;
 }
 
 function isApplied(suggestion: Suggestion, draft: string) {
   return (
-    suggestion.status === "applied" &&
-    suggestion.appliedText !== undefined &&
-    currentText(suggestion, draft) !== suggestion.before
+    canRevert(suggestion) &&
+    (!suggestion.range.hasBoundaries() || currentText(suggestion, draft) !== suggestion.before)
   );
 }
 
@@ -134,11 +170,16 @@ interface Props {
   readonly active: boolean;
   readonly platform: Platform;
   readonly folder: string | null;
-  readonly askRequest: number | null;
-  readonly tasksRequest: number | null;
+  readonly askRequest: { readonly folder?: string } | null;
+  readonly taskRestore: WritingTaskOpenRequest | null;
+  readonly taskListRevision: number;
   readonly settingsOpen: boolean;
   readonly onAsk: () => void;
   readonly onTasks: () => void;
+  readonly onOpenReview: (
+    task: SavedWritingTask,
+    returnToTab: number,
+  ) => Promise<WritingTaskOpenResult>;
   readonly onActivate: () => void;
   readonly onSettings: () => void;
   readonly externalChange: boolean;
@@ -156,10 +197,12 @@ export function WritingAssistant({
   platform,
   folder,
   askRequest,
-  tasksRequest,
+  taskRestore,
+  taskListRevision,
   settingsOpen,
   onAsk,
   onTasks,
+  onOpenReview,
   onActivate,
   onSettings,
   externalChange,
@@ -169,33 +212,31 @@ export function WritingAssistant({
   const t = useT();
   const [hasSelection, setHasSelection] = useState(false);
   const [origin, setOrigin] = useState<Origin | null>(null);
+  const [temporary, setTemporary] = useState(false);
   const [restored, setRestored] = useState<RestoredReview | null>(null);
   const taskRunning = useRef(false);
   const [placement, setPlacement] = useState<"inline" | "sidebar" | null>(null);
-  const [historyOpen, setHistoryOpen] = useState(false);
+  const [reviewStart, setReviewStart] = useState<{ id: string; returnToTab: number } | null>(null);
   const [hasSavedTasks, setHasSavedTasks] = useState(false);
   const [busyTask, setBusyTask] = useState<string | null>(null);
-  const lastAsk = useRef<number | null>(null);
-  const lastHistory = useRef<number | null>(null);
+  const lastAsk = useRef<typeof askRequest>(null);
+  const lastRestore = useRef<typeof taskRestore>(null);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Changes to task records invalidate this document's saved task list.
   useEffect(() => {
     let current = true;
-    void platform.writingTasks.list(path).then(
-      (tasks) => {
-        if (current) setHasSavedTasks(tasks.length > 0);
-      },
-      () => {},
-    );
+    void writingTaskWrites(platform.writingTasks)
+      .then(() => platform.writingTasks.list(path))
+      .then(
+        (tasks) => {
+          if (current) setHasSavedTasks(tasks.length > 0);
+        },
+        () => {},
+      );
     return () => {
       current = false;
     };
-  }, [platform, path]);
-
-  useEffect(() => {
-    if (tasksRequest === null || tasksRequest === lastHistory.current) return;
-    lastHistory.current = tasksRequest;
-    setHistoryOpen(true);
-  }, [tasksRequest]);
+  }, [platform, path, taskListRevision]);
 
   useEffect(() => {
     if (!editor) return;
@@ -212,16 +253,16 @@ export function WritingAssistant({
   useEffect(() => {
     if (!askRequest || askRequest === lastAsk.current || !editor) return;
     lastAsk.current = askRequest;
-    if (taskRunning.current) {
+    if (taskRunning.current || temporary) {
       setPlacement("sidebar");
       return;
     }
-    const selection = captureWritingSelection(editor);
+    const selection = captureWritingSelection(editor, !!askRequest.folder);
     if (!selection) return;
-    setOrigin({ id: crypto.randomUUID(), ...selection });
+    setOrigin({ id: crypto.randomUUID(), ...selection, folder: askRequest.folder });
     setRestored(null);
-    setPlacement("inline");
-  }, [askRequest, editor]);
+    setPlacement(askRequest.folder ? "sidebar" : "inline");
+  }, [askRequest, editor, temporary]);
 
   useEffect(() => () => origin?.range.release(), [origin]);
 
@@ -229,13 +270,15 @@ export function WritingAssistant({
     if (!origin || origin.editor !== editor) return;
     const reviews = openWritingReviews(platform.writingTasks);
     reviews.set(origin.id, {
+      tabId,
       busy: busyTask === origin.id,
-      focus() {
+      temporary,
+      focus(returnToTab) {
         onActivate();
         setPlacement("sidebar");
+        if (returnToTab !== undefined) setReviewStart({ id: origin.id, returnToTab });
       },
-      remove(remaining) {
-        setHasSavedTasks(remaining > 0);
+      remove() {
         setPlacement(null);
         setOrigin(null);
         setRestored(null);
@@ -244,33 +287,32 @@ export function WritingAssistant({
     return () => {
       reviews.delete(origin.id);
     };
-  }, [busyTask, editor, onActivate, origin, platform]);
+  }, [busyTask, editor, onActivate, origin, platform, tabId, temporary]);
 
-  function openTask(task: SavedWritingTask) {
-    if (!editor) return false;
-    if (task.id !== origin?.id) {
-      const openReview = openWritingReviews(platform.writingTasks).get(task.id);
-      if (openReview) {
-        openReview.focus();
-        return true;
-      }
-      if (taskRunning.current) return false;
-      if (task.path === null && task.baseline !== editor.getText()) {
-        if (editor.getText()) return false;
-        editor.replaceText(task.baseline);
-      }
-      const mapper = mapReviewRanges(task.baseline, editor.getText());
-      setOrigin({
-        id: task.id,
-        editor,
-        text: task.origin.text,
-        range: restoreRange(editor, mapper.range(task.origin)),
-      });
-      setRestored({ task, mapper });
+  const restoreTask = useEffectEvent((editor: MintEditor, request: WritingTaskOpenRequest) => {
+    const { task, returnToTab } = request;
+    if (taskRunning.current || temporary) {
+      request.complete(temporary ? "temporary" : false);
+      return;
     }
+    const mapper = mapReviewRanges(task.baseline, editor.getText());
+    setOrigin({
+      id: task.id,
+      editor,
+      text: task.origin.text,
+      range: restoreRange(editor, mapper.range(task.origin)),
+      folder: task.folder,
+    });
+    setRestored({ task, mapper, restoreReading: returnToTab === undefined });
     setPlacement("sidebar");
-    return true;
-  }
+    if (returnToTab !== undefined) setReviewStart({ id: task.id, returnToTab });
+    request.complete(true);
+  });
+  useEffect(() => {
+    if (!editor || !taskRestore || lastRestore.current === taskRestore) return;
+    lastRestore.current = taskRestore;
+    restoreTask(editor, taskRestore);
+  }, [editor, taskRestore]);
 
   return (
     <div
@@ -304,19 +346,6 @@ export function WritingAssistant({
           )}
         </div>
       )}
-      {historyOpen && (
-        <WritingTasksDialog
-          tasks={platform.writingTasks}
-          path={path}
-          busyTask={busyTask}
-          onClose={() => setHistoryOpen(false)}
-          onOpen={openTask}
-          onDelete={(id, remaining) => {
-            setHasSavedTasks(remaining > 0);
-            openWritingReviews(platform.writingTasks).get(id)?.remove(remaining);
-          }}
-        />
-      )}
       {origin && origin.editor === editor && (
         <Composer
           key={origin.id}
@@ -325,6 +354,7 @@ export function WritingAssistant({
           path={path}
           name={name}
           placement={placement}
+          reviewStart={reviewStart?.id === origin.id ? reviewStart : null}
           setPlacement={setPlacement}
           active={active}
           taskRunning={taskRunning}
@@ -335,8 +365,18 @@ export function WritingAssistant({
           externalChange={externalChange}
           refreshDisk={refreshDisk}
           restored={restored}
-          onSaved={() => setHasSavedTasks(true)}
+          temporary={temporary}
+          onTemporaryChange={setTemporary}
+          onEndTemporary={() => {
+            setTemporary(false);
+            setPlacement(null);
+            setOrigin(null);
+          }}
+          onSaved={() => {
+            if (!origin.folder) setHasSavedTasks(true);
+          }}
           onTasks={onTasks}
+          onOpenReview={onOpenReview}
           onBusyChange={setBusyTask}
         />
       )}
@@ -350,6 +390,7 @@ function Composer({
   path,
   name,
   placement,
+  reviewStart,
   setPlacement,
   taskRunning,
   active,
@@ -360,8 +401,12 @@ function Composer({
   externalChange,
   refreshDisk,
   restored,
+  temporary,
+  onTemporaryChange,
+  onEndTemporary,
   onSaved,
   onTasks,
+  onOpenReview,
   onBusyChange,
 }: Pick<
   Props,
@@ -373,25 +418,31 @@ function Composer({
   | "folder"
   | "settingsOpen"
   | "onSettings"
+  | "onOpenReview"
   | "onTasks"
   | "externalChange"
   | "refreshDisk"
 > & {
   readonly origin: Origin;
   readonly restored: RestoredReview | null;
+  readonly temporary: boolean;
+  readonly onTemporaryChange: (temporary: boolean) => void;
+  readonly onEndTemporary: () => void;
   readonly onSaved: () => void;
   readonly onBusyChange: (id: string | null) => void;
   readonly placement: "inline" | "sidebar" | null;
+  readonly reviewStart: { readonly returnToTab: number } | null;
   readonly taskRunning: { current: boolean };
   readonly setPlacement: (placement: "inline" | "sidebar" | null) => void;
 }) {
   const t = useT();
   const [instruction, setInstruction] = useState("");
-  const [scope, setScope] = useState<Scope>("selection");
+  const [scope, setScope] = useState<Scope>(origin.folder ? "folder" : "selection");
   const [actionOverride, setActionOverride] = useState<Action | null>(null);
   const [includeDraft, setIncludeDraft] = useState(false);
   const [allowedFolder, setAllowedFolder] = useState<string | null>(null);
-  const searchFolder = allowedFolder === folder ? folder : null;
+  const searchFolder =
+    allowedFolder === folder && (!origin.folder || origin.folder === folder) ? folder : null;
   const named = useNamedMaterials();
   const materialRequests = useMaterialRequests();
   const [includeHistory, setIncludeHistory] = useState(true);
@@ -403,6 +454,11 @@ function Composer({
   const [loadFailed, setLoadFailed] = useState(false);
   const [turns, setTurns] = useState<readonly Turn[]>([]);
   const [title, setTitle] = useState(restored?.task.title ?? "");
+  const [confirmTemporaryClose, setConfirmTemporaryClose] = useState(false);
+  const [closingTemporary, setClosingTemporary] = useState(false);
+  const [temporaryCleanupFailed, setTemporaryCleanupFailed] = useState(false);
+  const temporaryAgentCopy = useRef(false);
+  const finishTabClose = useRef<((allow: boolean) => void) | null>(null);
   const savedAt = useRef(restored?.task.updatedAt);
   const [ready, setReady] = useState(!restored);
   const [saveFailed, setSaveFailed] = useState(false);
@@ -411,9 +467,9 @@ function Composer({
   const controller = useRef<AbortController | null>(null);
   const busy = attempt?.status === "working" || attempt?.status === "approval";
   const store = useTabStore();
-  const [error, setError] = useState<"sendFailed" | "agentChanged" | "missingSelection" | null>(
-    null,
-  );
+  const [error, setError] = useState<
+    "sendFailed" | "agentChanged" | "missingSelection" | "visionRequired" | null
+  >(null);
   const input = useRef<HTMLInputElement>(null);
   const review = useRef<HTMLElement>(null);
   const reviewScroll = useRef(restored?.task.reviewScroll ?? 0);
@@ -427,8 +483,20 @@ function Composer({
   const checkingDisk = useRef(false);
   const trackedSuggestions = useRef(new Set<TrackedRange>());
   const [showSource, setShowSource] = useState(restored?.task.showSource ?? false);
+  const [reviewSelection, setReviewSelection] = useState(restored?.task.reviewSelection);
+  const [focusedReview, setFocusedReview] = useState(false);
+  const returnTab = useRef(tabId);
+  const reading = useRef<ReturnType<MintEditor["captureReadingPosition"]> | null>(null);
   const [draft, setDraft] = useState(() => origin.editor.getText());
   const recipient = recipients.find((candidate) => candidate.id === recipientId);
+  const checkVision = useModelVision(platform.sendModelMessage);
+  const visionFor = (candidate?: WritingRecipient) =>
+    checkVision(
+      candidate?.kind === "model"
+        ? { id: candidate.id, connection: { id: candidate.modelId } }
+        : undefined,
+    );
+  const vision = visionFor(recipient);
   const labelFor = (candidate: WritingRecipient) =>
     candidate.kind === "agent"
       ? t("writing.recipient.agent", { path: candidate.path })
@@ -442,6 +510,15 @@ function Composer({
       ? "comment"
       : (actionOverride ?? (explicitDirect ? "direct" : turns.length ? "comment" : "preview"));
 
+  const capacity = useMaterialCapacity({
+    recipient: recipient && labelFor(recipient),
+    selectedText,
+    draft: currentDraft,
+    entries: named.entries,
+    folderSearch: !!searchFolder,
+    editing: action !== "comment",
+  });
+
   const snapshot = useCallback(
     (taskTitle: string): SavedWritingTask => {
       const editor = origin.editor;
@@ -449,32 +526,34 @@ function Composer({
         version: 1,
         id: origin.id,
         path,
+        folder: origin.folder,
         title: taskTitle,
         updatedAt: Date.now(),
         baseline: editor.getText(),
         origin: { ...savedRange(origin.range), text: origin.text },
-        reading: { ...editor.getSelection(), top: editor.getVisibleRange().from },
+        reading: reading.current?.current() ?? {
+          ...editor.getSelection(),
+          top: editor.getVisibleRange().from,
+        },
         reviewScroll: reviewScroll.current,
+        reviewSelection,
         showSource,
         pending: pending.current,
         turns: turns.map((turn) => ({
           ...turn,
           suggestions: turn.suggestions?.map((item) => ({
             ...item,
-            range:
-              item.status === "preview" || canRevert(item)
-                ? savedRange(item.range)
-                : { from: 0, to: 0, located: false },
+            range: savedRange(item.range),
           })),
         })),
       };
     },
-    [origin, path, showSource, turns],
+    [origin, path, reviewSelection, showSource, turns],
   );
 
   const persist = useCallback(
     (taskTitle = title) => {
-      if (!taskTitle || !ready) return;
+      if (temporary || !taskTitle || !ready) return;
       const record = snapshot(taskTitle);
       void writeTaskCheckpoint(platform.writingTasks, async () => {
         const previous = savedAt.current;
@@ -491,7 +570,7 @@ function Composer({
         },
       );
     },
-    [platform, ready, snapshot, title],
+    [platform, ready, snapshot, temporary, title],
   );
 
   const saveCheckpoint = useEffectEvent(persist);
@@ -504,7 +583,7 @@ function Composer({
   });
 
   function queueReadingSave() {
-    if (!title || !ready) return;
+    if (temporary || !title || !ready) return;
     if (readingTimer.current !== null) clearTimeout(readingTimer.current);
     readingTimer.current = setTimeout(() => {
       readingTimer.current = null;
@@ -531,11 +610,13 @@ function Composer({
           }),
         })),
       );
-      origin.editor.restoreReadingPosition({
-        anchor: mapper.point(task.reading.anchor),
-        head: mapper.point(task.reading.head),
-        top: mapper.point(task.reading.top),
-      });
+      if (restored.restoreReading) {
+        origin.editor.restoreReadingPosition({
+          anchor: mapper.point(task.reading.anchor),
+          head: mapper.point(task.reading.head),
+          top: mapper.point(task.reading.top),
+        });
+      }
       if (review.current) review.current.scrollTop = reviewScroll.current;
       setReady(true);
     }
@@ -544,6 +625,8 @@ function Composer({
       flushReadingCheckpoint();
       taskRunning.current = false;
       controller.current?.abort();
+      reading.current?.release();
+      reading.current = null;
       for (const range of tracked) range.release();
       tracked.clear();
     };
@@ -557,6 +640,24 @@ function Composer({
     onBusyChange(busy ? origin.id : null);
     return () => onBusyChange(null);
   }, [busy, onBusyChange, origin.id]);
+
+  useEffect(() => {
+    if (!temporary) return;
+    const unregister = store.registerCloseGuard(tabId, () => {
+      if (finishTabClose.current) return Promise.resolve(false);
+      store.activate(tabId);
+      setPlacement("sidebar");
+      setConfirmTemporaryClose(true);
+      return new Promise((resolve) => {
+        finishTabClose.current = resolve;
+      });
+    });
+    return () => {
+      unregister();
+      finishTabClose.current?.(false);
+      finishTabClose.current = null;
+    };
+  }, [setPlacement, store, tabId, temporary]);
 
   useEffect(() => {
     if (!active || !placement) return;
@@ -576,11 +677,13 @@ function Composer({
     if (ready && placement && review.current) review.current.scrollTop = reviewScroll.current;
   }, [ready, placement]);
 
+  const onBatchHistory = useEffectEvent(syncBatchHistory);
   useEffect(() => {
     const refresh = () => setDraft(origin.editor.getText());
     refresh();
     return origin.editor.subscribe((event) => {
       if (event.type === "change") refresh();
+      if (event.type === "rangeHistory") onBatchHistory(event);
     });
   }, [origin]);
 
@@ -619,9 +722,75 @@ function Composer({
   }
 
   function close() {
+    if (temporary) {
+      setConfirmTemporaryClose(true);
+      return;
+    }
     persist();
     setPlacement(null);
     origin.editor.focus();
+  }
+
+  function finishTemporaryClose(confirmed: boolean) {
+    const finish = finishTabClose.current;
+    finishTabClose.current = null;
+    setConfirmTemporaryClose(false);
+    if (confirmed) {
+      onEndTemporary();
+      if (!finish) requestAnimationFrame(() => store.editor(tabId)?.focus());
+    }
+    finish?.(confirmed);
+  }
+
+  async function endTemporarySession() {
+    if (controller.current || checkingDisk.current || closingTemporary) return;
+    setClosingTemporary(true);
+    setTemporaryCleanupFailed(false);
+    try {
+      if (temporaryAgentCopy.current) await platform.writingTasks.removeTemporary(origin.id);
+      finishTemporaryClose(true);
+    } catch {
+      setTemporaryCleanupFailed(true);
+    } finally {
+      setClosingTemporary(false);
+    }
+  }
+
+  function openFocusedReview(returnToTab = tabId) {
+    returnTab.current = returnToTab;
+    reading.current ??= origin.editor.captureReadingPosition();
+    setFocusedReview(true);
+  }
+
+  const startFocusedReview = useEffectEvent(openFocusedReview);
+  useEffect(() => {
+    if (ready && reviewStart) startFocusedReview(reviewStart.returnToTab);
+  }, [ready, reviewStart]);
+
+  function closeFocusedReview(returnToOriginal = true) {
+    persist();
+    reading.current?.restore();
+    reading.current?.release();
+    reading.current = null;
+    setFocusedReview(false);
+    setPlacement(temporary && returnToOriginal ? "sidebar" : null);
+    if (returnToOriginal) {
+      const id = returnTab.current;
+      if (id !== tabId && store.getState().tabs.some((tab) => tab.id === id)) store.activate(id);
+      else origin.editor.focus();
+    }
+  }
+
+  async function switchReview({ id, path }: SavedReviewLink) {
+    const tasks = platform.writingTasks;
+    await writingTaskWrites(tasks);
+    const task = (await tasks.list(path, true)).find(
+      (task) => task.id === id && task.path === path,
+    );
+    if (!task) return false;
+    const result = await onOpenReview(task, returnTab.current);
+    if (result === true) closeFocusedReview(false);
+    return result;
   }
 
   function locate() {
@@ -638,16 +807,47 @@ function Composer({
     if (trackedSuggestions.current.delete(range)) range.release();
   }
 
+  function retrack(
+    suggestion: Suggestion,
+    range: TextRange,
+    options?: Parameters<MintEditor["trackRange"]>[1],
+  ) {
+    releaseRange(suggestion.range);
+    const tracked = origin.editor.trackRange(range, options);
+    trackedSuggestions.current.add(tracked);
+    return tracked;
+  }
+
+  function recordReversionDecision(ranges: readonly TrackedRange[], status: "reverted" | "kept") {
+    const decided = new Set(ranges);
+    setTurns((previous) =>
+      previous.map((turn) => ({
+        ...turn,
+        suggestions: turn.suggestions?.map((suggestion) =>
+          decided.has(suggestion.range) ? { ...suggestion, status } : suggestion,
+        ),
+      })),
+    );
+  }
+
+  function keepCurrent(range: TrackedRange) {
+    if (busy || checkingDisk.current || !trackedSuggestions.current.has(range)) return;
+    recordReversionDecision([range], "kept");
+  }
+
   function recordApplied(
     suggestion: Suggestion,
     range: TextRange,
     appliedText: string,
     before = suggestion.before,
   ): Suggestion {
-    releaseRange(suggestion.range);
-    const tracked = origin.editor.trackRange(range);
-    trackedSuggestions.current.add(tracked);
-    return { ...suggestion, range: tracked, appliedText, before, status: "applied" };
+    return {
+      ...suggestion,
+      range: retrack(suggestion, range),
+      appliedText,
+      before,
+      status: "applied",
+    };
   }
 
   async function applyDirectly(
@@ -683,11 +883,7 @@ function Composer({
     });
   }
 
-  async function revertDirect(
-    index: number,
-    suggestions: readonly Suggestion[],
-    compared?: string,
-  ) {
+  async function revertEdits(suggestions: readonly Suggestion[], compared?: string) {
     if (busy || checkingDisk.current) return;
     checkingDisk.current = true;
     try {
@@ -697,32 +893,37 @@ function Composer({
       }
       const live = origin.editor.getText();
       let needsComparison = false;
-      const replacements = suggestions.flatMap(({ id, status, appliedText, range, before }) => {
-        if (status !== "applied" || appliedText === undefined) return [];
+      const replacements: (TextRange & { text: string; range: TrackedRange })[] = [];
+      const laterEdits: TextRange[] = [];
+      // If two turns touched the same text, consider the latest edit first.
+      for (const suggestion of suggestions.toReversed()) {
+        const { appliedText, range, before } = suggestion;
+        if (!trackedSuggestions.current.has(range) || !isApplied(suggestion, live)) continue;
         const { from, to } = range.current();
-        const current = live.slice(from, to);
-        if (current === before) return [];
-        if (!range.hasBoundaries() || current !== (compared ?? appliedText)) {
+        const overlaps = laterEdits.some((other) =>
+          from === to || other.from === other.to
+            ? from <= other.to && other.from <= to
+            : from < other.to && other.from < to,
+        );
+        laterEdits.push({ from, to });
+        if (
+          !range.hasBoundaries() ||
+          live.slice(from, to) !== (compared ?? appliedText) ||
+          overlaps
+        ) {
           needsComparison = true;
-          return [];
+          continue;
         }
-        return [{ id, from, to, text: before }];
-      });
-      origin.editor.replaceRanges(replacements, { lineEndings: "preserve" });
-      const reverted = new Set(replacements.map(({ id }) => id));
-      for (const { id, range } of suggestions) if (reverted.has(id)) releaseRange(range);
-      setTurns((previous) =>
-        previous.map((turn, i) =>
-          i === index
-            ? {
-                ...turn,
-                suggestions: turn.suggestions?.map((suggestion) =>
-                  reverted.has(suggestion.id) ? { ...suggestion, status: "reverted" } : suggestion,
-                ),
-              }
-            : turn,
-        ),
-      );
+        replacements.push({ from, to, text: before, range });
+      }
+      if (replacements.length > 0) {
+        replacements.sort((left, right) => left.from - right.from);
+        origin.editor.replaceRanges(replacements, { lineEndings: "preserve" });
+        recordReversionDecision(
+          replacements.map(({ range }) => range),
+          "reverted",
+        );
+      }
       if (needsComparison) viewChanges();
       else if (isActive.current && placement === "inline") origin.editor.focus();
     } finally {
@@ -753,43 +954,138 @@ function Composer({
     );
   }
 
+  function updateBatch(updates: ReadonlyMap<Suggestion, Suggestion>) {
+    if (!updates.size) return;
+    setTurns((previous) =>
+      previous.map((turn) => ({
+        ...turn,
+        suggestions: turn.suggestions?.map((item) => updates.get(item) ?? item),
+      })),
+    );
+  }
+
+  function syncBatchHistory({
+    id,
+    direction,
+    ranges,
+  }: Extract<EditorEvent, { type: "rangeHistory" }>) {
+    const undoing = direction === "undo";
+    const draft = origin.editor.getText();
+    const updates = new Map<Suggestion, Suggestion>();
+    for (const turn of turns) {
+      for (const item of turn.suggestions ?? []) {
+        if (item.sectionBatch?.id !== id || item.status !== (undoing ? "applied" : "preview"))
+          continue;
+        const range = ranges[item.sectionBatch.index];
+        if (!range) continue;
+        updates.set(
+          item,
+          undoing
+            ? {
+                ...item,
+                range: retrack(item, range, proposedEditTracking),
+                status: "preview",
+                appliedText: undefined,
+              }
+            : recordApplied(item, range, draft.slice(range.from, range.to)),
+        );
+      }
+    }
+    updateBatch(updates);
+  }
+
   async function decide(
     index: number,
     position: number,
     suggestion: Suggestion,
     acceptedText?: string,
+    keepReviewFocus = false,
   ) {
-    if (busy || checkingDisk.current || suggestion.status !== "preview") return;
-    let update: Partial<Suggestion> = { status: "discarded" };
+    if (busy || checkingDisk.current || reviewStatus(suggestion, draft) !== "preview") return false;
+    let update: Partial<Suggestion> = {
+      status: "discarded",
+      batchApplied: false,
+      sectionBatch: undefined,
+    };
     if (acceptedText !== undefined) {
       checkingDisk.current = true;
       try {
-        if (!(await refreshDisk()) || !mounted.current || !suggestion.range.hasBoundaries()) return;
+        if (!(await refreshDisk()) || !mounted.current || !suggestion.range.hasBoundaries())
+          return false;
         const range = suggestion.range.current();
-        if (origin.editor.getText().slice(range.from, range.to) !== acceptedText) return;
-        update = { status: "applied" };
+        if (origin.editor.getText().slice(range.from, range.to) !== acceptedText) return false;
+        update = { status: "applied", batchApplied: false, sectionBatch: undefined };
         if (acceptedText !== suggestion.after) {
           const [inserted] = origin.editor.replaceRanges([{ ...range, text: suggestion.after }], {
             collapseSelection: range,
             lineEndings: "match",
           });
-          if (turns[index]?.direct && inserted) {
+          if (inserted) {
             const edited = origin.editor.getText();
             update = recordApplied(
-              suggestion,
+              { ...suggestion, batchApplied: false, sectionBatch: undefined },
               inserted,
               edited.slice(inserted.from, inserted.to),
               acceptedText,
             );
           }
         }
-        if (isActive.current) origin.editor.focus();
+        if (isActive.current && !keepReviewFocus) origin.editor.focus();
       } finally {
         checkingDisk.current = false;
       }
     }
-    releaseRange(suggestion.range);
     updateSuggestion(index, position, update);
+    return true;
+  }
+
+  async function acceptSection(entries: readonly ReviewEntry[]) {
+    if (busy || checkingDisk.current) return 0;
+    checkingDisk.current = true;
+    try {
+      if (!(await refreshDisk()) || !mounted.current || !reading.current) return 0;
+      const editor = origin.editor;
+      const live = editor.getText();
+      // A refresh can change the outline and invalidate the section chosen in the dialog.
+      if (live !== draft) return 0;
+      const eligible = entries.flatMap(({ turn, position, spansSections }) => {
+        const item = turns[turn]?.suggestions?.[position];
+        if (
+          !item ||
+          spansSections ||
+          item.note ||
+          reviewStatus(item, live) !== "preview" ||
+          !item.range.hasBoundaries() ||
+          currentText(item, live) !== item.before
+        )
+          return [];
+        return [{ ...item.range.current(), text: item.after, item }];
+      });
+      // Different replies can propose edits to the same passage. Leave overlapping
+      // proposals pending for individual comparison.
+      let end = -1;
+      eligible.sort((a, b) => a.from - b.from);
+      const replacements = eligible.filter(({ from, to }, index) => {
+        const overlapsEarlier = from < end || from === eligible[index - 1]?.from;
+        end = Math.max(end, to);
+        const next = eligible[index + 1]?.from;
+        return !overlapsEarlier && (next === undefined || (next >= to && next !== from));
+      });
+      const id = crypto.randomUUID();
+      const ranges = editor.replaceRanges(replacements, { lineEndings: "match", historyId: id });
+      const edited = editor.getText();
+      const updates = new Map<Suggestion, Suggestion>();
+      for (const [index, { item }] of replacements.entries()) {
+        const range = ranges[index];
+        if (!range) continue;
+        const applied = recordApplied(item, range, edited.slice(range.from, range.to));
+        updates.set(item, { ...applied, batchApplied: false, sectionBatch: { id, index } });
+      }
+      updateBatch(updates);
+      return updates.size;
+    } finally {
+      checkingDisk.current = false;
+    }
   }
 
   function reportSendError(problem: unknown) {
@@ -835,9 +1131,13 @@ function Composer({
     if (
       !instruction.trim() ||
       !recipient ||
+      !capacity.plan ||
       busy ||
       loading ||
       named.loading ||
+      named.unconfirmed ||
+      (named.hasImages && !vision?.verified) ||
+      (scope === "folder" && !searchFolder) ||
       checkingDisk.current
     )
       return;
@@ -860,21 +1160,12 @@ function Composer({
           ) ?? []),
         ])
       : [];
-    const draftSnapshot = sendDraft
-      ? { name, text: origin.editor.getText().replace(/^\uFEFF/, "") }
-      : undefined;
     const task: Task = {
+      plan: capacity.plan,
       request: {
         instruction: instruction.trim(),
-        selectedText,
-        taskContext:
-          draftSnapshot || named.materials.length || searchFolder
-            ? {
-                currentDraft: draftSnapshot,
-                materials: named.materials.length ? named.materials : undefined,
-                folderSearch: searchFolder ? true : undefined,
-              }
-            : undefined,
+        selectedText: capacity.plan.selectedText,
+        taskContext: capacity.plan.contexts[0],
         history: history.length ? history : undefined,
         responseFormat: action === "comment" ? undefined : "replacement",
       },
@@ -893,12 +1184,19 @@ function Composer({
 
   async function runTask(task: Task, connection: WritingRecipient, onSavedRequest?: () => void) {
     if (controller.current || checkingDisk.current) return false;
+    if (
+      hasTaskImages(...(task.plan?.contexts ?? [task.request.taskContext])) &&
+      !visionFor(connection)?.verified
+    ) {
+      setError("visionRequired");
+      return false;
+    }
     const running = new AbortController();
     const { signal } = running;
     controller.current = running;
     taskRunning.current = true;
     const recipient = labelFor(connection);
-    const entry = { task, recipientId: connection.id, recipient };
+    const entry = { id: crypto.randomUUID(), task, recipientId: connection.id, recipient };
     const submitted = {
       instruction: task.request.instruction,
       material: task.request.selectedText ?? task.request.taskContext?.currentDraft?.text,
@@ -912,13 +1210,16 @@ function Composer({
     let approved: NamedMaterial[] = [];
     let status: AttemptStatus;
     let finalReplacement: string | undefined;
+    let capacityRejected = false;
     setRetryId("");
     setError(null);
     setAttempt({ ...entry, approved, status: "working", partial: "" });
 
     const taskTitle = title || submitted.instruction;
     pending.current = submitted;
-    if (title) persist();
+    if (temporary) {
+      setTitle(taskTitle);
+    } else if (title) persist();
     else {
       try {
         const record = snapshot(taskTitle);
@@ -941,35 +1242,39 @@ function Composer({
       setSaveFailed(false);
       onSaved();
     }
-    onSavedRequest?.();
-
     let sentContext = submitted.context;
     try {
+      if (temporary && connection.kind === "agent") {
+        temporaryAgentCopy.current = true;
+        await platform.writingTasks.createTemporary(origin.id);
+      }
       const result = await materialRequests.send(
-        (outbound, options) => {
-          sentContext = outbound.taskContext;
-          pending.current = { ...submitted, context: sentContext };
-          persist(taskTitle);
-          return connection.send(outbound, options);
-        },
+        connection.send,
         task.request,
         recipient,
         task.searchFolder,
         {
           taskId: origin.id,
           signal,
-          onApproval: () => {
-            text = "";
+          plan: task.plan,
+          onContext: (context) => {
+            sentContext = context;
+            pending.current = { ...submitted, context };
+            persist(taskTitle);
+          },
+          onApproval: (completed) => {
+            text = completed;
             setAttempt({ ...entry, approved, status: "approval", partial: "" });
           },
-          onResume: (decision) => {
-            text = "";
+          onResume: (decision, completed) => {
+            text = completed;
             if (decision?.outcome === "allowed") approved = [...approved, decision.material];
-            if (!signal.aborted) setAttempt({ ...entry, approved, status: "working", partial: "" });
+            if (!signal.aborted)
+              setAttempt({ ...entry, approved, status: "working", partial: text });
           },
-          onDelta: (delta) => {
+          onProgress: (progress) => {
             if (signal.aborted) return;
-            text += delta;
+            text = progress;
             setAttempt({ ...entry, approved, status: "working", partial: text });
           },
         },
@@ -979,10 +1284,16 @@ function Composer({
       if (editing && status === "complete") finalReplacement = replacementFromReply(result);
     } catch (problem) {
       status = failureStatus(problem, signal);
-      if (mounted.current && status === "failed") reportSendError(problem);
+      capacityRejected = !signal.aborted && !!task.plan && isMaterialCapacityError(problem);
+      if (mounted.current) {
+        if (capacityRejected) capacity.reject(recipient);
+        else if (status === "failed") reportSendError(problem);
+      }
     }
     if (!mounted.current) return false;
 
+    if (!capacityRejected) onSavedRequest?.();
+    else if (onSavedRequest) setActionOverride(task.action);
     if (signal.aborted) status = "stopped";
     const canApplyDirectly =
       status === "complete" && task.action === "direct" && task.seen.size === 0;
@@ -1007,7 +1318,10 @@ function Composer({
             ? {
                 ...turn,
                 suggestions: turn.suggestions?.map((suggestion, position) => {
-                  if (position !== rewrite.position || suggestion.status !== "preview")
+                  if (
+                    position !== rewrite.position ||
+                    reviewStatus(suggestion, origin.editor.getText()) !== "preview"
+                  )
                     return suggestion;
                   if (
                     replacement !== undefined &&
@@ -1041,7 +1355,7 @@ function Composer({
     if (!mounted.current) return false;
     if (signal.aborted) status = "stopped";
     pending.current = undefined;
-    if (!rewrite || partial)
+    if (partial || (!rewrite && (!capacityRejected || replacement !== undefined)))
       setTurns((previous) => [
         ...previous,
         {
@@ -1054,7 +1368,15 @@ function Composer({
           partial,
         },
       ]);
-    setAttempt({ ...entry, approved, status, partial: "" });
+    else if (!rewrite) persist(taskTitle);
+    setAttempt({
+      ...entry,
+      approved,
+      status,
+      partial: "",
+      newDecisions: suggestions?.filter(({ status }) => status === "preview").length,
+      capacityRejected,
+    });
     controller.current = null;
     taskRunning.current = false;
     return status === "complete";
@@ -1075,6 +1397,12 @@ function Composer({
   const stop = () => controller.current?.abort();
   const status = attempt?.status;
   const sendingTo = attempt?.recipient;
+  const pendingApproval = materialRequests.pending;
+  const decisions = turns.reduce(
+    (total, turn) =>
+      total + (turn.suggestions?.filter(({ status }) => status === "preview").length ?? 0),
+    Number(!!pendingApproval),
+  );
   const materials = task
     ? [
         t(`writing.scope.${task.scope}`),
@@ -1087,11 +1415,26 @@ function Composer({
     () =>
       status && sendingTo
         ? {
+            id: origin.id,
+            tabId,
+            title: title || attempt.task.request.instruction,
             name,
+            folder: origin.folder,
             recipient: sendingTo,
             material: materials,
             status,
             count,
+            decisions,
+            background: !active || !placement,
+            notice: pendingApproval
+              ? {
+                  id: `${attempt.id}:approval:${pendingApproval.id}`,
+                  detail: pendingApproval.name,
+                  decisions: 1,
+                }
+              : status === "complete"
+                ? { id: attempt.id, decisions: attempt.newDecisions }
+                : undefined,
             stop:
               status === "working" || status === "approval"
                 ? () => controller.current?.abort()
@@ -1102,16 +1445,153 @@ function Composer({
             },
           }
         : null,
-    [count, materials, name, sendingTo, setPlacement, status, store, tabId],
+    [
+      active,
+      attempt,
+      count,
+      decisions,
+      materials,
+      name,
+      origin,
+      pendingApproval,
+      placement,
+      sendingTo,
+      setPlacement,
+      status,
+      store,
+      tabId,
+      title,
+    ],
   );
   useWritingTask(report);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: document edits can move section headings.
+  const sections = useMemo(() => {
+    if (!focusedReview) return [];
+    const parents: { level: number; text: string }[] = [];
+    return origin.editor.getOutline().map(({ level, text, from }, index) => {
+      while (parents.length && (parents.at(-1)?.level ?? 0) >= level) parents.pop();
+      parents.push({ level, text });
+      return { id: String(index), name: parents.map((heading) => heading.text).join(" › "), from };
+    });
+  }, [focusedReview, origin.editor, draft]);
 
-  const canRetry = attempt && !busy && attempt.status !== "complete";
+  const canRetry = attempt && !busy && !attempt.capacityRejected && attempt.status !== "complete";
   const sameConnection = canRetry && recipients.find(({ id }) => id === attempt.recipientId);
   const otherConnection = canRetry && recipients.find(({ id }) => id === retryId);
+  const retryHasImages =
+    !!canRetry &&
+    hasTaskImages(...(attempt.task.plan?.contexts ?? [attempt.task.request.taskContext]));
+  const sameVision = visionFor(sameConnection || undefined);
+  const otherVision = visionFor(otherConnection || undefined);
   if (!placement) return null;
   const sidebar = placement === "sidebar";
   const latest = turns.at(-1);
+  const closeLabel = t(temporary ? "writing.temporary.close" : "settings.close");
+  const closeConfirmation = confirmTemporaryClose && (
+    <TemporarySessionClose
+      busy={busy}
+      closing={closingTemporary}
+      failed={temporaryCleanupFailed}
+      onCancel={() => finishTemporaryClose(false)}
+      onReview={
+        !sidebar && latest?.suggestions?.length
+          ? () => {
+              finishTemporaryClose(false);
+              viewChanges();
+            }
+          : undefined
+      }
+      onConfirm={() => void endTemporarySession()}
+    />
+  );
+  if (focusedReview) {
+    const entries = turns
+      .flatMap((turn, index) =>
+        (turn.suggestions ?? []).map((suggestion, position): ReviewEntry & { from: number } => {
+          const { from, to } = suggestion.range.current();
+          const located = suggestion.range.hasBoundaries();
+          const sectionIndex = located
+            ? sections.findLastIndex((heading) => heading.from <= from)
+            : -1;
+          const section = sections[sectionIndex];
+          const nextSection = sections[sectionIndex + 1];
+          return {
+            key: `${index}:${suggestion.id}`,
+            turn: index,
+            position,
+            from,
+            before: suggestion.before,
+            after: suggestion.after,
+            current: currentText(suggestion, draft),
+            status: reviewStatus(suggestion, draft),
+            note: suggestion.note,
+            spansSections: located && nextSection !== undefined && to > nextSection.from,
+            section: section ?? {
+              id: located ? "intro" : "unlocated",
+              name: t(
+                !located
+                  ? "writing.review.unlocated"
+                  : sections.length
+                    ? "writing.review.intro"
+                    : "writing.scope.document",
+              ),
+            },
+            blocked: externalChange ? "disk" : !located ? "boundaries" : undefined,
+          };
+        }),
+      )
+      .sort((a, b) => a.from - b.from);
+    const review = (
+      <FocusedWritingReview
+        entries={entries}
+        file={name}
+        path={path}
+        folder={folder && (!path || isWithin(path, folder)) ? folder : path && parentPath(path)}
+        tasks={platform.writingTasks}
+        onOpenFile={switchReview}
+        initialSelection={reviewSelection}
+        onSelection={setReviewSelection}
+        onCompare={({ turn, position }) => {
+          const range = turns[turn]?.suggestions?.[position]?.range;
+          if (!range?.hasBoundaries()) return null;
+          const target = range.current();
+          const surrounding = origin.editor.getComparisonBlock(target);
+          if (!surrounding) return null;
+          return {
+            kind: surrounding.kind,
+            prefix: draft.slice(surrounding.from, target.from),
+            suffix: draft.slice(target.to, surrounding.to),
+          };
+        }}
+        source={showSource}
+        busy={busy}
+        onSource={setShowSource}
+        onLocate={({ turn, position }) => {
+          const range = turns[turn]?.suggestions?.[position]?.range;
+          if (range?.hasBoundaries()) {
+            const { from, to } = range.current();
+            origin.editor.setSelection({ anchor: from, head: to, scrollIntoView: "start" });
+          }
+        }}
+        onDecide={({ turn, position, current }, accept) => {
+          const suggestion = turns[turn]?.suggestions?.[position];
+          return suggestion
+            ? decide(turn, position, suggestion, accept ? current : undefined, true)
+            : Promise.resolve(false);
+        }}
+        onAcceptSection={acceptSection}
+        onRestore={({ turn, position }) => updateSuggestion(turn, position, { status: "preview" })}
+        onComment={({ turn, position }, note) => updateSuggestion(turn, position, { note })}
+        onClose={() => closeFocusedReview()}
+      />
+    );
+    return (
+      <>
+        {review}
+        {closeConfirmation}
+      </>
+    );
+  }
   if (
     !sidebar &&
     !busy &&
@@ -1121,7 +1601,7 @@ function Composer({
   ) {
     const { suggestions } = latest;
     const applied = suggestions.filter((suggestion) => isApplied(suggestion, draft)).length;
-    const pending = suggestions.filter(({ status }) => status === "preview").length;
+    const pending = suggestions.filter((item) => reviewStatus(item, draft) === "preview").length;
     const summary =
       pending === 0 && applied === 0
         ? t("writing.edit.noneApplied")
@@ -1137,23 +1617,30 @@ function Composer({
         <button type="button" className={buttonClass} onClick={viewChanges}>
           {t("writing.viewChanges")}
         </button>
+        {pending > 0 && (
+          <button type="button" className={buttonClass} onClick={() => openFocusedReview()}>
+            {t("writing.review.title")}
+          </button>
+        )}
         {applied > 0 && (
           <button
             type="button"
             className={buttonClass}
-            onClick={() => void revertDirect(turns.length - 1, suggestions)}
+            onClick={() => void revertEdits(suggestions)}
           >
             {t("writing.edit.undoDirect")}
           </button>
         )}
         <button type="button" className={buttonClass} onClick={close}>
-          {t("settings.close")}
+          {closeLabel}
         </button>
+        {closeConfirmation}
       </section>
     );
   }
   const Container = sidebar ? "aside" : "section";
   const messages = sidebar ? turns : turns.slice(-1);
+  const taskEdits = sidebar ? turns.flatMap((turn) => turn.suggestions ?? []) : [];
 
   function renderReplyExcerpt(reply: string, collapsed = false) {
     const actions = <ReplyExcerpt reply={reply} origin={origin} originId={tabId} />;
@@ -1174,13 +1661,7 @@ function Composer({
 
   function renderSentContext(context: TaskContext | undefined, searchFolder?: string) {
     if (!context) return null;
-    const materials = [
-      ...(context.currentDraft ? [context.currentDraft] : []),
-      ...(context.materials ?? []),
-      ...(context.materialDecisions ?? []).flatMap((decision) =>
-        decision.outcome === "allowed" ? [decision.material] : [],
-      ),
-    ];
+    const materials = contextMaterials(context);
     return (
       <fieldset className="space-y-1 rounded border border-(--mint-border) p-2 text-xs">
         <legend className="px-1">{t("writing.tasks.sentContext")}</legend>
@@ -1189,11 +1670,11 @@ function Composer({
             {t("writing.tasks.searchedFolder", { folder: searchFolder ?? "" })}
           </p>
         )}
-        {materials.map(({ name, text }, index) => (
+        {materials.map((material, index) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: A turn keeps its original material order, including duplicates.
-          <details key={`${index}:${name}`} className="wrap-anywhere">
-            <summary>{name}</summary>
-            <pre className="max-h-24 overflow-auto whitespace-pre-wrap">{text}</pre>
+          <details key={`${index}:${material.name}`} className="wrap-anywhere">
+            <summary>{materialLabel(material, t)}</summary>
+            <MaterialPreview material={material} />
           </details>
         ))}
         {context.materialDecisions?.map((decision) =>
@@ -1216,7 +1697,7 @@ function Composer({
           : "absolute right-3 bottom-3 max-h-[70%] w-[min(36rem,calc(100%-1.5rem))] rounded-lg shadow-lg"
       }`}
       onKeyDown={(event) => {
-        if (event.key === "Escape" && !event.nativeEvent.isComposing) {
+        if (event.key === "Escape" && !confirmTemporaryClose && !event.nativeEvent.isComposing) {
           event.stopPropagation();
           close();
         }
@@ -1232,26 +1713,43 @@ function Composer({
           {t(sidebar ? "writing.title" : "writing.ask")}
         </span>
         <div className="flex gap-2">
-          {title && (
-            <button type="button" className={buttonClass} disabled={busy} onClick={onTasks}>
+          {temporary && <span className="self-center text-xs">{t("writing.temporary.label")}</span>}
+          {title && !temporary && (
+            <button type="button" className={buttonClass} onClick={onTasks}>
               {t("writing.tasks")}
             </button>
           )}
           <button type="button" className={buttonClass} onClick={close}>
-            {t("settings.close")}
+            {closeLabel}
           </button>
         </div>
       </header>
       {sidebar && (
         <>
-          <span className="wrap-anywhere">{name}</span>
-          <button type="button" className={buttonClass} onClick={locate}>
-            {t("writing.locate")}
-          </button>
-          <pre className="max-h-24 overflow-auto whitespace-pre-wrap wrap-anywhere rounded bg-(--mint-hover) p-2">
-            {origin.text}
-          </pre>
+          <span className="wrap-anywhere">
+            {origin.folder ? t("writing.tasks.folder", { folder: origin.folder }) : name}
+          </span>
+          {!origin.folder && origin.text && (
+            <>
+              <button type="button" className={buttonClass} onClick={locate}>
+                {t("writing.locate")}
+              </button>
+              <pre className="max-h-24 overflow-auto whitespace-pre-wrap wrap-anywhere rounded bg-(--mint-hover) p-2">
+                {origin.text}
+              </pre>
+            </>
+          )}
         </>
+      )}
+      {taskEdits.some((suggestion) => isApplied(suggestion, draft)) && (
+        <button
+          type="button"
+          className={`${buttonClass} self-start`}
+          disabled={busy}
+          onClick={() => void revertEdits(taskEdits)}
+        >
+          {t("writing.edit.revertAll")}
+        </button>
       )}
       {sidebar && attempt && (
         <WritingTaskMaterials
@@ -1261,14 +1759,19 @@ function Composer({
         />
       )}
       {messages.some((turn) => turn.suggestions?.length) && (
-        <label className="flex items-center gap-1">
-          <input
-            type="checkbox"
-            checked={showSource}
-            onChange={(event) => setShowSource(event.target.checked)}
-          />
-          {t("writing.edit.source")}
-        </label>
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" className={buttonClass} onClick={() => openFocusedReview()}>
+            {t("writing.review.title")}
+          </button>
+          <label className="flex items-center gap-1">
+            <input
+              type="checkbox"
+              checked={showSource}
+              onChange={(event) => setShowSource(event.target.checked)}
+            />
+            {t("writing.edit.source")}
+          </label>
+        </div>
       )}
       <div aria-live="polite" className="space-y-2">
         {messages.map((turn, position) => {
@@ -1289,32 +1792,18 @@ function Composer({
                 </details>
               )}
               {sidebar && renderSentContext(turn.context, turn.searchFolder)}
-              {sidebar &&
-                turn.direct &&
-                suggestions?.some((suggestion) => isApplied(suggestion, draft)) && (
-                  <button
-                    type="button"
-                    className={buttonClass}
-                    disabled={busy}
-                    onClick={() => void revertDirect(index, suggestions)}
-                  >
-                    {t("writing.edit.undoDirect")}
-                  </button>
-                )}
               {suggestions?.length ? (
                 suggestions.map((suggestion, position) => {
-                  const pending = suggestion.status === "preview";
-                  const revertible = canRevert(suggestion);
+                  const status = reviewStatus(suggestion, draft);
+                  const pending = status === "preview";
+                  const revertible = !pending && canRevert(suggestion);
                   const current = pending || revertible ? currentText(suggestion, draft) : "";
                   const conflict = pending && current !== suggestion.before;
-                  const reverted = revertible && current === suggestion.before;
+                  const located = suggestion.range.hasBoundaries();
+                  const reverted = revertible && located && current === suggestion.before;
                   const revertConflict =
-                    revertible && !reverted && current !== suggestion.appliedText;
-                  const blocked = externalChange
-                    ? "disk"
-                    : !suggestion.range.hasBoundaries()
-                      ? "boundaries"
-                      : undefined;
+                    revertible && !reverted && (!located || current !== suggestion.appliedText);
+                  const blocked = externalChange ? "disk" : !located ? "boundaries" : undefined;
                   return (
                     <ProposedSelectionEdit
                       key={suggestion.id}
@@ -1324,19 +1813,26 @@ function Composer({
                       })}
                       before={suggestion.before}
                       after={suggestion.appliedText ?? suggestion.after}
-                      status={reverted ? "reverted" : suggestion.status}
-                      showAppliedComparison={turn.direct}
+                      status={reverted ? "reverted" : status}
+                      showAppliedComparison={revertible}
                       source={showSource}
                       current={conflict || revertConflict ? current : undefined}
                       blocked={pending || (revertible && !reverted) ? blocked : undefined}
                       busy={busy}
                       recipient={turn.recipient}
-                      conversation={suggestion.comments?.map(({ id, instruction, reply }) => (
-                        <div key={id} className="rounded bg-(--mint-hover) p-2">
-                          <p className="font-medium">{instruction}</p>
-                          {renderReplyExcerpt(reply)}
-                        </div>
-                      ))}
+                      conversation={
+                        <>
+                          {suggestion.note && (
+                            <p className="whitespace-pre-wrap wrap-anywhere">{suggestion.note}</p>
+                          )}
+                          {suggestion.comments?.map(({ id, instruction, reply }) => (
+                            <div key={id} className="rounded bg-(--mint-hover) p-2">
+                              <p className="font-medium">{instruction}</p>
+                              {renderReplyExcerpt(reply)}
+                            </div>
+                          ))}
+                        </>
+                      }
                       onApply={
                         blocked || !pending
                           ? undefined
@@ -1345,10 +1841,18 @@ function Composer({
                       onDiscard={
                         pending ? () => void decide(index, position, suggestion) : undefined
                       }
+                      onRestore={
+                        status === "discarded"
+                          ? () => updateSuggestion(index, position, { status: "preview" })
+                          : undefined
+                      }
                       onRevert={
                         revertible && !reverted && !blocked
-                          ? () => void revertDirect(index, [suggestion], current)
+                          ? () => void revertEdits([suggestion], current)
                           : undefined
+                      }
+                      onKeepCurrent={
+                        revertConflict ? () => keepCurrent(suggestion.range) : undefined
                       }
                       onRewrite={
                         blocked || !pending || !canRewrite
@@ -1366,6 +1870,13 @@ function Composer({
                   <p>{t("writing.task.partial")}</p>
                   <pre className="whitespace-pre-wrap wrap-anywhere">{turn.partial}</pre>
                 </div>
+              )}
+              {!!turn.sourcePassages?.length && (
+                <SourcePassageReview
+                  draft={turn.reply}
+                  passages={turn.sourcePassages}
+                  editor={turn.direct ? origin.editor : undefined}
+                />
               )}
               {!!turn.reply && renderReplyExcerpt(turn.reply, suggestions !== undefined)}
             </article>
@@ -1400,10 +1911,13 @@ function Composer({
       )}
       {canRetry && (
         <div className="flex flex-wrap items-end gap-2">
+          {retryHasImages && sameVision && !sameVision.verified && (
+            <VisionControl check={sameVision} />
+          )}
           <button
             type="button"
             className={buttonClass}
-            disabled={!sameConnection || busy}
+            disabled={!sameConnection || busy || (retryHasImages && !sameVision?.verified)}
             onClick={() => sameConnection && void runTask(attempt.task, sameConnection)}
           >
             {t("writing.task.retry")}
@@ -1436,10 +1950,20 @@ function Composer({
                     ))}
                 </select>
               </label>
+              {attempt.task.plan && otherConnection && (
+                <MaterialPlanPreview
+                  plan={attempt.task.plan}
+                  recipient={labelFor(otherConnection)}
+                />
+              )}
+              {retryHasImages && otherVision && <VisionControl check={otherVision} />}
+              {retryHasImages && otherConnection && !otherVision && (
+                <p role="alert">{t("materials.visionRequired")}</p>
+              )}
               <button
                 type="button"
                 className={buttonClass}
-                disabled={!otherConnection || busy}
+                disabled={!otherConnection || busy || (retryHasImages && !otherVision?.verified)}
                 onClick={() => otherConnection && void runTask(attempt.task, otherConnection)}
               >
                 {t("writing.task.retryOther")}
@@ -1449,10 +1973,18 @@ function Composer({
         </div>
       )}
       {error && (
-        <p role="alert">{t(error === "agentChanged" ? "agent.reviewAgain" : `writing.${error}`)}</p>
+        <p role="alert">
+          {t(
+            error === "agentChanged"
+              ? "agent.reviewAgain"
+              : error === "visionRequired"
+                ? "materials.visionRequired"
+                : `writing.${error}`,
+          )}
+        </p>
       )}
       {saveFailed && <p role="alert">{t("writing.tasks.saveFailed")}</p>}
-      {!sidebar && turns.length > 0 ? (
+      {!sidebar && turns.length > 0 && !attempt?.capacityRejected ? (
         <button
           type="button"
           className={`${buttonClass} self-start`}
@@ -1461,7 +1993,11 @@ function Composer({
           {t("writing.continue")}
         </button>
       ) : (
-        <form onSubmit={(event) => void submit(event)} className="space-y-2">
+        <form
+          onSubmit={(event) => void submit(event)}
+          onPaste={busy ? undefined : materialDropHandlers(named).onPaste}
+          className="space-y-2"
+        >
           <fieldset
             disabled={busy}
             className={materialRequests.pending ? "hidden" : "flex min-w-0 flex-col gap-2"}
@@ -1501,7 +2037,7 @@ function Composer({
                   value={scope}
                   onChange={(event) => setScope(event.target.value as Scope)}
                 >
-                  {scopes.map((id) => (
+                  {(origin.folder ? (["folder"] as const) : scopes).map((id) => (
                     <option key={id} value={id}>
                       {t(`writing.scope.${id}`)}
                     </option>
@@ -1545,17 +2081,30 @@ function Composer({
               </p>
             )}
             {loadFailed && <p role="alert">{t("writing.connectionsFailed")}</p>}
+            {!title && (
+              <label className="flex items-center gap-2 text-xs">
+                <input
+                  type="checkbox"
+                  checked={temporary}
+                  onChange={(event) => onTemporaryChange(event.target.checked)}
+                />
+                {t("writing.temporary.label")}
+              </label>
+            )}
             <TaskContextChecklist
               platform={platform}
               named={named}
               recipient={recipient && labelFor(recipient)}
+              vision={vision}
               selection={selectedText}
               draft={currentDraft}
               includeDraft={scope === "selection" ? setIncludeDraft : undefined}
-              folder={folder}
+              handlingFull={capacity.method === "full"}
+              folder={origin.folder && origin.folder !== folder ? null : folder}
               searchEnabled={!!searchFolder}
               onSearchChange={(checked) => setAllowedFolder(checked ? folder : null)}
             />
+            {capacity.controls}
             {turns.length > 0 && (
               <label className="flex items-start gap-2 text-xs">
                 <input
@@ -1570,7 +2119,16 @@ function Composer({
               <button
                 type="submit"
                 className={buttonClass}
-                disabled={!recipient || loading || !instruction.trim() || named.loading}
+                disabled={
+                  !recipient ||
+                  !capacity.plan ||
+                  loading ||
+                  !instruction.trim() ||
+                  named.loading ||
+                  named.unconfirmed ||
+                  (named.hasImages && !vision?.verified) ||
+                  (scope === "folder" && !searchFolder)
+                }
               >
                 {recipient
                   ? t("writing.sendAuthorized", {
@@ -1592,12 +2150,69 @@ function Composer({
           key={materialRequests.pending.id}
           pending={materialRequests.pending}
           platform={platform}
+          vision={visionFor(recipients.find(({ id }) => id === attempt?.recipientId))}
           onDecision={(decision) => {
             materialRequests.decide(decision);
             if (active && attempt?.task.action === "direct") origin.editor.focus();
           }}
         />
       )}
+      {closeConfirmation}
     </Container>
+  );
+}
+
+function TemporarySessionClose({
+  busy,
+  closing,
+  failed,
+  onCancel,
+  onReview,
+  onConfirm,
+}: {
+  readonly busy: boolean;
+  readonly closing: boolean;
+  readonly failed: boolean;
+  readonly onCancel: () => void;
+  readonly onReview?: () => void;
+  readonly onConfirm: () => void;
+}) {
+  const t = useT();
+  const { props, close } = useModalDialog(onCancel);
+  const description = useId();
+  return (
+    <dialog
+      {...props}
+      onCancel={(event) => {
+        if (closing) event.preventDefault();
+        else props.onCancel(event);
+      }}
+      aria-label={t("writing.temporary.close")}
+      aria-describedby={description}
+      className="m-auto max-h-[85vh] w-[min(28rem,90vw)] space-y-3 overflow-auto rounded-lg border border-(--mint-border) bg-(--mint-bg) p-4 text-(--mint-fg) backdrop:bg-black/30"
+    >
+      <h2 className="font-medium">{t("writing.temporary.close")}</h2>
+      <p id={description}>{t("writing.temporary.closePrompt")}</p>
+      {busy && <p>{t("writing.temporary.wait")}</p>}
+      {failed && <p role="alert">{t("writing.temporary.cleanupFailed")}</p>}
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className={buttonClass} disabled={closing} onClick={close}>
+          {t("unsaved.cancel")}
+        </button>
+        {onReview && (
+          <button type="button" className={buttonClass} disabled={closing} onClick={onReview}>
+            {t("writing.viewChanges")}
+          </button>
+        )}
+        <button
+          type="button"
+          className={buttonClass}
+          disabled={busy || closing}
+          onClick={onConfirm}
+        >
+          {t("writing.temporary.close")}
+        </button>
+      </div>
+    </dialog>
   );
 }

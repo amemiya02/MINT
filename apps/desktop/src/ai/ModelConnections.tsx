@@ -13,6 +13,23 @@ const presets = {
 } as const;
 type Preset = keyof typeof presets;
 
+const retentionPolicies: Readonly<
+  Record<string, { message: MessageKey; url: string } | undefined>
+> = {
+  "https://api.openai.com": {
+    message: "models.retention.openai",
+    url: "https://developers.openai.com/api/docs/guides/your-data",
+  },
+  "https://api.deepseek.com": {
+    message: "models.retention.deepseek",
+    url: "https://api-docs.deepseek.com/guides/kv_cache/",
+  },
+  "http://127.0.0.1:11434": {
+    message: "models.retention.ollama",
+    url: "https://docs.ollama.com/faq",
+  },
+};
+
 const fieldClass =
   "w-full rounded-md border border-(--mint-border) bg-(--mint-bg) px-2 py-1 focus-visible:outline-2 focus-visible:outline-(--mint-accent)";
 const buttonClass =
@@ -127,6 +144,7 @@ function ModelTrial({
   } catch {
     // The action stays disabled until the service address is valid.
   }
+  const retention = endpoint ? retentionPolicies[new URL(endpoint).origin] : undefined;
 
   function clearResult() {
     setPartial("");
@@ -306,9 +324,24 @@ function ModelTrial({
           {t("models.requestStreaming")}
         </label>
         {endpoint && (
-          <p className="wrap-anywhere text-xs text-(--mint-muted)">
-            {t("models.recipient", { endpoint })}
-          </p>
+          <>
+            <p className="wrap-anywhere text-xs text-(--mint-muted)">
+              {t("models.recipient", { endpoint })}
+            </p>
+            <details className="space-y-1 text-xs text-(--mint-muted)">
+              <summary>{t("models.retention")}</summary>
+              <p>{t(retention?.message ?? "models.retention.custom")}</p>
+              {retention && (
+                <button
+                  type="button"
+                  className="underline"
+                  onClick={() => void platform.openExternal(retention.url)}
+                >
+                  {t("models.retention.policy")}
+                </button>
+              )}
+            </details>
+          </>
         )}
         <div className="flex flex-wrap gap-2">
           <button type="submit" disabled={!canRun} className={buttonClass}>

@@ -4,17 +4,37 @@ import type { Platform } from "../platform/platform.ts";
 import { useTabStore } from "../tabs/context.ts";
 import { ExternalAgentAccessNotice } from "./ExternalAgentPanel.tsx";
 import { type ExternalAgent, externalAgentSender } from "./external-agent.ts";
+import {
+  type MaterialPlan,
+  MaterialPlanPreview,
+  useMaterialCapacity,
+} from "./MaterialCapacity.tsx";
 import { MaterialRequestNotice, useMaterialRequests } from "./MaterialRequest.tsx";
+import { useModelVision, VisionControl, type VisionTarget } from "./ModelVision.tsx";
 import { modelEndpoint, modelWritingSender, type SavedModelConnection } from "./model.ts";
-import { TaskContextChecklist, useNamedMaterials } from "./TaskContext.tsx";
+import { recordWritingResult } from "./record-writing-result.ts";
+import { SourcePassageReview } from "./SourcePassageReview.tsx";
+import {
+  draftText,
+  hasSourceMaterials,
+  readDraftPassages,
+  type SourcePassage,
+} from "./source-passages.ts";
+import { materialDropHandlers, TaskContextChecklist, useNamedMaterials } from "./TaskContext.tsx";
 import { useWritingTask, WritingTaskMaterials } from "./WritingTasks.tsx";
 import {
   type AttemptStatus,
   failureStatus,
+  isMaterialCapacityError,
   replyStatus,
   writingMaterialNames,
 } from "./writing-attempt.ts";
-import type { NamedMaterial, WritingRequest, WritingSender } from "./writing-sender.ts";
+import {
+  hasTaskImages,
+  type NamedMaterial,
+  type WritingRequest,
+  type WritingSender,
+} from "./writing-sender.ts";
 
 const field =
   "w-full rounded-md border border-(--mint-border) bg-(--mint-bg) px-2 py-1 focus-visible:outline-2 focus-visible:outline-(--mint-accent)";
@@ -25,19 +45,25 @@ interface DraftConnection {
   readonly id: string;
   readonly label: string;
   readonly send: WritingSender;
+  readonly visionTarget?: VisionTarget;
 }
 
 interface DraftTask {
+  readonly id: string;
+  readonly title: string;
   readonly request: WritingRequest;
+  readonly plan: MaterialPlan;
   readonly folder: string | null;
 }
 
 interface DraftAttempt {
+  readonly id: string;
   readonly task: DraftTask;
-  readonly connection: DraftConnection;
+  readonly connection: Omit<DraftConnection, "send">;
   readonly status: AttemptStatus;
   readonly partial: string;
   readonly approved: readonly NamedMaterial[];
+  readonly capacityRejected?: boolean;
 }
 
 export function DraftComposer({
@@ -59,13 +85,14 @@ export function DraftComposer({
   readonly settingsOpen: boolean;
   readonly canApplyDraft: () => boolean;
   readonly onDraft: (text: string) => boolean;
-  readonly onClose: () => void;
+  readonly onClose: (tabId: number) => void;
 }) {
   const t = useT();
   const id = useId();
   const input = useRef<HTMLInputElement>(null);
   const store = useTabStore();
   const controller = useRef<AbortController | null>(null);
+  const retryConnection = useRef<DraftConnection | null>(null);
   const mounted = useRef(true);
   const [collapsed, setCollapsed] = useState(false);
   const [attempt, setAttempt] = useState<DraftAttempt | null>(null);
@@ -81,6 +108,13 @@ export function DraftComposer({
   const busy = attempt?.status === "working" || attempt?.status === "approval";
   const [error, setError] = useState<MessageKey | null>(null);
   const [unapplied, setUnapplied] = useState("");
+  const [applied, setApplied] = useState<{
+    text: string;
+    passages: readonly SourcePassage[];
+  } | null>(null);
+  const appliedReply = applied?.text ?? "";
+  const [showAppliedReply, setShowAppliedReply] = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false);
   const named = useNamedMaterials();
   const [allowedFolder, setAllowedFolder] = useState<string | null>(null);
   const searchFolder = allowedFolder === folder ? folder : null;
@@ -103,6 +137,12 @@ export function DraftComposer({
         : endpoint
       : undefined;
 
+  const capacity = useMaterialCapacity({
+    recipient,
+    entries: named.entries,
+    folderSearch: !!searchFolder,
+  });
+
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -114,6 +154,16 @@ export function DraftComposer({
   useEffect(() => {
     if (store.getState().activeId === tabId && !collapsed && !settingsOpen) input.current?.focus();
   }, [collapsed, settingsOpen, store, tabId]);
+
+  useEffect(() => {
+    if (!appliedReply) return;
+    const editor = store.editor(tabId);
+    return editor?.subscribe(({ type }) => {
+      if (type !== "change") return;
+      const tab = store.getState().tabs.find(({ id }) => id === tabId);
+      if (tab?.path === null && editor.getText() === "") onClose(tabId);
+    });
+  }, [appliedReply, onClose, store, tabId]);
 
   useEffect(() => {
     if (settingsOpen) return;
@@ -144,9 +194,24 @@ export function DraftComposer({
     };
   }, [platform, settingsOpen]);
 
+  const checkVision = useModelVision(platform.sendModelMessage);
+  const inlineTarget: VisionTarget = useMemo(
+    () => ({ id: crypto.randomUUID(), connection: { address, model }, apiKey: key }),
+    [address, model, key],
+  );
+  const vision = checkVision(
+    remembered
+      ? { id: `model:${remembered.id}`, connection: { id: remembered.id } }
+      : custom && endpoint && model.trim()
+        ? inlineTarget
+        : undefined,
+  );
   const canSend =
     !!instruction.trim() &&
     !named.loading &&
+    !named.unconfirmed &&
+    (!named.hasImages || vision?.verified === true) &&
+    !!capacity.plan &&
     (!!agent || (!!endpoint && (!!remembered || (custom && !!model.trim()))));
 
   const connections: DraftConnection[] = [
@@ -157,6 +222,7 @@ export function DraftComposer({
         endpoint: modelEndpoint(item.address),
       }),
       send: modelWritingSender(platform.sendModelMessage, item),
+      visionTarget: { id: `model:${item.id}`, connection: { id: item.id } },
     })),
     ...agents.map((item) => ({
       id: `agent:${item.path}`,
@@ -167,7 +233,7 @@ export function DraftComposer({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy || !canSend || unapplied || !recipient) return;
+    if (busy || !canSend || unapplied || !recipient || !capacity.plan) return;
     if (!canApplyDraft()) {
       setError("draft.requiresEmptyUntitled");
       return;
@@ -176,21 +242,21 @@ export function DraftComposer({
       ? {
           id: "",
           label: recipient,
-          send: modelWritingSender(platform.sendModelMessage, { address, model }, { apiKey: key }),
+          send: modelWritingSender(platform.sendModelMessage, inlineTarget.connection, {
+            apiKey: key,
+          }),
+          visionTarget: inlineTarget,
         }
       : connections.find(({ id }) => id === choice);
     if (!connection) return;
     await runDraft(
       {
+        id: crypto.randomUUID(),
+        title: instruction.trim(),
+        plan: capacity.plan,
         request: {
           instruction: t("draft.prompt", { instruction: instruction.trim() }),
-          taskContext:
-            named.materials.length || searchFolder
-              ? {
-                  materials: named.materials.length ? named.materials : undefined,
-                  folderSearch: searchFolder ? true : undefined,
-                }
-              : undefined,
+          taskContext: capacity.plan.contexts[0],
         },
         folder: searchFolder,
       },
@@ -200,34 +266,66 @@ export function DraftComposer({
 
   async function runDraft(task: DraftTask, connection: DraftConnection) {
     if (controller.current) return;
+    if (hasTaskImages(...task.plan.contexts) && !checkVision(connection.visionTarget)?.verified) {
+      setError("materials.visionRequired");
+      return;
+    }
     const running = new AbortController();
     const { signal } = running;
     controller.current = running;
-    const entry = { task, connection };
+    retryConnection.current = connection;
+    const { id, label } = connection;
+    const entry = { id: crypto.randomUUID(), task, connection: { id, label } };
     let partial = "";
     let approved: NamedMaterial[] = [];
+    let sentContext = task.request.taskContext;
+    const passages: SourcePassage[] = [];
+    let nextOffset = 0;
+    let readingSources = false;
     let status: AttemptStatus;
+    let capacityRejected = false;
     setError(null);
     setRetryId("");
     setAttempt({ ...entry, approved, partial, status: "working" });
     try {
       const reply = await materialRequests.send(
-        connection.send,
+        (request, options) => {
+          readingSources = hasSourceMaterials(request.taskContext);
+          return connection.send(
+            { ...request, sourcePassages: readingSources ? true : undefined },
+            options,
+          );
+        },
         task.request,
         connection.label,
         task.folder,
         {
           signal,
-          onDelta(delta) {
+          plan: task.plan,
+          onContext(context) {
+            sentContext = context;
+          },
+          onProgress(text) {
             if (signal.aborted) return;
-            partial += delta;
+            partial = readingSources ? draftText(text) : text;
             setAttempt({ ...entry, approved, partial, status: "working" });
           },
-          onApproval() {
-            partial = "";
+          mapBatchReply(reply, context) {
+            if (replyStatus(reply) !== "complete")
+              return readingSources ? { ...reply, text: draftText(reply.text) } : reply;
+            const result = readDraftPassages(reply.text, context);
+            if (!result.text.trim()) throw "invalidReply";
+            for (const passage of result.passages)
+              passages.push({ ...passage, from: passage.from + nextOffset });
+            nextOffset += result.text.length + 2; // The sender joins completed batches with a blank line.
+            return { ...reply, text: result.text };
+          },
+          onApproval(text) {
+            partial = text;
             setAttempt({ ...entry, approved, partial, status: "approval" });
           },
-          onResume(decision) {
+          onResume(decision, text) {
+            partial = text;
             if (decision?.outcome === "allowed") approved = [...approved, decision.material];
             if (!signal.aborted) setAttempt({ ...entry, approved, partial, status: "working" });
           },
@@ -238,8 +336,31 @@ export function DraftComposer({
       partial = reply.text;
       if (status === "complete") {
         controller.current = null;
-        if (onDraft(reply.text)) {
-          onClose();
+        retryConnection.current = null;
+        setKey("");
+        const inserted = onDraft(reply.text);
+        recordWritingResult(platform.writingTasks, store, {
+          tabId,
+          id: task.id,
+          turn: {
+            instruction: task.title,
+            reply: reply.text,
+            context: sentContext,
+            searchFolder: task.folder ?? undefined,
+            recipient: connection.label,
+            recipientId: connection.id,
+            direct: inserted,
+            sourcePassages: passages.length ? passages : undefined,
+            status,
+          },
+          onError: () => {
+            if (mounted.current) setSaveFailed(true);
+          },
+        });
+        if (inserted) {
+          setApplied({ text: reply.text, passages });
+          setAttempt({ ...entry, approved, status, partial: "" });
+          if (store.getState().activeId === tabId) store.editor(tabId)?.focus();
           return;
         }
         setUnapplied(reply.text);
@@ -249,7 +370,9 @@ export function DraftComposer({
     } catch (error) {
       if (!mounted.current) return;
       status = failureStatus(error, signal);
-      if (status === "failed") {
+      capacityRejected = !signal.aborted && isMaterialCapacityError(error);
+      if (capacityRejected) capacity.reject(connection.label);
+      else if (status === "failed") {
         const code = error instanceof Error ? error.message : error;
         setError(
           code === "agentChanged" || code === "agentAccessRequired"
@@ -265,7 +388,7 @@ export function DraftComposer({
       const reply = { id: crypto.randomUUID(), text: partial };
       setPartials((previous) => [...previous, reply]);
     }
-    setAttempt({ ...entry, approved, status, partial: "" });
+    setAttempt({ ...entry, approved, status, partial: "", capacityRejected });
     controller.current = null;
   }
 
@@ -273,6 +396,9 @@ export function DraftComposer({
   const report = useMemo(
     () =>
       attempt && {
+        id: attempt.task.id,
+        tabId,
+        title: attempt.task.title,
         name,
         recipient: attempt.connection.label,
         material: [
@@ -283,28 +409,102 @@ export function DraftComposer({
         ].join(" · "),
         status: attempt.status,
         count: 0,
+        decisions: Number(!!pending || !!unapplied),
+        background: !active || collapsed,
+        notice: pending
+          ? { id: `${attempt.id}:approval:${pending.id}`, detail: pending.name, decisions: 1 }
+          : attempt.status === "complete"
+            ? { id: attempt.id, decisions: Number(!!unapplied) }
+            : undefined,
         stop: busy ? () => controller.current?.abort() : undefined,
+        forget: () => {
+          setAttempt(null);
+          setPartials([]);
+          setUnapplied("");
+          if (appliedReply) onClose(tabId);
+        },
         reveal: () => {
-          setCollapsed(false);
           store.activate(tabId);
+          setCollapsed(false);
+          if (appliedReply) setShowAppliedReply(true);
         },
       },
-    [attempt, busy, name, pending, store, t, tabId],
+    [
+      active,
+      appliedReply,
+      attempt,
+      busy,
+      collapsed,
+      name,
+      onClose,
+      pending,
+      store,
+      t,
+      tabId,
+      unapplied,
+    ],
   );
   useWritingTask(report);
 
   function close() {
-    if (!attempt || (!busy && attempt.status === "complete")) onClose();
+    if (!attempt || (!busy && attempt.status === "complete")) onClose(tabId);
     else {
       setCollapsed(true);
       if (active) store.editor(tabId)?.focus();
     }
   }
 
-  const retry = attempt && !busy && attempt.status !== "complete" ? attempt : null;
+  const retry =
+    attempt && !busy && !attempt.capacityRejected && retryConnection.current
+      ? { ...attempt, connection: retryConnection.current }
+      : null;
   const alternatives = retry ? connections.filter(({ id }) => id !== retry.connection.id) : [];
   const alternate = alternatives.find(({ id }) => id === retryId);
+  const retryHasImages = hasTaskImages(...(retry?.task.plan.contexts ?? []));
+  const alternateVision = checkVision(alternate?.visionTarget);
 
+  if (applied)
+    return (
+      <>
+        {applied.passages.length > 0 && (
+          <div className="max-h-[45%] shrink-0 overflow-auto border-b border-(--mint-border) px-4 py-2">
+            <SourcePassageReview
+              draft={applied.text}
+              passages={applied.passages}
+              editor={store.editor(tabId)}
+            />
+          </div>
+        )}
+        {showAppliedReply && (
+          <section
+            aria-label={t("command.file.draftWithAi")}
+            className="max-h-[70%] shrink-0 space-y-2 overflow-auto border-b border-(--mint-border) px-4 py-3 text-sm"
+          >
+            <header className="flex items-center justify-between gap-2">
+              <h2 className="font-medium">{attempt?.task.title}</h2>
+              <button
+                type="button"
+                className={button}
+                onClick={() => {
+                  setShowAppliedReply(false);
+                  store.editor(tabId)?.focus();
+                }}
+              >
+                {t("settings.close")}
+              </button>
+            </header>
+            <textarea
+              aria-label={t("writing.reply")}
+              className="block w-full resize-y rounded bg-(--mint-hover) p-2 font-mono focus-visible:outline-2 focus-visible:outline-(--mint-accent)"
+              readOnly
+              rows={3}
+              value={appliedReply}
+            />
+          </section>
+        )}
+        {saveFailed && <p role="alert">{t("writing.tasks.saveFailed")}</p>}
+      </>
+    );
   if (collapsed)
     return (
       active && (
@@ -322,6 +522,7 @@ export function DraftComposer({
     <form
       aria-labelledby={id}
       onSubmit={submit}
+      onPaste={busy ? undefined : materialDropHandlers(named).onPaste}
       className="max-h-[70%] shrink-0 space-y-2 overflow-auto border-b border-(--mint-border) px-4 py-3 text-sm"
     >
       <div className="flex items-center justify-between gap-2">
@@ -425,10 +626,13 @@ export function DraftComposer({
           named={named}
           emptyDraft
           recipient={recipient}
+          vision={vision}
+          handlingFull={capacity.method === "full"}
           folder={folder}
           searchEnabled={!!searchFolder}
           onSearchChange={(checked) => setAllowedFolder(checked ? folder : null)}
         />
+        {capacity.controls}
         {agent && (
           <details className="space-y-1 text-xs text-(--mint-muted)">
             <summary>
@@ -446,6 +650,7 @@ export function DraftComposer({
           key={materialRequests.pending.id}
           pending={materialRequests.pending}
           platform={platform}
+          vision={checkVision(retryConnection.current?.visionTarget)}
           onDecision={materialRequests.decide}
         />
       ) : (
@@ -490,10 +695,17 @@ export function DraftComposer({
                   ))}
                 </select>
               </label>
+              {alternate && (
+                <MaterialPlanPreview plan={retry.task.plan} recipient={alternate.label} />
+              )}
+              {retryHasImages && alternateVision && <VisionControl check={alternateVision} />}
+              {retryHasImages && alternate && !alternateVision && (
+                <p role="alert">{t("materials.visionRequired")}</p>
+              )}
               <button
                 type="button"
                 className={button}
-                disabled={!alternate}
+                disabled={!alternate || (retryHasImages && !alternateVision?.verified)}
                 onClick={() => alternate && void runDraft(retry.task, alternate)}
               >
                 {t("writing.task.retryOther")}
@@ -517,6 +729,7 @@ export function DraftComposer({
         </section>
       )}
       {error && <p role="alert">{t(error)}</p>}
+      {saveFailed && <p role="alert">{t("writing.tasks.saveFailed")}</p>}
       {unapplied && (
         <pre className="max-h-32 overflow-auto whitespace-pre-wrap wrap-anywhere">{unapplied}</pre>
       )}

@@ -77,6 +77,33 @@ struct TaskContext {
 struct NamedMaterial {
     name: String,
     text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    range: Option<MaterialRange>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    format: Option<TextMaterialFormat>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", tag = "kind", deny_unknown_fields)]
+enum MaterialRange {
+    Pdf {
+        page: u32,
+        pages: u32,
+    },
+    Image {
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
+    },
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum TextMaterialFormat {
+    ExtractedText,
+    Caption,
+    Summary,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -361,7 +388,7 @@ pub(crate) async fn send_external_agent(
             &current.path,
             access,
             &request,
-            scratch.path(),
+            &scratch,
             cli_paths(&app),
             &stopped,
             progress.as_ref(),
@@ -406,19 +433,22 @@ fn run_codex(
     path: &Path,
     access: AgentAccess,
     request: &WritingRequest,
-    scratch: &Path,
+    scratch: &crate::writing_tasks::AgentScratch,
     paths: Vec<PathBuf>,
     stopped: &AtomicBool,
     events: Option<&Channel<AgentEvent>>,
 ) -> Result<WritingReply, String> {
     let failed = || FAILED.to_owned();
     let input = serde_json::to_vec(request).map_err(|_| failed())?;
-    if request.instruction.trim().is_empty() || input.len() > MAX_INPUT {
+    if input.len() > MAX_INPUT {
+        return Err("materialCapacity".to_owned());
+    }
+    if request.instruction.trim().is_empty() {
         return Err(failed());
     }
-    let private = tempfile::tempdir().map_err(|_| failed())?;
+    let private = scratch.private_spool().map_err(|_| failed())?;
     // Independent offsets allow live reads. Keep the spool outside the Agent task copy.
-    let stdin = temporary_input(&input).map_err(|_| failed())?;
+    let stdin = temporary_input(&input, private.path()).map_err(|_| failed())?;
     let output = tempfile::NamedTempFile::new_in(private.path()).map_err(|_| failed())?;
     let stdout = output.reopen().map_err(|_| failed())?;
     let mut reader = BufReader::new(output.reopen().map_err(|_| failed())?);
@@ -453,7 +483,7 @@ fn run_codex(
     }
     let mut child = command
         .arg("-")
-        .current_dir(scratch)
+        .current_dir(scratch.path())
         .stdin(Stdio::from(stdin))
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::null())
@@ -554,9 +584,9 @@ impl AgentOutput {
     }
 }
 
-fn temporary_input(input: &[u8]) -> std::io::Result<File> {
+fn temporary_input(input: &[u8], directory: &Path) -> std::io::Result<File> {
     use std::io::Write;
-    let mut stdin = tempfile::tempfile()?;
+    let mut stdin = tempfile::tempfile_in(directory)?;
     stdin.write_all(input)?;
     stdin.rewind()?;
     Ok(stdin)

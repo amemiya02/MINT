@@ -10,6 +10,12 @@ import { basename, dirname, join, resolve } from "node:path";
 import { after, before, test } from "node:test";
 import { promisify } from "node:util";
 import JSZip from "jszip";
+import type { SavedWritingTask } from "../src/ai/writing-tasks.ts";
+import {
+  selectedPageText,
+  writingMaterialChart,
+  writingMaterialPdf,
+} from "../test-fixtures/writing-materials.ts";
 
 const driver = process.env.TAURI_DRIVER_URL ?? "http://127.0.0.1:4444";
 const application = process.env.MINT_APP;
@@ -23,6 +29,7 @@ const keys = {
   home: "\uE011",
   shift: "\uE008",
   enter: "\uE007",
+  escape: "\uE00C",
   tab: "\uE004",
 } as const;
 /** The element reference key of the WebDriver protocol. */
@@ -138,7 +145,7 @@ async function openSettings() {
 }
 
 /** WebDriver selects a real disk file directly on the WebView's upload control. */
-async function choosePackage(button: string, path: string) {
+async function chooseWebViewFile(button: string, path: string, owner = "dialog[open]") {
   await command("POST", `/session/${session}/execute/sync`, {
     script: `document.addEventListener('click', function intercept(event) {
       if (!event.target.matches?.('input[type=file]')) return;
@@ -150,7 +157,7 @@ async function choosePackage(button: string, path: string) {
   await click(button);
   const input = await command<Record<string, string>>("POST", `/session/${session}/element`, {
     using: "css selector",
-    value: "dialog[open] input[type=file]",
+    value: `${owner} input[type=file]`,
   });
   await command("POST", `/session/${session}/element/${input[elementKey]}/value`, { text: path });
 }
@@ -424,7 +431,7 @@ test("import a hidden Notion attachment and embed its granted bytes in a native 
     );
   };
   await chooseFormat("Notion import");
-  await choosePackage("Notion export (.zip)", archive);
+  await chooseWebViewFile("Notion export (.zip)", archive);
   await chooseNativePath("Import", "Choose the parent folder for the import", folder, "Open");
   await click("Open imported folder");
   await clickPath("//*[@role='treeitem' and @aria-label='Map.md']");
@@ -849,7 +856,7 @@ test("declining a plugin update keeps its native read grant and withholds its wr
   const upload = async (manifest: object) => {
     const path = join(dir, "smoke.mint.json");
     await writeFile(path, JSON.stringify(manifest));
-    await choosePackage("Install a MINT plugin file", path);
+    await chooseWebViewFile("Install a MINT plugin file", path);
   };
   const path = join(dir, "update.md");
   await writeFile(path, "plugin update draft");
@@ -1126,6 +1133,186 @@ test("only granted Zotero reads reach the local service and the chosen item is s
     assert.ok(requests > 0);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("native citation verification reads Zotero only after approval and edits only the manuscript", async () => {
+  const draft = join(dir, "verify-zotero-citation.md");
+  const original = "The ridge study (Rivera, 2019) covered the northern trail.";
+  const corrected =
+    "The ridge study ([Rivera, 2024](zotero://select/library/items/RIDGE123)) covered the northern trail.";
+  const instruction = "Verify and correct this citation, apply directly";
+  const material = [
+    "Title: Ridge study",
+    "Creators: Ana Rivera, Ridge Field Station",
+    "Date: 2024",
+    "Publication: Field Reports",
+    "DOI: 10.5555/ridge.2024",
+    "Zotero link: zotero://select/library/items/RIDGE123",
+  ].join("\n");
+  const libraryRequests: {
+    method?: string;
+    path: string;
+    query: Record<string, string>;
+    body: string;
+  }[] = [];
+  const modelRequests: { method?: string; url?: string; task: unknown }[] = [];
+  const library = createServer(async (request, response) => {
+    let body = "";
+    for await (const chunk of request) body += chunk;
+    const url = new URL(request.url ?? "/", "http://127.0.0.1:23119");
+    libraryRequests.push({
+      method: request.method,
+      path: url.pathname,
+      query: Object.fromEntries(url.searchParams),
+      body,
+    });
+    if (request.method !== "GET" || url.pathname !== "/api/users/0/items/top") {
+      response.writeHead(405).end();
+      return;
+    }
+    const ridge = {
+      key: "RIDGE123",
+      data: {
+        itemType: "journalArticle",
+        title: "Ridge study",
+        creators: [
+          { firstName: "Ana", lastName: "Rivera", creatorType: "author" },
+          { name: "Ridge Field Station", creatorType: "author" },
+        ],
+        date: "2024",
+        publicationTitle: "Field Reports",
+        DOI: "10.5555/ridge.2024",
+        abstractNote: "Private abstract",
+        tags: [{ tag: "Private tag" }],
+      },
+    };
+    const other = { key: "OTHER123", data: { itemType: "book", title: "Unrelated notes" } };
+    response
+      .writeHead(200, { "Content-Type": "application/json" })
+      .end(
+        JSON.stringify(url.searchParams.get("q") === "Rivera & Ridge" ? [ridge] : [ridge, other]),
+      );
+  });
+  const model = createServer(async (request, response) => {
+    let body = "";
+    for await (const chunk of request) body += chunk;
+    modelRequests.push({
+      method: request.method,
+      url: request.url,
+      task: JSON.parse(JSON.parse(body).messages.at(-1).content),
+    });
+    response.writeHead(200, { "Content-Type": "application/json" }).end(
+      JSON.stringify({
+        choices: [{ message: { content: `<replacement>${corrected}</replacement>` } }],
+      }),
+    );
+  });
+  try {
+    for (const [server, port] of [
+      [library, 23119],
+      [model, 0],
+    ] as const) {
+      await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(port, "127.0.0.1", resolve);
+      });
+    }
+    const address = model.address();
+    assert.ok(address && typeof address !== "string");
+    const endpoint = `http://127.0.0.1:${address.port}/v1/chat/completions`;
+    await writeFile(draft, `Field notes.\n\n${original}`);
+    await restart([draft]);
+    await openSettings();
+    await clickSettingsButton("Model connections");
+    for (const [label, value] of [
+      ["Connection name", "Zotero review fixture"],
+      ["API address", endpoint],
+      ["Model name", "zotero-review"],
+    ] as const) {
+      await clickPath(`//dialog[@open]//label[normalize-space(.)='${label}']/input`);
+      await keyActions(typing(value));
+    }
+    await clickSettingsButton("Use for this launch");
+    await shows("Zotero review fixture");
+    await clickSettingsButton("Close");
+    await waitForView(
+      "the citation manuscript to receive focus",
+      `return document.activeElement?.matches('.cm-content') &&
+        document.activeElement.textContent.includes(${JSON.stringify(original)});`,
+    );
+    await keyActions([...chord(keys.control, keys.end), ...chord(keys.shift, keys.home)]);
+    await click("Ask AI");
+    const assistant = "//section[@aria-label='Ask AI']";
+    const picker = `${assistant}//fieldset[@aria-label='Zotero (read only)']`;
+    const chooseZotero = () =>
+      clickPath(`${assistant}//button[normalize-space(.)='Add from Zotero']`);
+    await chooseZotero();
+    assert.deepEqual(libraryRequests, []);
+    await clickPath(`${picker}//button[normalize-space(.)='Deny access']`);
+    await waitForView(
+      "the Zotero picker to close on denial",
+      `return !document.querySelector('section[aria-label="Ask AI"] fieldset[aria-label="Zotero (read only)"]');`,
+    );
+    assert.deepEqual(libraryRequests, []);
+    assert.deepEqual(modelRequests, []);
+
+    await chooseZotero();
+    await clickPath(`${picker}//button[normalize-space(.)='Allow once']`);
+    await clickPath(`${picker}//input[@type='search']`);
+    await keyActions(typing("Rivera & Ridge"));
+    await clickPath(`${picker}//button[not(@disabled) and normalize-space(.)='Search']`);
+    await clickPath(`${picker}//button[normalize-space(.)='Ridge study']`);
+    const recipient = `Zotero review fixture · ${endpoint}`;
+    await waitForView(
+      "the selected Zotero fields, tool and writing recipient before sending",
+      `const context = document.querySelector('section[aria-label="Ask AI"] form fieldset fieldset');
+        return context?.innerText.includes(${JSON.stringify(recipient)}) &&
+          context.innerText.includes('Zotero (read only)') &&
+          [...context.querySelectorAll('pre')].some((card) => card.textContent === ${JSON.stringify(material)});`,
+    );
+    assert.deepEqual(modelRequests, []);
+    await clickPath(`${assistant}//form//input`);
+    await keyActions(typing(instruction));
+    const send = `Apply directly · Current selection · ${recipient}`;
+    await clickPath(
+      `${assistant}//button[@type='submit' and not(@disabled) and normalize-space(.)='${send}']`,
+    );
+    await waitForView(
+      "the citation revision in the native editor",
+      `return document.querySelector('.cm-content')?.textContent.includes('Rivera, 2024');`,
+    );
+    await nativeShortcut("ctrl+s");
+    await until(
+      "the corrected Markdown on disk",
+      async () => (await readFile(draft, "utf8")) === `Field notes.\n\n${corrected}` || null,
+    ).catch(explain);
+    assert.deepEqual(modelRequests, [
+      {
+        method: "POST",
+        url: "/v1/chat/completions",
+        task: {
+          instruction,
+          selectedText: original,
+          taskContext: { materials: [{ name: "Zotero · Ridge study", text: material }] },
+        },
+      },
+    ]);
+    const browse = {
+      method: "GET",
+      path: "/api/users/0/items/top",
+      query: { v: "3", limit: "51", sort: "title", direction: "asc", start: "0" },
+      body: "",
+    };
+    assert.deepEqual(libraryRequests, [
+      browse,
+      { ...browse, query: { ...browse.query, q: "Rivera & Ridge", qmode: "titleCreatorYear" } },
+    ]);
+  } finally {
+    for (const server of [library, model]) {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   }
 });
 
@@ -1471,14 +1658,10 @@ test("a native model receives only the sample or live selection and edits throug
       "only the independent direct edits to autosave with the original BOM and CRLF",
       async () => (await readFile(draft)).equals(mergedBytes) || null,
     ).catch(explain);
-    await click("View changes");
     await waitForView(
-      "the author's middle line to remain available for comparison",
-      `const conflict = document.querySelector('[aria-label="Proposed edit 2 of 3"]');
-       return conflict?.innerText.includes("Author's middle line.") &&
-         [...conflict.querySelectorAll('button')].some((button) => button.textContent.trim() === 'Apply to compared text');`,
+      "the author to retain editor focus after the direct edits",
+      "return document.activeElement?.matches('.cm-content');",
     );
-    await clickPath("//aside[@aria-label='Writing Assistant']//button[normalize-space(.)='Close']");
     await keyActions(chord(keys.control, "z"));
     await until(
       "one undo to autosave the precise author-edited baseline",
@@ -1489,13 +1672,20 @@ test("a native model receives only the sample or live selection and edits throug
       "redo to autosave the precise merged bytes",
       async () => (await readFile(draft)).equals(mergedBytes) || null,
     ).catch(explain);
-    await click("Resume conversation");
-    await click("View changes");
+    await clickPath(
+      "//section[@aria-label='Ask AI']//button[normalize-space(.)='Undo direct edits']",
+    );
+    await until(
+      "reverting from the completion notice to autosave the precise author-edited baseline",
+      async () => (await readFile(draft)).equals(authorBytes) || null,
+    ).catch(explain);
+    await clickPath("//section[@aria-label='Ask AI']//button[normalize-space(.)='View changes']");
+    await showsIn('[aria-label="Proposed edit 2 of 3"]', "Author's middle line.");
     await clickPath(
       "//fieldset[@aria-label='Proposed edit 2 of 3']//button[normalize-space(.)='Apply to compared text']",
     );
     const comparedBytes = Buffer.from(
-      mergedSource.replace("Author's middle line.", "Model's middle line."),
+      authorSource.replace("Author's middle line.", "Model's middle line."),
     );
     await until(
       "accepting the comparison to save the entire replacement with the original BOM and CRLF",
@@ -1504,8 +1694,8 @@ test("a native model receives only the sample or live selection and edits throug
     await clickPath("//aside[@aria-label='Writing Assistant']//button[normalize-space(.)='Close']");
     await keyActions(chord(keys.control, "z"));
     await until(
-      "one undo to restore the author's line and retain the independent direct edits",
-      async () => (await readFile(draft)).equals(mergedBytes) || null,
+      "one undo to restore the author's exact bytes after accepting the comparison",
+      async () => (await readFile(draft)).equals(authorBytes) || null,
     ).catch(explain);
 
     const reviewSource = "**Opening line.**\r\n\r\nKeep this.  \n\nClosing line.";
@@ -1540,6 +1730,11 @@ test("a native model receives only the sample or live selection and edits throug
       "the external change during generation",
       "return document.querySelector('.cm-content')?.textContent.includes('Disk closing.');",
     );
+    await nativeShortcut("ctrl+n");
+    await waitForView(
+      "the second document to have focus before the native model completes",
+      "return document.querySelector('[role=tab][aria-selected=true]')?.textContent === 'Untitled' && document.activeElement?.matches('.cm-content');",
+    );
     previewReply.writeHead(200, { "Content-Type": "application/json" }).end(
       JSON.stringify({
         choices: [
@@ -1552,6 +1747,16 @@ test("a native model receives only the sample or live selection and edits throug
           },
         ],
       }),
+    );
+    await waitForView(
+      "a passive completion notice while the second editor retains focus",
+      `const notice = document.querySelector('[aria-label="Writing task notifications"]');
+       return notice?.innerText.includes('2 decisions needed') &&
+         document.querySelector('[role=tab][aria-selected=true]')?.textContent === 'Untitled' &&
+         document.activeElement?.matches('.cm-content');`,
+    );
+    await clickPath(
+      "//section[@aria-label='Writing task notifications']//button[normalize-space(.)='Open task for ask-ai-model.md']",
     );
     await waitForView(
       "independent rendered proposals with the changed text compared",
@@ -1570,7 +1775,7 @@ test("a native model receives only the sample or live selection and edits throug
         (await readFile(draft, "utf8")) ===
           externallyEdited.replace("Opening line.", "Revised opening.") || null,
     ).catch(explain);
-    await clickPath("//section[@aria-label='Ask AI']//button[normalize-space(.)='Close']");
+    await clickPath("//aside[@aria-label='Writing Assistant']//button[normalize-space(.)='Close']");
     await keyActions(chord(keys.control, "z"));
     await until(
       "undo to preserve the external edit",
@@ -1580,7 +1785,7 @@ test("a native model receives only the sample or live selection and edits throug
     await keyActions(chord(keys.control, "a"));
     await askSelection(stopInstruction);
     await showsIn('section[aria-label="Ask AI"]', "Native partial text.");
-    await nativeShortcut("ctrl+n");
+    await clickPath("//*[@role='tab' and normalize-space(.)='Untitled']");
     await waitForView(
       "the second document to have focus during native streaming",
       "return document.querySelector('[role=tab][aria-selected=true]')?.textContent === 'Untitled' && document.activeElement?.matches('.cm-content');",
@@ -1629,12 +1834,23 @@ test("a native model receives only the sample or live selection and edits throug
 test("a saved writing review resumes after a native restart without contacting its model", async () => {
   const draft = join(dir, "resume-writing-review.md");
   const renamedDraft = join(dir, "renamed-writing-review.md");
-  const original = "First draft.\n\nSecond draft.\n\nThird draft.\n\nLast draft.";
-  const replacement = "First edit.\n\nSecond edit.\n\nThird edit.\n\nLast edit.";
-  const instruction = "Review all four passages.";
+  const original =
+    "# Methods\n\n| Group | Finding |\n| --- | --- |\n| Coast | First draft. |\n\nSecond draft.\n\nThird draft.\n\nFourth draft.\n\nFifth draft.\n\n# Results\n\nLast draft.";
+  const replacement = original.replaceAll("draft.", "edit.");
+  const instruction = "Review all six passages.";
   const excerpt = "The Tuesday field notes support the first passage.";
+  const note = "Check this with the interviewer.";
   const requests: { messages: { content: string }[] }[] = [];
   let connectionId: string | undefined;
+  const savedReviewWithPending = (count: number) =>
+    until(`the saved writing review to have ${count} pending decisions`, async () => {
+      const [task] = await invokeNative<SavedWritingTask[]>("list_writing_tasks", { path: draft });
+      if (!task) return null;
+      const suggestions = task.turns[0]?.suggestions;
+      return suggestions?.filter(({ status }) => status === "preview").length === count
+        ? task
+        : null;
+    }).catch(explain);
   await writeFile(draft, original);
   const endpoint = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
@@ -1693,39 +1909,120 @@ test("a saved writing review resumes after a native restart without contacting i
       "//section[@aria-label='Ask AI']//label[normalize-space(.)='Instruction']/input",
     );
     await keyActions([...typing(instruction), ...typing(keys.enter)]);
-    await clickPath(
-      "//fieldset[@aria-label='Proposed edit 1 of 4']//button[normalize-space(.)='Apply proposed edit']",
+    await waitForView(
+      "the review proposal to arrive",
+      "return [...document.querySelectorAll('button')].some(button => button.textContent.trim() === 'Review proposed edits');",
     );
-    await clickPath(
-      "//fieldset[@aria-label='Proposed edit 2 of 4']//button[normalize-space(.)='Dismiss proposed edit']",
+    await waitForView(
+      "the manuscript to be available before review",
+      "const editor = document.querySelector('.cm-content'); editor.focus(); return editor === document.activeElement;",
     );
+    await keyActions(chord(keys.control, keys.end));
+    await click("Review proposed edits");
+    const reviewRoot =
+      "document.querySelector('dialog[open][aria-label=\"Review proposed edits\"]')";
+    const focusedEdit = (number: number, type = "Replacement") =>
+      waitForView(
+        `proposal ${number} to receive keyboard focus`,
+        `return ${reviewRoot}?.querySelector('h3') === document.activeElement &&
+          document.activeElement.textContent.trim() === '${type} · Edit ${number} of 6';`,
+      );
+    const pressReviewButton = async (label: string) => {
+      for (let index = 0; index < 20; index++) {
+        await keyActions(typing(keys.tab));
+        const found = await command<boolean>("POST", `/session/${session}/execute/sync`, {
+          script: `return ${reviewRoot}?.contains(document.activeElement) &&
+            document.activeElement?.matches('button') &&
+            document.activeElement.textContent.trim() === arguments[0];`,
+          args: [label],
+        });
+        if (!found) continue;
+        await keyActions(typing(keys.enter));
+        return;
+      }
+      assert.fail(`could not reach ${label} by keyboard`);
+    };
+    await focusedEdit(1, "Table · Replacement");
+    await waitForView(
+      "both versions of the table to render in the native review",
+      `const review = ${reviewRoot};
+        return review?.querySelector('[aria-label="Removed text"] table')?.textContent.includes('First draft.') &&
+          review?.querySelector('[aria-label="Added text"] table')?.textContent.includes('First edit.');`,
+    );
+    await pressReviewButton("Apply proposed edit");
+    await focusedEdit(2);
+    await pressReviewButton("Dismiss proposed edit");
+    await focusedEdit(3);
+    await pressReviewButton("Leave comment");
+    await waitForView(
+      "the review comment to receive keyboard focus",
+      `return ${reviewRoot}?.querySelector('form input') === document.activeElement;`,
+    );
+    await keyActions([...typing(note), ...typing(keys.enter)]);
+    await focusedEdit(4);
+    await waitForView(
+      "Methods to report two remaining edits",
+      `const option = [...${reviewRoot}?.querySelectorAll('select option') ?? []]
+        .find(option => option.textContent.trim() === 'Methods · 2 pending of 5 edits');
+       if (!option) return false;
+       option.parentElement.value = option.value;
+       option.parentElement.dispatchEvent(new Event('change', { bubbles: true }));
+       return true;`,
+    );
+    await pressReviewButton("Accept remaining edits in Methods");
+    await shows("Accepted 2 edits.");
+    await keyActions(typing(keys.escape));
     assert.deepEqual(JSON.parse(requests[0]?.messages.at(-1)?.content ?? ""), {
       instruction,
       selectedText: original,
       taskContext: { materials: [{ name: "Pasted text", text: excerpt }] },
     });
     await waitForView(
-      "the manuscript caret to regain focus",
+      "the manuscript to regain focus at the original reading position",
       `
       const editor = document.querySelector('.cm-content');
-      editor?.focus();
-      return editor === document.activeElement;
+      const node = window.getSelection()?.focusNode;
+      const line = (node instanceof Element ? node : node?.parentElement)?.closest('.cm-line');
+      return editor === document.activeElement && line?.textContent === 'Last draft.';
     `,
     );
-    await keyActions(chord(keys.control, keys.end));
-    await clickPath("//section[@aria-label='Ask AI']//button[normalize-space(.)='Close']");
-    await nativeShortcut("ctrl+s");
     const accepted = original.replace("First draft.", "First edit.");
+    const batch = accepted
+      .replace("Fourth draft.", "Fourth edit.")
+      .replace("Fifth draft.", "Fifth edit.");
+    await nativeShortcut("ctrl+s");
     await until(
-      "the accepted text to reach disk",
+      "only the two remaining Methods edits to reach disk",
+      async () => (await readFile(draft)).equals(Buffer.from(batch)) || null,
+    ).catch(explain);
+    await savedReviewWithPending(2);
+    await keyActions(chord(keys.control, "z"));
+    await nativeShortcut("ctrl+s");
+    await until(
+      "one undo to restore both Methods edits and preserve the earlier acceptance",
       async () => (await readFile(draft, "utf8")) === accepted || null,
     ).catch(explain);
-    const history = await until("the accepted document history to be recorded", async () => {
-      const versions = await invokeNative<number[]>("list_versions", { path: draft });
-      return versions.length ? versions : null;
-    }).catch(explain);
-    const [review] = await invokeNative<unknown[]>("list_writing_tasks", { path: draft });
-    assert.ok(review);
+    const history = await until(
+      "the batch and its undo to be recorded in version history",
+      async () => {
+        const versions = await invokeNative<number[]>("list_versions", { path: draft });
+        const [batchId, undoId] = versions.slice(-2);
+        if (batchId === undefined || undoId === undefined) return null;
+        const savedBatch = await invokeNative<string>("read_version", { path: draft, id: batchId });
+        const savedUndo = await invokeNative<string>("read_version", { path: draft, id: undoId });
+        return savedBatch === batch && savedUndo === accepted ? versions : null;
+      },
+    ).catch(explain);
+    const review = await savedReviewWithPending(4);
+    const links = await invokeNative<{ id: string; path: string; title: string }[]>(
+      "list_writing_reviews_in_folder",
+      { folder: dirname(draft) },
+    );
+    assert.ok(
+      links.some(
+        (link) => link.id === review.id && link.path === draft && link.title === instruction,
+      ),
+    );
     await assert.rejects(
       invokeNative("update_writing_task", { task: review, expectedUpdatedAt: 0 }),
       /writing task changed/,
@@ -1741,20 +2038,25 @@ test("a saved writing review resumes after a native restart without contacting i
       "the saved decisions and only the changed proposal marked for comparison",
       `
       const pane = document.querySelector('aside[aria-label="Writing Assistant"]');
-      const field = index => pane?.querySelector('fieldset[aria-label="Proposed edit ' + index + ' of 4"]');
+      const field = index => pane?.querySelector('fieldset[aria-label="Proposed edit ' + index + ' of 6"]');
       const button = (index, label) => [...field(index)?.querySelectorAll('button') ?? []].some(el => el.textContent.trim() === label);
       return field(1)?.innerText.includes('Applied to the selected text.') &&
         field(2)?.innerText.includes('Proposed edit dismissed.') &&
-        field(3)?.innerText.includes('External third.') && button(3, 'Apply to compared text') &&
-        button(4, 'Apply proposed edit');
+        field(3)?.innerText.includes('External third.') &&
+        field(3)?.innerText.includes(${JSON.stringify(note)}) && button(3, 'Apply to compared text') &&
+        [4, 5, 6].every(index => button(index, 'Apply proposed edit'));
     `,
     );
     await clickPath(
       "//aside[@aria-label='Writing Assistant']//summary[normalize-space(.)='Pasted text']",
     );
     await showsIn('aside[aria-label="Writing Assistant"]', excerpt);
+    await clickPath(
+      "//aside[@aria-label='Writing Assistant']//button[normalize-space(.)='Review proposed edits']",
+    );
+    await focusedEdit(4);
+    await keyActions(typing(keys.escape));
     assert.equal(requests.length, 1);
-    await clickPath("//aside[@aria-label='Writing Assistant']//button[normalize-space(.)='Close']");
     await waitForView(
       "the saved reading position",
       `
@@ -1763,11 +2065,75 @@ test("a saved writing review resumes after a native restart without contacting i
       return line?.textContent === 'Last draft.';
     `,
     );
+    await nativeShortcut("ctrl+w");
+    await nativeShortcut("ctrl+n");
+    await nativeShortcut("ctrl+shift+p");
+    await waitForView(
+      "the Command Palette to receive focus",
+      `return document.activeElement?.matches('dialog[aria-label="Command Palette"] input');`,
+    );
+    await keyActions(typing("All writing tasks"));
+    await shows("All writing tasks");
+    await keyActions(typing(keys.enter));
+    await waitForView(
+      "the closed document's task and outstanding decisions in All writing tasks",
+      `const dialog = document.querySelector('dialog[aria-label="All writing tasks"]');
+       return [...dialog?.querySelectorAll('li') ?? []].some(row =>
+         row.innerText.includes(${JSON.stringify(instruction)}) &&
+         row.innerText.includes('renamed-writing-review.md') &&
+         row.innerText.includes('4 decisions needed'));`,
+    );
+    await clickPath(
+      `//dialog[@aria-label='All writing tasks']//button[normalize-space(.)='${instruction}']`,
+    );
+    await waitForView(
+      "the task to open its manuscript and saved review",
+      `return document.querySelector('[role=tab][aria-selected=true]')?.textContent.includes('renamed-writing-review.md') &&
+        !!document.querySelector('aside[aria-label="Writing Assistant"] [aria-label="Proposed edit 4 of 6"]');`,
+    );
+    assert.equal(requests.length, 1, "finding a task does not send another native model request");
     assert.equal(await readFile(renamedDraft, "utf8"), changed);
     assert.deepEqual(
       await invokeNative<number[]>("list_versions", { path: renamedDraft }),
       history,
     );
+    const second = "//fieldset[@aria-label='Proposed edit 2 of 6']";
+    await clickPath(`${second}//button[normalize-space(.)='Return to pending']`);
+    await waitForView(
+      "only the chosen dismissal to return to pending from the saved task",
+      `const pane = document.querySelector('aside[aria-label="Writing Assistant"]');
+       const edit = index => pane?.querySelector('fieldset[aria-label="Proposed edit ' + index + ' of 6"]');
+       return edit(1)?.innerText.includes('Applied to the selected text.') &&
+         [...edit(2)?.querySelectorAll('button') ?? []].some(el => el.textContent.trim() === 'Apply proposed edit') &&
+         edit(3)?.innerText.includes(${JSON.stringify(note)});`,
+    );
+    assert.equal(await readFile(renamedDraft, "utf8"), changed);
+    const overlapping = changed.replace("First edit.", "Author's first edit.");
+    await writeFile(renamedDraft, overlapping);
+    await waitForView(
+      "the later author edit to load from disk",
+      `return document.querySelector('.cm-content')?.textContent.includes("Author's first edit.");`,
+    );
+    await click("Open renamed-writing-review.md in other pane", "aria-label");
+    await click("Writing tasks");
+    await click(instruction);
+    const first = "//fieldset[@aria-label='Proposed edit 1 of 6']";
+    await clickPath(`${first}//button[normalize-space(.)='Revert to selected text']`);
+    await waitForView(
+      "both native panes to show the chosen reversion and preserve the external edit",
+      `const panes = [...document.querySelectorAll('.cm-content')];
+      return panes.length === 2 && panes.every(pane =>
+        pane.textContent.includes('First draft.') && pane.textContent.includes('External third.'));`,
+    );
+    await clickPath("//aside[@aria-label='Writing Assistant']//button[normalize-space(.)='Close']");
+    await nativeShortcut("ctrl+s");
+    await until(
+      "reverting an accepted proposal from the restored task to preserve the external edit",
+      async () =>
+        (await readFile(renamedDraft, "utf8")) === changed.replace("First edit.", "First draft.") ||
+        null,
+    ).catch(explain);
+    assert.equal(requests.length, 1);
   } finally {
     try {
       if (connectionId && session)
@@ -2103,7 +2469,13 @@ test("a native model reply stays editable and untitled until the author chooses 
   await writeFile(source, `${unapproved}\n${excerpt}\n`);
   const path = join(folder, "field-notes.md");
   const instruction = "Draft an introduction for the field notes.";
-  const generated = "Field notes from the ridge.";
+  const supported = "The north ridge is open again.";
+  const unsupported = "The south trail is open too.";
+  const generated = `${supported} ${unsupported}`;
+  const groundedReply = `${generated}\n\n<source-passages>\n${JSON.stringify([
+    { claim: supported, material: 2, quote: excerpt },
+    { claim: unsupported, material: 2, quote: unapproved },
+  ])}\n</source-passages>`;
   const requests: {
     path: string | undefined;
     method: string | undefined;
@@ -2129,7 +2501,7 @@ test("a native model reply stays editable and untitled until the author chooses 
               query: "north ridge reopened",
             },
           })
-        : generated;
+        : groundedReply;
     response.end(JSON.stringify({ choices: [{ message: { content }, finish_reason: "stop" }] }));
   });
 
@@ -2188,6 +2560,20 @@ test("a native model reply stays editable and untitled until the author chooses 
     await until("the generated Markdown in the untitled editor", () =>
       draftMatches(generated),
     ).catch(explain);
+    const sourceReview = '//section[@aria-label="Source passages"]';
+    const chooseClaim = `${sourceReview}//button[normalize-space(.)='${supported}']`;
+    await clickPath(chooseClaim);
+    await waitForView(
+      "the approved original passage and the unverified conclusion",
+      `const review = document.querySelector('section[aria-label="Source passages"]');
+        const passage = review?.querySelector('section[aria-label="Excerpt used for this draft"]');
+        return passage?.querySelector('blockquote')?.textContent === ${JSON.stringify(excerpt)} &&
+          passage?.textContent.includes('field-log.md · line 2') &&
+          [...review.querySelectorAll('li')].some((line) =>
+            line.textContent.includes(${JSON.stringify(unsupported)}) &&
+            line.textContent.includes('Needs verification')) &&
+          !review.textContent.includes(${JSON.stringify(unapproved)});`,
+    );
     assert.equal(requests.length, 2);
     const initialContext = {
       materials: [{ name: "Pasted text", text: "Field notes are for the visitor bulletin." }],
@@ -2199,6 +2585,11 @@ test("a native model reply stays editable and untitled until the author chooses 
       assert.equal(request.authorization, "Bearer draft-fixture-secret");
       assert.equal(request.body.model, "native-draft-fixture");
       assert.equal(request.body.stream, true);
+      assert.ok(
+        request.body.messages.some(
+          ({ role, content }) => role === "system" && content.includes("<source-passages>"),
+        ),
+      );
       assert.deepEqual(JSON.parse(request.body.messages.at(-1)?.content ?? ""), {
         instruction: `Write a Markdown draft following this instruction. Return only the draft text, without a surrounding code fence.\n\n${instruction}`,
         taskContext:
@@ -2238,6 +2629,28 @@ test("a native model reply stays editable and untitled until the author chooses 
     await until("the author's addition in the draft", () => draftMatches(edited)).catch(explain);
     await saveWith("Save");
     assert.equal(await until("the saved draft", () => readFile(path, "utf8")), edited);
+    const saved = await until("the draft task to follow the native Save As path", async () => {
+      const tasks = await invokeNative<SavedWritingTask[]>("list_writing_tasks", { path });
+      return tasks.find((task) => task.title === instruction) ?? null;
+    });
+    assert.equal(saved.turns[0]?.reply, generated);
+    assert.deepEqual(saved.turns[0]?.sourcePassages, [
+      {
+        from: 0,
+        claim: supported,
+        excerpts: [{ name: "field-log.md · line 2", quote: excerpt, line: 1 }],
+      },
+      { from: supported.length + 1, claim: unsupported, excerpts: [] },
+    ]);
+    assert.ok(!JSON.stringify(saved).includes("draft-fixture-secret"));
+    await clickPath(`${sourceReview}//button[normalize-space(.)='Insert Markdown citation']`);
+    await nativeShortcut("ctrl+s");
+    const cited = `${supported}[^mint-source-1] ${unsupported} Author's addition.\n\n[^mint-source-1]: field-log.md · line 2, line 1 of sent material. “${excerpt}”\n`;
+    await until(
+      "only the requested citation to be added to the native manuscript",
+      async () => (await readFile(path, "utf8")) === cited || null,
+    );
+    assert.equal(requests.length, 2);
   } finally {
     endpoint.closeAllConnections();
     await new Promise<void>((resolve) => endpoint.close(() => resolve()));
@@ -2251,6 +2664,230 @@ async function addPastedWritingMaterial(text: string) {
   await keyActions(typing(text));
   await clickPath("//form//button[normalize-space(.)='Add pasted text']");
 }
+
+test("native writing sends only the approved excerpt after a model capacity error", async () => {
+  const publicLine = "Ridge is open.\n";
+  const privateLine = "Private ranger contact details.";
+  const received: { name: string; text: string }[][] = [];
+  const endpoint = createServer(async (request, response) => {
+    let body = "";
+    for await (const chunk of request) body += chunk;
+    const { taskContext } = JSON.parse(JSON.parse(body).messages.at(-1).content);
+    const materials = taskContext.materials as (typeof received)[number];
+    received.push(materials);
+    const oversized = Buffer.byteLength(materials.map(({ text }) => text).join("")) > 16;
+    response.writeHead(oversized ? 400 : 200, { "Content-Type": "application/json" });
+    response.end(
+      JSON.stringify(
+        oversized
+          ? { error: { code: "context_length_exceeded" } }
+          : { choices: [{ message: { content: "Ridge bulletin." }, finish_reason: "stop" }] },
+      ),
+    );
+  });
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      endpoint.once("error", reject);
+      endpoint.listen(0, "127.0.0.1", resolve);
+    });
+    const address = endpoint.address();
+    assert.ok(address && typeof address !== "string");
+    const model = `http://127.0.0.1:${address.port}/v1`;
+    await restart([document]);
+    await nativeShortcut("ctrl+n");
+    await click("Draft with AI");
+    for (const [label, value] of [
+      ["API address", model],
+      ["Model name", "bounded-native-fixture"],
+      ["Drafting instruction", "Write a ridge bulletin."],
+    ] as const) {
+      await clickPath(`//form//label[normalize-space(.)='${label}']/input`);
+      await keyActions(typing(value));
+    }
+    await clickPath("//form//summary[normalize-space(.)='Add files or paste text']");
+    await clickPath("//form//label[normalize-space(.)='Pasted material']/textarea");
+    await keyActions([
+      ...typing(publicLine.trimEnd()),
+      ...typing(keys.enter),
+      ...typing(privateLine),
+    ]);
+    await click("Add pasted text");
+    await clickPath("//form//button[not(@disabled) and normalize-space(.)='Generate draft']");
+    await waitForView(
+      "the capacity rejection in the draft form",
+      `return [...document.querySelectorAll('form [role="alert"]')].some((notice) =>
+        notice.textContent.includes("The recipient rejected the material because of its capacity."));`,
+    );
+    assert.deepEqual(received, [[{ name: "Pasted text", text: publicLine + privateLine }]]);
+
+    await clickPath("//form//label[normalize-space(.)='Material limit (UTF-8 bytes)']/input");
+    await keyActions(typing("16"));
+    await waitForView(
+      "the excerpt method to be selected",
+      `const option = document.querySelector('form select option[value="excerpt"]');
+        if (!option || !option.parentElement) return false;
+        option.parentElement.value = option.value;
+        option.parentElement.dispatchEvent(new Event("change", { bubbles: true }));
+        return true;`,
+    );
+    await clickPath("//form//label[normalize-space(.)='Last line']/input");
+    await keyActions(typing("1"));
+    await waitForView(
+      "the exact excerpt and loopback recipient before sending",
+      `const plan = document.querySelector('section[aria-label="Material send plan"]');
+        return plan?.innerText.includes("Excerpt · ${model}/chat/completions") &&
+          plan.innerText.includes("Pasted text · lines 1–1") &&
+          !plan.textContent.includes("Private ranger contact details.");`,
+    );
+    assert.equal(received.length, 1);
+    await clickPath("//form//button[not(@disabled) and normalize-space(.)='Generate draft']");
+    await waitForView(
+      "the response to appear in the untitled editor",
+      `return [...document.querySelectorAll('[role=tabpanel]:not([hidden]) .cm-content')]
+        .some((editor) => editor.textContent === "Ridge bulletin.");`,
+    );
+    assert.deepEqual(received.slice(1), [[{ name: "Pasted text · lines 1–1", text: publicLine }]]);
+  } finally {
+    endpoint.closeAllConnections();
+    await new Promise<void>((resolve) => endpoint.close(() => resolve()));
+  }
+});
+
+test("a native first model receives the selected PDF page and image crop as inline PNGs", async () => {
+  const folder = await mkdtemp(join(dir, "material-ranges-"));
+  const pdf = join(folder, "field-notes.pdf");
+  const chart = join(folder, "chart.png");
+  await writeFile(pdf, writingMaterialPdf());
+  await writeFile(chart, Buffer.from(writingMaterialChart, "base64"));
+  const instruction = "Describe the marked evidence.";
+  const generated = "The selected chart region is blue.";
+  type Part = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
+  const received: { path?: string; model: string; content: Part[] }[] = [];
+  const endpoint = createServer(async (request, response) => {
+    let body = "";
+    for await (const chunk of request) body += chunk;
+    const { model, messages } = JSON.parse(body);
+    received.push({ path: request.url, model, content: messages.at(-1).content });
+    const content = received.length === 1 ? "green,yellow" : generated;
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ choices: [{ message: { content }, finish_reason: "stop" }] }));
+  });
+
+  async function fillMaterial(label: string, value: string) {
+    await clickPath(`//form//label[normalize-space(text()[1])='${label}']/input`);
+    await keyActions([...chord(keys.control, "a"), ...typing(value)]);
+  }
+
+  async function acceptVisual(name: string) {
+    await waitForView(
+      `image pixels to be available for ${name}`,
+      `const fieldset = [...document.querySelectorAll('form fieldset')]
+        .find(group => group.querySelector(':scope > legend')?.textContent === ${JSON.stringify(name)});
+        const option = fieldset?.querySelector('option[value=image]:enabled');
+        if (!option) return false;
+        option.parentElement.value = 'image';
+        option.parentElement.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;`,
+    );
+    await clickPath(
+      `//form//fieldset[legend[normalize-space(.)='${name}']]//button[not(@disabled) and normalize-space(.)='Use selected material']`,
+    );
+  }
+
+  async function sentPixel(url: string, x: number, y: number) {
+    assert.match(url, /^data:image\/png;base64,/);
+    const result = await command<number[] | null>("POST", `/session/${session}/execute/async`, {
+      script: `const [url, x, y, done] = arguments;
+        const image = new Image();
+        image.onerror = () => done(null);
+        image.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = image.width;
+          canvas.height = image.height;
+          const drawing = canvas.getContext('2d');
+          drawing.drawImage(image, 0, 0);
+          done([image.width, image.height, ...drawing.getImageData(x, y, 1, 1).data]);
+        };
+        image.src = url;`,
+      args: [url, x, y],
+    });
+    assert.ok(result, "the transmitted PNG decodes");
+    return result;
+  }
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      endpoint.once("error", reject);
+      endpoint.listen(0, "127.0.0.1", resolve);
+    });
+    const address = endpoint.address();
+    assert.ok(address && typeof address !== "string");
+    await restart([document]);
+    await nativeShortcut("ctrl+n");
+    await click("Draft with AI");
+    for (const [label, value] of [
+      ["API address", `http://127.0.0.1:${address.port}/v1`],
+      ["Model name", "native-vision-fixture"],
+      ["Drafting instruction", instruction],
+    ] as const) {
+      await clickPath(`//form//label[normalize-space(.)='${label}']/input`);
+      await keyActions(typing(value));
+    }
+    await clickPath("//form//summary[normalize-space(.)='Add files or paste text']");
+    await chooseWebViewFile("Choose material file", pdf, "body");
+    await chooseWebViewFile("Choose material file", chart, "body");
+    await fillMaterial("PDF page", "2");
+    await fillMaterial("Left (px)", "5");
+    await fillMaterial("Top (px)", "1");
+    await fillMaterial("Width (px)", "2");
+    await fillMaterial("Height (px)", "2");
+    assert.equal(received.length, 0, "selecting ranges performs no model requests");
+    await click("Check image support");
+    await waitForView(
+      "the preview model's verified image support",
+      "return document.querySelector('form')?.innerText.includes('Image support verified');",
+    );
+    assert.equal(received.length, 1);
+    assert.doesNotMatch(JSON.stringify(received[0]), /field-notes|chart\.png|marked evidence/);
+    await acceptVisual("field-notes.pdf");
+    await acceptVisual("chart.png");
+    await waitForView(
+      "the exact page and crop in the native draft send list",
+      `const list = document.querySelector('form')?.innerText;
+        return list?.includes('field-notes.pdf · Page 2 of 2 · Image pixels') &&
+          list.includes('chart.png · x 5, y 1 · 2 × 2 px · Image pixels');`,
+    );
+    await clickPath("//form//button[not(@disabled) and normalize-space(.)='Generate draft']");
+    await waitForView(
+      "the visual model response in the untitled editor",
+      `return document.querySelector('[role=tabpanel]:not([hidden]) .cm-content')?.textContent === ${JSON.stringify(generated)};`,
+    );
+    assert.equal(received.length, 2);
+    const request = received[1];
+    assert.equal(request?.path, "/v1/chat/completions");
+    assert.equal(request?.model, "native-vision-fixture");
+    assert.equal(request?.content.length, 3);
+    const [prompt, pageImage, cropImage] = request?.content ?? [];
+    assert.ok(
+      prompt?.type === "text" && pageImage?.type === "image_url" && cropImage?.type === "image_url",
+    );
+    assert.deepEqual(JSON.parse(prompt.text).taskContext.materials, [
+      { name: "field-notes.pdf", range: { kind: "pdf", page: 2, pages: 2 }, format: "image" },
+      {
+        name: "chart.png",
+        range: { kind: "image", x: 5, y: 1, width: 2, height: 2 },
+        format: "image",
+      },
+    ]);
+    assert.deepEqual(await sentPixel(pageImage.image_url.url, 4, 155), [640, 160, 0, 255, 0, 255]);
+    assert.deepEqual(await sentPixel(cropImage.image_url.url, 0, 0), [2, 2, 0, 0, 255, 255]);
+  } finally {
+    endpoint.closeAllConnections();
+    await new Promise<void>((resolve) => endpoint.close(() => resolve()));
+    await rm(folder, { recursive: true, force: true });
+  }
+});
 
 const credentialPolicy = process.env.MINT_SMOKE_CREDENTIAL_POLICY;
 test("model keys survive a restart only when remembered and disconnect removes the OS credential", {
@@ -2536,6 +3173,8 @@ test("external Agent consent gates a real CLI process and keeps the manuscript o
   const executable = join(fixture, "fixture-codex");
   const calls = join(fixture, "calls.jsonl");
   const cancelInstruction = "Generate a reply I can stop.";
+  const temporaryInstruction = "Shorten this privately, apply directly";
+  const privateMaterial = "A confidential interview excerpt for the temporary session.";
   const writeTarget = join(fixture, "agent-write.txt");
   const initial = "Unsent paragraph.\n\nOn-disk sentence.";
   const configuredAccessNotice = "Configured file access may include writes across your account.";
@@ -2551,13 +3190,19 @@ const readable = fs.readFileSync(${JSON.stringify(draft)}, "utf8");
 fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify({
   args, prompt, pid: process.pid, cwd: process.cwd(), entries: fs.readdirSync(process.cwd()), readable,
 }) + "\\n");
-if (prompt.instruction === "Is the selected line clear?") fs.writeFileSync("review-copy.md", prompt.selectedText);
+if (prompt.instruction.startsWith("Is the selected line clear?")) fs.writeFileSync("review-copy.md", prompt.selectedText);
+if (prompt.instruction.startsWith(${JSON.stringify(temporaryInstruction)})) {
+  const copy = require("node:path").join(process.cwd(), "..", "retained-task-copy.md");
+  fs.writeFileSync(copy, prompt.taskContext.materials[0].text);
+}
 if (!readOnly) fs.writeFileSync(${JSON.stringify(writeTarget)}, "configured access ran");
 if (prompt.instruction === ${JSON.stringify(cancelInstruction)}) {
   console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "Partial Agent reply." } }));
   setInterval(() => {}, 1000);
 } else {
-  const text = prompt.annotationBatch
+  const text = prompt.instruction.startsWith(${JSON.stringify(temporaryInstruction)})
+    ? "<replacement>Short sentence.</replacement>"
+    : prompt.annotationBatch
     ? JSON.stringify({ results: prompt.annotationBatch.map(({ id }) => ({ id, replacement: "Brief sentence." })) })
     : "Fixture Agent reply.";
   console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text } }));
@@ -2625,7 +3270,24 @@ if (prompt.instruction === ${JSON.stringify(cancelInstruction)}) {
       action.dispatchEvent(new Event('change', { bubbles: true }));`,
     args: [],
   });
-  await clickPath("//section[@aria-label='Ask AI']//input");
+  const pdf = join(fixture, "field-notes.pdf");
+  await writeFile(pdf, writingMaterialPdf());
+  await clickPath(
+    "//section[@aria-label='Ask AI']//summary[normalize-space(.)='Add files or paste text']",
+  );
+  await chooseWebViewFile("Choose material file", pdf, "body");
+  await clickPath(
+    "//section[@aria-label='Ask AI']//label[normalize-space(text()[1])='PDF page']/input",
+  );
+  await keyActions([...chord(keys.control, "a"), ...typing("2")]);
+  await clickPath(
+    "//section[@aria-label='Ask AI']//button[not(@disabled) and normalize-space(.)='Use selected material']",
+  );
+  await waitForView(
+    "the selected PDF page and text format before the CLI send",
+    `return document.querySelector('section[aria-label="Ask AI"]')?.innerText.includes('field-notes.pdf · Page 2 of 2 · Extracted text');`,
+  );
+  await clickPath("//section[@aria-label='Ask AI']//input[not(@type='checkbox')]");
   await keyActions([...typing("Is the selected line clear?"), ...typing(keys.enter)]);
   await waitForView(
     "the inline reply from the CLI",
@@ -2633,6 +3295,9 @@ if (prompt.instruction === ${JSON.stringify(cancelInstruction)}) {
       !document.querySelector('aside[aria-label="Writing Assistant"]');`,
   );
   await click("Continue in sidebar");
+  await clickPath(
+    "//aside[@aria-label='Writing Assistant']//button[normalize-space(.)='Remove field-notes.pdf']",
+  );
   await command("POST", `/session/${session}/execute/sync`, {
     script: `const scope = [...document.querySelectorAll('aside[aria-label="Writing Assistant"] select')]
       .find((select) => select.querySelector('option[value="instruction"]'));
@@ -2657,16 +3322,26 @@ if (prompt.instruction === ${JSON.stringify(cancelInstruction)}) {
     .split("\n")
     .slice(1)
     .map((line) => JSON.parse(line));
-  assert.deepEqual(
-    selectedCalls.map((entry) => entry.prompt),
-    [
-      { instruction: "Is the selected line clear?", selectedText: "On-disk sentence." },
-      {
-        instruction: "What would help?",
-        history: [{ instruction: "Is the selected line clear?", reply: "Fixture Agent reply." }],
-      },
-    ],
-  );
+  assert.equal(selectedCalls.length, 2);
+  const { instruction: selectedInstruction, ...selectedPayload } = selectedCalls[0].prompt;
+  assert.match(selectedInstruction, /^Is the selected line clear\?/);
+  assert.deepEqual(selectedPayload, {
+    selectedText: "On-disk sentence.",
+    taskContext: {
+      materials: [
+        {
+          name: "field-notes.pdf",
+          text: selectedPageText,
+          range: { kind: "pdf", page: 2, pages: 2 },
+          format: "extractedText",
+        },
+      ],
+    },
+  });
+  assert.deepEqual(selectedCalls[1].prompt, {
+    instruction: "What would help?",
+    history: [{ instruction: "Is the selected line clear?", reply: "Fixture Agent reply." }],
+  });
   assert.ok(selectedCalls.every((entry) => entry.entries.length === 0));
   const taskDir = dirname(selectedCalls[0].cwd);
   assert.ok(process.env.XDG_DATA_HOME);
@@ -2886,8 +3561,8 @@ if (prompt.instruction === ${JSON.stringify(cancelInstruction)}) {
   await showsIn('section[aria-label="Ask AI"]', "Partial Agent reply.");
   const runningCall = JSON.parse((await readFile(calls, "utf8")).trim().split("\n").at(-1) ?? "");
   assert.equal(runningCall.prompt.instruction, cancelInstruction);
-  const callsBeforeReplacement = (await readFile(calls, "utf8")).trim().split("\n").length;
-  assert.equal(callsBeforeReplacement, callsBeforeRestart + 3);
+  const callsBeforeTemporary = (await readFile(calls, "utf8")).trim().split("\n").length;
+  assert.equal(callsBeforeTemporary, callsBeforeRestart + 3);
   process.kill(runningCall.pid, 0);
   await clickPath("//section[@aria-label='Ask AI']//button[normalize-space(.)='Stop generation']");
   await until("the stopped CLI process to be reaped", async () => {
@@ -2907,6 +3582,84 @@ if (prompt.instruction === ${JSON.stringify(cancelInstruction)}) {
   );
   await assert.rejects(readdir(runningCall.cwd), { code: "ENOENT" });
   assert.equal(await readFile(draft, "utf8"), initial);
+
+  const composer = "//section[@aria-label='Ask AI']";
+  await clickPath(`${composer}//button[normalize-space(.)='Close']`);
+  await keyActions([...chord(keys.control, keys.end), ...chord(keys.shift, keys.home)]);
+  await click("Ask AI");
+  await clickPath(`${composer}//label[normalize-space(.)='Temporary session']/input`);
+  await addPastedWritingMaterial(privateMaterial);
+  await clickPath(`${composer}//label[normalize-space(.)='Instruction']/input`);
+  await keyActions([...typing(temporaryInstruction), ...typing(keys.enter)]);
+  await clickPath(`${composer}//button[normalize-space(.)='View changes']`);
+  const assistant = "//aside[@aria-label='Writing Assistant']";
+  await waitForView(
+    "the applied temporary edit to remain reviewable",
+    `const edit = document.querySelector('aside[aria-label="Writing Assistant"] [aria-label="Proposed edit 1 of 1"]');
+      return edit?.innerText.includes("Short sentence.") &&
+        [...edit.querySelectorAll("button")].some((button) => button.textContent === "Revert this edit");`,
+  );
+
+  const temporaryCall = JSON.parse((await readFile(calls, "utf8")).trim().split("\n").at(-1) ?? "");
+  assert.ok(temporaryCall.args.includes("--ephemeral"));
+  assert.equal(temporaryCall.prompt.selectedText, "On-disk sentence.");
+  assert.deepEqual(temporaryCall.prompt.taskContext.materials, [
+    { name: "Pasted text", text: privateMaterial },
+  ]);
+  const temporaryDir = dirname(temporaryCall.cwd);
+  assert.equal(
+    dirname(temporaryDir),
+    join(process.env.XDG_DATA_HOME, "io.github.amemiya02.mint", "ai", "temporary-tasks"),
+  );
+  assert.equal(
+    await readFile(join(temporaryDir, "retained-task-copy.md"), "utf8"),
+    privateMaterial,
+  );
+  assert.equal((await readdir(temporaryDir)).includes("review.json"), false);
+  await nativeShortcut("ctrl+s");
+  const retained = initial.replace("On-disk sentence.", "Short sentence.");
+  await until(
+    "the temporary revision to save",
+    async () => (await readFile(draft, "utf8")) === retained || null,
+  ).catch(explain);
+  const versionIds = await until("the ordinary version of the temporary revision", async () => {
+    const ids = await invokeNative<number[]>("list_versions", { path: draft });
+    const latest = ids.at(-1);
+    if (latest === undefined) return null;
+    const text = await invokeNative<string>("read_version", { path: draft, id: latest });
+    return text === retained ? ids : null;
+  }).catch(explain);
+  const taskRecordsBefore = await invokeNative<unknown[]>("list_writing_tasks", { path: draft });
+  assert.equal(JSON.stringify(taskRecordsBefore).includes(temporaryInstruction), false);
+
+  await clickPath(`${assistant}//button[normalize-space(.)='Close temporary session']`);
+  await shows("You will lose the option to revert edits by task.");
+  await clickPath("//dialog[@open]//button[normalize-space(.)='Close temporary session']");
+  await until("the temporary task directory to be removed", async () => {
+    try {
+      await readdir(temporaryDir);
+      return null;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return true;
+      throw error;
+    }
+  }).catch(explain);
+  await waitForView(
+    "the temporary review to close",
+    `return !document.querySelector('aside[aria-label="Writing Assistant"], dialog[aria-label="Close temporary session"]');`,
+  );
+  assert.equal(await readFile(draft, "utf8"), retained);
+  assert.deepEqual(await invokeNative<number[]>("list_versions", { path: draft }), versionIds);
+  assert.equal(
+    await invokeNative<string>("read_version", { path: draft, id: versionIds.at(-1) }),
+    retained,
+  );
+  assert.deepEqual(
+    await invokeNative<unknown[]>("list_writing_tasks", { path: draft }),
+    taskRecordsBefore,
+  );
+  const callsBeforeReplacement = (await readFile(calls, "utf8")).trim().split("\n").length;
+  assert.equal(callsBeforeReplacement, callsBeforeTemporary + 1);
 
   await openSettings();
   await clickSettingsButton("External Agents");

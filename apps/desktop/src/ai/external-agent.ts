@@ -1,6 +1,8 @@
 import {
+  hasTaskImages,
   materialRequestInstruction,
   replacementInstruction,
+  sourcePassageInstruction,
   type WritingOptions,
   type WritingReply,
   type WritingRequest,
@@ -28,7 +30,7 @@ export interface ExternalAgentPlatform {
   send(
     agent: ExternalAgent,
     access: AgentAccess,
-    request: Omit<WritingRequest, "responseFormat">,
+    request: Omit<WritingRequest, "responseFormat" | "sourcePassages">,
     options?: WritingOptions,
   ): Promise<WritingReply>;
 }
@@ -39,10 +41,12 @@ export function externalAgentSender(
   access: AgentAccess,
 ): WritingSender {
   // The native boundary rechecks access and executable identity for every operation.
-  return ({ responseFormat, ...request }, options) => {
+  return async ({ responseFormat, sourcePassages, ...request }, options) => {
+    if (hasTaskImages(request.taskContext)) throw "invalidRequest";
     const instruction = [request.instruction];
     if (responseFormat === "replacement") instruction.push(replacementInstruction);
     if (request.taskContext) instruction.push(materialRequestInstruction);
+    if (sourcePassages) instruction.push(sourcePassageInstruction);
     return platform.send(
       agent,
       access,

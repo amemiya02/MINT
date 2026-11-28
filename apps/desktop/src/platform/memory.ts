@@ -5,7 +5,8 @@ import {
   modelEndpoint,
   type SavedModelConnection,
 } from "../ai/model.ts";
-import { baseName, parentPath } from "../paths.ts";
+import { hasProposedEdits, type SavedWritingTask } from "../ai/writing-tasks.ts";
+import { baseName, isWithin, parentPath } from "../paths.ts";
 import { createIgnoreRules } from "./gitignore.ts";
 import { type MemoryExternalAgentOptions, memoryExternalAgent } from "./memory-external-agent.ts";
 import { pickBrowserFile } from "./pick-file.ts";
@@ -138,6 +139,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
   const appData = new Map(Object.entries(options.appData ?? {}));
   const taskRoot = "ai/tasks/";
   const taskRecord = (id: string) => `${taskRoot}${id}/review.json`;
+  const temporaryTasks = new Set<string>();
   const trash: string[] = [];
   const dialogResults = [...(options.openDialogResults ?? [])];
   const saveDialogResults = [...(options.saveDialogResults ?? [])];
@@ -263,9 +265,16 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     for (const [key, value] of [...appData]) {
       if (key.startsWith(taskRoot) && key.endsWith("/review.json")) {
         const task = JSON.parse(value);
-        if (task.path !== null && within(task.path, from) && isFile(task.path)) {
-          appData.set(key, JSON.stringify({ ...task, path: to + task.path.slice(from.length) }));
-        }
+        const path =
+          task.path !== null && within(task.path, from) && isFile(task.path)
+            ? to + task.path.slice(from.length)
+            : task.path;
+        const folder =
+          task.folder && within(task.folder, from)
+            ? to + task.folder.slice(from.length)
+            : task.folder;
+        if (path !== task.path || folder !== task.folder)
+          appData.set(key, JSON.stringify({ ...task, path, folder }));
         continue;
       }
       const match = /^(history:|snapshot:\d+:|annotations:)([\s\S]+)$/.exec(key);
@@ -349,20 +358,40 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     async disconnectModelConnection(id) {
       modelConnections.delete(id);
     },
-    async listZoteroItems(start) {
+    async listZoteroItems(start, query) {
       if (!options.zoteroItems) throw new Error("unavailable");
+      const needle = query?.trim().toLowerCase();
+      const items = needle
+        ? options.zoteroItems.filter(({ title, creators, date }) =>
+            [title, ...(creators ?? []), date ?? ""].some((field) =>
+              field.toLowerCase().includes(needle),
+            ),
+          )
+        : options.zoteroItems;
       return {
-        items: options.zoteroItems.slice(start, start + 50),
-        next: options.zoteroItems.length > start + 50,
+        items: items.slice(start, start + 50),
+        next: items.length > start + 50,
       };
     },
-    externalAgent: memoryExternalAgent(options.externalAgent),
+    externalAgent: memoryExternalAgent(
+      options.externalAgent,
+      (id) => temporaryTasks.has(id) || appData.has(taskRecord(id)),
+    ),
     writingTasks: {
-      async list(path) {
+      async list(path, all) {
         return [...appData.entries()].flatMap(([key, json]) => {
           if (!key.startsWith(taskRoot) || !key.endsWith("/review.json")) return [];
           const task = JSON.parse(json);
-          return task.path === path ? [task] : [];
+          return all || (!task.folder && task.path === path) ? [task] : [];
+        });
+      },
+      async listReviewsInFolder(folder) {
+        return [...appData.entries()].flatMap(([key, json]) => {
+          if (!key.startsWith(taskRoot) || !key.endsWith("/review.json")) return [];
+          const task: SavedWritingTask = JSON.parse(json);
+          return task.path && isWithin(task.path, folder) && hasProposedEdits(task)
+            ? [{ id: task.id, path: task.path, title: task.title }]
+            : [];
         });
       },
       async create(task) {
@@ -378,11 +407,20 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
         if (stored.updatedAt !== expectedUpdatedAt || task.updatedAt <= expectedUpdatedAt) {
           throw new Error("Writing task changed");
         }
-        appData.set(key, JSON.stringify({ ...task, path: stored.path ?? task.path }));
+        appData.set(
+          key,
+          JSON.stringify({ ...task, path: stored.path ?? task.path, folder: stored.folder }),
+        );
       },
       async remove(id) {
         const prefix = `${taskRoot}${id}/`;
         for (const key of appData.keys()) if (key.startsWith(prefix)) appData.delete(key);
+      },
+      async createTemporary(id) {
+        temporaryTasks.add(id);
+      },
+      async removeTemporary(id) {
+        temporaryTasks.delete(id);
       },
     },
     locale: options.locale ?? navigator.language,

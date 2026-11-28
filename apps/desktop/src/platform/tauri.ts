@@ -102,11 +102,14 @@ export function createTauriPlatform(): Platform {
   return {
     locale: navigator.language,
     writingTasks: {
-      list: (path) => invoke("list_writing_tasks", { path }),
+      list: (path, all) => invoke("list_writing_tasks", { path, all }),
+      listReviewsInFolder: (folder) => invoke("list_writing_reviews_in_folder", { folder }),
       create: (task) => invoke("create_writing_task", { task }),
       update: (task, expectedUpdatedAt) =>
         invoke("update_writing_task", { task, expectedUpdatedAt }),
       remove: (id) => invoke("delete_writing_task", { id }),
+      createTemporary: (id) => invoke("create_temporary_writing_task", { id }),
+      removeTemporary: (id) => invoke("delete_temporary_writing_task", { id }),
     },
     externalAgent: {
       discover: () => invoke("discover_external_agents"),
@@ -152,7 +155,7 @@ export function createTauriPlatform(): Platform {
     listModelConnections: () => invoke("list_model_connections"),
     saveModelConnection: (connection) => invoke("save_model_connection", { connection }),
     disconnectModelConnection: (id) => invoke("disconnect_model_connection", { id }),
-    listZoteroItems: (start) => invoke("list_zotero_items", { start }),
+    listZoteroItems: (start, query) => invoke("list_zotero_items", { start, query }),
     savesPdfDirectly: /Windows/.test(navigator.userAgent),
     readTextFile: (path) => invoke<string>("read_text_file", { path }),
     readBinaryFile: (path) => invoke<ArrayBuffer>("read_binary_file", { path }),

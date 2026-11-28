@@ -11,6 +11,7 @@ export function ProposedSelectionEdit({
   showAppliedComparison,
   label,
   source,
+  review,
   current,
   blocked,
   replyExcerpt,
@@ -19,7 +20,9 @@ export function ProposedSelectionEdit({
   recipient,
   onApply,
   onDiscard,
+  onRestore,
   onRevert,
+  onKeepCurrent,
   onRewrite,
 }: {
   readonly before: string;
@@ -28,6 +31,7 @@ export function ProposedSelectionEdit({
   readonly showAppliedComparison?: boolean | undefined;
   readonly label: string;
   readonly source: boolean;
+  readonly review?: { readonly before: string; readonly after: string };
   readonly current?: string | undefined;
   readonly blocked?: "disk" | "boundaries" | undefined;
   readonly replyExcerpt?: boolean;
@@ -36,39 +40,87 @@ export function ProposedSelectionEdit({
   readonly recipient?: string;
   readonly onApply?: (() => void) | undefined;
   readonly onDiscard?: (() => void) | undefined;
+  readonly onRestore?: (() => void) | undefined;
   readonly onRevert?: (() => void) | undefined;
+  readonly onKeepCurrent?: (() => void) | undefined;
   readonly onRewrite?: ((instruction: string) => Promise<boolean>) | undefined;
 }) {
   const t = useT();
   const [rewriting, setRewriting] = useState(false);
   const [instruction, setInstruction] = useState("");
   const input = useRef<HTMLInputElement>(null);
+  const proposal = useRef<HTMLFieldSetElement>(null);
+  const restoring = useRef(false);
   useEffect(() => {
     if (rewriting) input.current?.focus();
   }, [rewriting]);
+  useEffect(() => {
+    if (status !== "preview" || !restoring.current) return;
+    restoring.current = false;
+    proposal.current?.focus({ preventScroll: true });
+  }, [status]);
+
+  const restore = onRestore && (
+    <button
+      type="button"
+      className="rounded border border-(--mint-border) px-2 py-1"
+      disabled={busy}
+      onClick={() => {
+        restoring.current = !review;
+        onRestore();
+      }}
+    >
+      {t("writing.review.restore")}
+    </button>
+  );
 
   if (
-    (status === "applied" && !showAppliedComparison) ||
-    status === "discarded" ||
-    status === "reverted"
+    !review &&
+    ((status === "applied" && !showAppliedComparison) ||
+      status === "discarded" ||
+      status === "reverted" ||
+      status === "kept")
   ) {
     return (
-      <fieldset aria-label={label} className="min-w-0">
+      <fieldset aria-label={label} className="min-w-0 space-y-1">
         <p>{t(`writing.edit.${status}`)}</p>
-        <pre className="whitespace-pre-wrap wrap-anywhere">{after}</pre>
+        {status !== "kept" && <pre className="whitespace-pre-wrap wrap-anywhere">{after}</pre>}
         {conversation}
+        {restore}
       </fieldset>
     );
   }
 
   const comparingReversion = status === "applied" && current !== undefined;
+  const beforeLabel = t(
+    review && (current ?? before)
+      ? "writing.review.removed"
+      : replyExcerpt
+        ? "writing.reply.current"
+        : current === undefined
+          ? "writing.edit.before"
+          : "writing.edit.current",
+  );
+  const afterLabel = t(
+    review && after
+      ? "writing.review.added"
+      : replyExcerpt
+        ? "writing.reply.selected"
+        : comparingReversion
+          ? "writing.edit.before"
+          : status === "applied"
+            ? "writing.edit.appliedText"
+            : "writing.edit.after",
+  );
   return (
     <fieldset
+      ref={proposal}
+      tabIndex={-1}
       aria-label={label}
-      className="min-w-0 space-y-2 rounded border border-(--mint-border) p-2"
+      className="@container min-w-0 space-y-2 rounded border border-(--mint-border) p-2"
     >
       <legend className="px-1 text-xs font-medium">{label}</legend>
-      {status === "applied" && <p>{t("writing.edit.applied")}</p>}
+      {status !== "preview" && <p>{t(`writing.edit.${status}`)}</p>}
       {(current !== undefined || blocked) && (
         <p role="alert">
           {t(
@@ -81,37 +133,31 @@ export function ProposedSelectionEdit({
         </p>
       )}
       {blocked && <p>{t(`writing.edit.blocked.${blocked}`)}</p>}
-      <div className="grid gap-2 sm:grid-cols-2">
-        <div className="min-w-0 rounded bg-(--mint-diff-removed-bg) p-1">
-          <p className="text-xs font-medium">
-            {t(
-              replyExcerpt
-                ? "writing.reply.current"
-                : current === undefined
-                  ? "writing.edit.before"
-                  : "writing.edit.current",
-            )}
-          </p>
+      <div className="grid gap-2 @min-[35rem]:grid-cols-2">
+        <section
+          aria-label={review ? beforeLabel : undefined}
+          className="min-w-0 rounded bg-(--mint-diff-removed-bg) p-1"
+        >
+          <p className="text-xs font-medium">{beforeLabel}</p>
           {replyExcerpt && current === "" ? (
             <p className="text-(--mint-muted)">{t("writing.reply.emptySelection")}</p>
           ) : (
-            <Excerpt text={current ?? before} source={source} />
+            <Excerpt
+              text={!source && review ? review.before : (current ?? before)}
+              source={source}
+            />
           )}
-        </div>
-        <div className="min-w-0 rounded bg-(--mint-diff-added-bg) p-1">
-          <p className="text-xs font-medium">
-            {t(
-              replyExcerpt
-                ? "writing.reply.selected"
-                : comparingReversion
-                  ? "writing.edit.before"
-                  : status === "applied"
-                    ? "writing.edit.appliedText"
-                    : "writing.edit.after",
-            )}
-          </p>
-          <Excerpt text={comparingReversion ? before : after} source={source} />
-        </div>
+        </section>
+        <section
+          aria-label={review ? afterLabel : undefined}
+          className="min-w-0 rounded bg-(--mint-diff-added-bg) p-1"
+        >
+          <p className="text-xs font-medium">{afterLabel}</p>
+          <Excerpt
+            text={!source && review ? review.after : comparingReversion ? before : after}
+            source={source}
+          />
+        </section>
       </div>
       {current !== undefined && (
         <details>
@@ -148,6 +194,7 @@ export function ProposedSelectionEdit({
             {t(replyExcerpt ? "writing.reply.dismissComparison" : "writing.edit.discard")}
           </button>
         )}
+        {restore}
         {onRevert && (
           <button
             type="button"
@@ -156,6 +203,16 @@ export function ProposedSelectionEdit({
             onClick={onRevert}
           >
             {t(comparingReversion ? "writing.edit.revertCompared" : "writing.edit.revert")}
+          </button>
+        )}
+        {onKeepCurrent && (
+          <button
+            type="button"
+            className="rounded border border-(--mint-border) px-2 py-1"
+            disabled={busy}
+            onClick={onKeepCurrent}
+          >
+            {t("writing.edit.keepCurrent")}
           </button>
         )}
         {onRewrite && !rewriting && (

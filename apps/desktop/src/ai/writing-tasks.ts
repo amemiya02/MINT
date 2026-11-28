@@ -1,9 +1,10 @@
 import diffSequence from "@jest/diff-sequences";
 import { compareLines, rawLines } from "../tabs/line-diff.ts";
+import type { SourcePassage } from "./source-passages.ts";
 import type { AttemptStatus } from "./writing-attempt.ts";
 import type { TaskContext, WritingTurn } from "./writing-sender.ts";
 
-export type EditStatus = "preview" | "applied" | "discarded" | "reverted";
+export type EditStatus = "preview" | "applied" | "discarded" | "reverted" | "kept";
 
 export interface ReviewRange {
   readonly from: number;
@@ -17,6 +18,10 @@ export interface SavedSuggestion {
   readonly after: string;
   readonly status: EditStatus;
   readonly appliedText?: string;
+  readonly note?: string;
+  /** Legacy marker used by reviews saved before section steps carried an ID. */
+  readonly batchApplied?: boolean;
+  readonly sectionBatch?: { readonly id: string; readonly index: number };
   readonly comments?: readonly (WritingTurn & { readonly id: number })[];
   readonly range: ReviewRange;
 }
@@ -30,6 +35,7 @@ export interface SavedTurn extends WritingTurn {
   readonly recipient: string;
   readonly recipientId: string;
   readonly direct: boolean;
+  readonly sourcePassages?: readonly SourcePassage[];
   readonly suggestions?: readonly SavedSuggestion[];
 }
 
@@ -37,28 +43,53 @@ export interface SavedWritingTask {
   readonly version: 1;
   readonly id: string;
   readonly path: string | null;
+  readonly folder?: string;
   readonly title: string;
   readonly updatedAt: number;
   readonly baseline: string;
   readonly origin: ReviewRange & { readonly text: string };
   readonly reading: { readonly anchor: number; readonly head: number; readonly top: number };
   readonly reviewScroll: number;
+  readonly reviewSelection?: string;
   readonly showSource: boolean;
   readonly turns: readonly SavedTurn[];
   readonly pending?: Omit<SavedTurn, "reply" | "suggestions" | "direct" | "status" | "partial">;
 }
 
 export interface WritingTasksPlatform {
-  list(path: string | null): Promise<SavedWritingTask[]>;
+  list(path: string | null, all?: boolean): Promise<SavedWritingTask[]>;
+  listReviewsInFolder(folder: string): Promise<readonly SavedReviewLink[]>;
   create(task: SavedWritingTask): Promise<void>;
   update(task: SavedWritingTask, expectedUpdatedAt: number): Promise<void>;
   remove(id: string): Promise<void>;
+  createTemporary(id: string): Promise<void>;
+  removeTemporary(id: string): Promise<void>;
+}
+
+export interface SavedReviewLink {
+  readonly id: string;
+  readonly path: string;
+  readonly title: string;
+}
+
+export type WritingTaskOpenResult = boolean | "temporary";
+
+export interface WritingTaskOpenRequest {
+  readonly task: SavedWritingTask;
+  readonly returnToTab: number | undefined;
+  readonly complete: (result: WritingTaskOpenResult) => void;
+}
+
+export function hasProposedEdits(task: SavedWritingTask) {
+  return task.turns.some((turn) => !!turn.suggestions?.length);
 }
 
 interface OpenWritingReview {
+  readonly tabId: number;
   readonly busy: boolean;
-  focus(): void;
-  remove(remaining: number): void;
+  readonly temporary: boolean;
+  focus(returnToTab?: number): void;
+  remove(): void;
 }
 
 const openReviews = new WeakMap<WritingTasksPlatform, Map<string, OpenWritingReview>>();
