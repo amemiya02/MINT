@@ -123,6 +123,12 @@ Install **Kanban board** in Settings → Plugins to group the current folder’s
 
 Packages can contribute this view with `"sidebar": "kanban"` and `"permissions": ["folder.read", "folder.status.write"]`. The second grant allows the host to update only the status property. Writers can revoke it independently while keeping the board readable.
 
+## Slide presentation
+
+Install **Slide presentation** in Settings → Plugins and allow it to read the current document. In your draft, separate slides with a Markdown horizontal rule, such as `---` on a line with blank lines around it. Choose **Present slides**. Use the left and right arrow keys or the on-screen controls to page through the draft. Press Escape to return to the editor.
+
+A local package can provide the same presentation action with `"presentation": "slides"` and the `document.read` permission.
+
 ## Zotero citations
 
 Enable the local API in Zotero's advanced settings, then install **Zotero** in MINT. Grant access to the local library and permission to modify the current selection. Place the caret in a draft, choose **Insert Zotero citation**, and select a title. MINT inserts a Markdown link to that library item. Escape dismisses the picker. The service receives only paginated library reads.

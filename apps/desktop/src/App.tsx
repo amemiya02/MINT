@@ -22,9 +22,10 @@ import { HistoryDialog } from "./history/HistoryDialog.tsx";
 import { type Translate, useT } from "./i18n/index.ts";
 import { documentExtensions, isWithin } from "./paths.ts";
 import type { DocumentEdit, Platform } from "./platform/platform.ts";
-import { insertTemplate } from "./plugins/host.ts";
+import { canPresentSlides, insertTemplate } from "./plugins/host.ts";
 import { KanbanBoard } from "./plugins/KanbanBoard.tsx";
 import { PluginEntries, pluginName, useInstallations } from "./plugins/Plugins.tsx";
+import { PresentationEntry } from "./plugins/Presentation.tsx";
 import { PropertyTable } from "./plugins/PropertyTable.tsx";
 import { RelationshipGraph } from "./plugins/RelationshipGraph.tsx";
 import { TagBrowser } from "./plugins/TagBrowser.tsx";
@@ -593,6 +594,15 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
           )}
         </div>
       </div>
+      {active && canPresentSlides(plugins) && (
+        <PresentationEntry
+          key={active.id}
+          editor={store.editor(active.id)}
+          dialect={dialect}
+          platform={platform}
+          path={active.path}
+        />
+      )}
       {activeId !== null &&
         plugins
           .filter((i) => i.enabled && i.manifest.citation === "zotero")
