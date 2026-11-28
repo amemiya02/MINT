@@ -1,3 +1,4 @@
+export type { Annotation, AnnotationKind, AnnotationTarget } from "./annotations.ts";
 export type { EditorDialect } from "./dialect.ts";
 export type {
   EditorCommand,
