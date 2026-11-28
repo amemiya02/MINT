@@ -26,6 +26,14 @@ export const notionImporter: PluginManifest = {
   importer: "notion",
 };
 
+export const latexExport: PluginManifest = {
+  apiVersion: 1,
+  id: "mint.latex-export",
+  name: "LaTeX export",
+  permissions: ["document.read"],
+  exportFormat: "latex",
+};
+
 export const epubExport: PluginManifest = {
   apiVersion: 1,
   id: "mint.epub-export",

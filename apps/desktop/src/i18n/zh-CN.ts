@@ -20,6 +20,7 @@ export const zhCN: Messages = {
   "plugin.timingEmpty": "时序图为空。请添加信号，例如 CLK: 0101。",
   "export.plugin.saveTitle": "导出为 {format}",
   "export.plugin.unavailable": "格式不可用",
+  "plugin.latex": "LaTeX 导出",
   "plugin.epub": "EPUB 导出",
   "plugin.timing": "数字时序图",
   "plugin.properties": "属性表",
