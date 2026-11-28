@@ -12,7 +12,7 @@ export function useOverlays() {
   /** The tab being exported, and to what, while the export dialog shows. */
   const [exporting, setExporting] = useState<{
     readonly tab: number;
-    readonly format: ExportFormat;
+    readonly format?: ExportFormat;
   } | null>(null);
   const [find, setFind] = useState<{ mode: FindMode; request: number } | null>(null);
   /** While global search shows (in place of the file tree), how many times it was invoked. */

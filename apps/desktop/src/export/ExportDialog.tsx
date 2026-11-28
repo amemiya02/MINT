@@ -14,7 +14,7 @@ export type ExportFormat = "html" | "pdf";
 
 interface ExportDialogProps {
   readonly platform: Platform;
-  readonly format: ExportFormat;
+  readonly initialFormat: ExportFormat | undefined;
   /** The document to export. */
   readonly path: string;
   /** Its current text, unsaved edits included. */
@@ -36,28 +36,38 @@ function stem(path: string): string {
  * Export a document: pick the theme and appearance, then either save a single
  * HTML file (optionally embedding images) or print it, to save as a PDF.
  */
-export function ExportDialog({ platform, format, path, getText, onClose }: ExportDialogProps) {
+export function ExportDialog({
+  platform,
+  initialFormat,
+  path,
+  getText,
+  onClose,
+}: ExportDialogProps) {
   const t = useT();
   const { settings } = useSettings();
   const { folder, themes } = useTheme();
   const { close, props: dialogProps } = useModalDialog(onClose);
   const titleId = useId();
+  const formatId = useId();
+  const [format, setFormat] = useState<ExportFormat>(initialFormat ?? "html");
   const themeId = useId();
   const appearanceId = useId();
   const imagesId = useId();
-  const [choice, setChoice] = useState<HtmlExportChoice>(() => ({
+  const [appearances, setAppearances] = useState<
+    Record<ExportFormat, HtmlExportChoice["appearance"]>
+  >(() => ({
+    html: document.documentElement.dataset.appearance === "dark" ? "dark" : "light",
+    pdf: "light",
+  }));
+  const [options, setOptions] = useState(() => ({
     // The look on screen: the theme in use and the current appearance.
     theme:
       findBuiltinTheme(settings.theme)?.id ??
       (themes.includes(settings.theme) ? settings.theme : ""),
-    // Paper is light; HTML keeps the current appearance.
-    appearance:
-      format === "html" && document.documentElement.dataset.appearance === "dark"
-        ? "dark"
-        : "light",
     // The print window has no folder to resolve images against: PDFs always embed them.
     embedImages: true,
   }));
+  const choice = { ...options, appearance: appearances[format] };
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -115,15 +125,36 @@ export function ExportDialog({ platform, format, path, getText, onClose }: Expor
           id={titleId}
           className="border-b border-(--mint-border) px-5 py-3 text-base font-medium"
         >
-          {t(format === "pdf" ? "export.pdf.title" : "export.html.title")}
+          {t(
+            initialFormat === undefined
+              ? "export.title"
+              : format === "pdf"
+                ? "export.pdf.title"
+                : "export.html.title",
+          )}
         </h2>
         <div className="flex flex-col gap-4 px-5 py-4 text-sm">
+          {initialFormat === undefined && (
+            <div className="flex items-center justify-between gap-4">
+              <label htmlFor={formatId}>{t("export.format")}</label>
+              <select
+                id={formatId}
+                value={format}
+                disabled={busy}
+                className={fieldClass}
+                onChange={(event) => setFormat(event.target.value === "pdf" ? "pdf" : "html")}
+              >
+                <option value="html">HTML</option>
+                <option value="pdf">PDF</option>
+              </select>
+            </div>
+          )}
           <div className="flex items-center justify-between gap-4">
             <label htmlFor={themeId}>{t("settings.theme")}</label>
             <select
               id={themeId}
               value={choice.theme}
-              onChange={(e) => setChoice({ ...choice, theme: e.target.value })}
+              onChange={(e) => setOptions({ ...options, theme: e.target.value })}
               className={fieldClass}
             >
               <ThemeOptions customThemes={themes} />
@@ -135,7 +166,10 @@ export function ExportDialog({ platform, format, path, getText, onClose }: Expor
               id={appearanceId}
               value={choice.appearance}
               onChange={(e) =>
-                setChoice({ ...choice, appearance: e.target.value === "dark" ? "dark" : "light" })
+                setAppearances({
+                  ...appearances,
+                  [format]: e.target.value === "dark" ? "dark" : "light",
+                })
               }
               className={fieldClass}
             >
@@ -150,7 +184,7 @@ export function ExportDialog({ platform, format, path, getText, onClose }: Expor
                 id={imagesId}
                 type="checkbox"
                 checked={choice.embedImages}
-                onChange={(e) => setChoice({ ...choice, embedImages: e.target.checked })}
+                onChange={(e) => setOptions({ ...options, embedImages: e.target.checked })}
                 className="size-4 accent-(--mint-accent)"
               />
             </div>

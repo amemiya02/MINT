@@ -251,6 +251,9 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
       if (activeId !== null) void store.saveAs(activeId);
     },
     "file.history": () => setHistoryPath(active?.path ?? null),
+    "file.export": () => {
+      if (activeId !== null) setExporting({ tab: activeId });
+    },
     "file.exportHtml": () => {
       if (activeId !== null) setExporting({ tab: activeId, format: "html" });
     },
@@ -513,7 +516,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
       {exportedTab && (
         <ExportDialog
           platform={platform}
-          format={exporting?.format ?? "html"}
+          initialFormat={exporting?.format}
           path={exportedTab.path ?? tabName(t, exportedTab)}
           getText={() => store.editor(exportedTab.id)?.getText() ?? exportedTab.text}
           onClose={() => {
