@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { promisify } from "node:util";
@@ -332,8 +332,9 @@ test("history restores and undo autosave the exact native file", async () => {
   assert.deepEqual(await readdir(dir), ["smoke.md"]);
 });
 
-test("import a hidden Notion attachment and embed its granted bytes in a native DOCX", async () => {
-  const folder = await mkdtemp(join(dir, "publication-"));
+test("import a hidden Notion attachment and embed its granted bytes in a native DOCX", async (t) => {
+  const folder = await mkdtemp(join(homedir(), "mint-publication-"));
+  t.after(() => rm(folder, { recursive: true, force: true }));
   const archive = join(folder, "Notebook.zip");
   const doc = "# Map\n\n![Field map](.attachments/map.png)\n";
   const png = Buffer.from(
