@@ -351,6 +351,12 @@ export const en = {
   "settings.typewriterMode": "Typewriter mode",
   "settings.vimMode": "Vim key bindings",
   "settings.spellcheck": "Check spelling",
+  "settings.inlineCompletion": "Inline completion",
+  "settings.inlineCompletion.off": "Off",
+  "settings.inlineCompletion.unavailable": "Connection unavailable",
+  "settings.inlineCompletion.recipient": "Sends to {address}",
+  "settings.inlineCompletion.hint":
+    "After you pause typing, MINT sends nearby manuscript text to the selected model. Tab accepts a suggestion and Esc dismisses it.",
   "settings.wikilinks": "Recognize wikilinks in {folder}",
   "settings.expected.folders": "an array of folder paths",
   "settings.extendedToc": "Extended syntax: [TOC] table of contents",

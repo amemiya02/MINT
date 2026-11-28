@@ -43,6 +43,7 @@ import {
 import { focusMode } from "./focus-mode.ts";
 import { type FormattingCommands, formattingCommands } from "./formatting.ts";
 import { type ImageFile, imageFileInsertion } from "./image-files.ts";
+import { inlineCompletion, type RequestInlineCompletion } from "./inline-completion.ts";
 import { type DocumentLink, type LinkTarget, linkAt, linkOpening } from "./links.ts";
 import { codeBlocks, setCodeBlockLanguage } from "./live-preview/code-blocks.ts";
 import { type CodeBlockRenderer, fencedRenderers } from "./live-preview/fenced-renderers.ts";
@@ -212,6 +213,8 @@ export interface MintEditor {
   getSettings(): EditorSettings;
   /** Change some settings; the others keep their value. Takes effect at once. */
   updateSettings(settings: Partial<EditorSettings>): void;
+  /** Use this view for inline writing suggestions, or clear the feature and any pending suggestion. */
+  setInlineCompletion(request: RequestInlineCompletion | null): void;
   /** The outline: every heading in document order, with its level, text and position. */
   getOutline(): readonly OutlineHeading[];
   /** Words, characters and reading time of the document as rendered. Counts the whole text on every call. */
@@ -277,6 +280,7 @@ export function createEditor(options: EditorOptions): MintEditor {
   const fences = new Compartment();
   const preview = new Compartment();
   const syntax = new Compartment();
+  const completion = new Compartment();
   let mode: EditorMode = options.mode ?? "livePreview";
   let lastOutline: readonly OutlineHeading[] = [];
   let settings: EditorSettings = { ...defaultSettings, ...options.settings };
@@ -295,6 +299,7 @@ export function createEditor(options: EditorOptions): MintEditor {
       extensions: [
         parsed.extension,
         options.phrases ? EditorState.phrases.of(options.phrases) : [],
+        completion.of([]),
         preferences.extension,
         history(),
         options.document?.initialHistory() ?? [],
@@ -504,6 +509,9 @@ export function createEditor(options: EditorOptions): MintEditor {
       };
     },
     getFindStatus: () => findStatus(view.state),
+    setInlineCompletion(request) {
+      view.dispatch({ effects: completion.reconfigure(request ? inlineCompletion(request) : []) });
+    },
     setDialect(dialect) {
       view.dispatch({ effects: syntax.reconfigure(dialectExtensions(dialect)) });
     },
