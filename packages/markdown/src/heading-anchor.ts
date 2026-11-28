@@ -43,9 +43,12 @@ export function matchingHeadings<T extends { readonly text: string }>(
 
 /** Heading text for resolving a fragment in Markdown that is not open in an editor. */
 export function markdownHeadings(source: string) {
-  const headings: { text: string }[] = [];
+  const headings: { text: string; line: number }[] = [];
   visit(fromMarkdown(source), "heading", (node) => {
-    headings.push({ text: headingText(node).replace(/\s+/g, " ").trim() });
+    headings.push({
+      text: headingText(node).replace(/\s+/g, " ").trim(),
+      line: node.position?.start.line ?? 1,
+    });
   });
   return headings;
 }

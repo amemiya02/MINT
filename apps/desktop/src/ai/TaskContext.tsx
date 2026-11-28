@@ -1,9 +1,10 @@
 import { type ClipboardEvent, type DragEvent, useRef, useState } from "react";
 import { useT } from "../i18n/index.ts";
 import type { Platform } from "../platform/platform.ts";
+import { sourceLines } from "./MaterialCapacity.tsx";
 import type { NamedMaterial } from "./writing-sender.ts";
 
-const materialLimit = 64 * 1024;
+const materialLimit = 2 * 1024 * 1024;
 const encoder = new TextEncoder();
 const previewClass =
   "max-h-28 overflow-auto whitespace-pre-wrap wrap-anywhere rounded bg-(--mint-hover) p-2";
@@ -34,7 +35,6 @@ export function useNamedMaterials() {
 
   return {
     entries,
-    materials: entries.map(({ material }) => material),
     loading: loading > 0,
     error,
     remove(id: MaterialEntry["id"]) {
@@ -83,6 +83,7 @@ export function TaskContextChecklist({
   draft,
   emptyDraft,
   includeDraft,
+  handlingFull = true,
   folder,
   searchEnabled,
   onSearchChange,
@@ -94,6 +95,7 @@ export function TaskContextChecklist({
   readonly draft?: NamedMaterial;
   readonly emptyDraft?: boolean;
   readonly includeDraft?: (checked: boolean) => void;
+  readonly handlingFull?: boolean;
   readonly folder: string | null;
   readonly searchEnabled: boolean;
   readonly onSearchChange: (checked: boolean) => void;
@@ -130,12 +132,17 @@ export function TaskContextChecklist({
                   checked={!!draft}
                   onChange={(event) => includeDraft(event.target.checked)}
                 />
-                {t("materials.includeDraft")}
+                {t(handlingFull ? "materials.includeDraft" : "materials.capacity.includeDraft")}
               </label>
             )}
             {draft ? (
               <>
-                <span>{draft.name}</span>
+                <span>{draft.name}</span>{" "}
+                <span>
+                  {t("materials.capacity.lineCount", {
+                    count: String(sourceLines(draft.text).length),
+                  })}
+                </span>
                 <pre className={previewClass}>{draft.text}</pre>
               </>
             ) : !includeDraft ? (
@@ -150,6 +157,9 @@ export function TaskContextChecklist({
             <li key={id} className="flex items-start justify-between gap-2">
               <details className="min-w-0 flex-1">
                 <summary className="cursor-pointer wrap-anywhere">{name}</summary>
+                <p>
+                  {t("materials.capacity.lineCount", { count: String(sourceLines(text).length) })}
+                </p>
                 <pre className={previewClass}>{text}</pre>
               </details>
               <button type="button" className={buttonClass} onClick={() => named.remove(id)}>

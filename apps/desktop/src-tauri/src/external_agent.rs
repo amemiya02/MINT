@@ -413,7 +413,10 @@ fn run_codex(
 ) -> Result<WritingReply, String> {
     let failed = || FAILED.to_owned();
     let input = serde_json::to_vec(request).map_err(|_| failed())?;
-    if request.instruction.trim().is_empty() || input.len() > MAX_INPUT {
+    if input.len() > MAX_INPUT {
+        return Err("materialCapacity".to_owned());
+    }
+    if request.instruction.trim().is_empty() {
         return Err(failed());
     }
     let private = tempfile::tempdir().map_err(|_| failed())?;

@@ -2,7 +2,7 @@
 //! configuration. The renderer owns the message format and reply interpretation.
 use crate::writing_requests::Registration;
 use reqwest::header::{HeaderValue, CONTENT_TYPE};
-use reqwest::{Client, Url};
+use reqwest::{Client, StatusCode, Url};
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use std::time::Duration;
@@ -221,7 +221,13 @@ async fn send(
     }
     let mut response = post.send().await.map_err(network_error)?;
     if !response.status().is_success() {
-        return Err(ModelError::Status(response.status().as_u16()));
+        let status = response.status();
+        if status == StatusCode::PAYLOAD_TOO_LARGE
+            || status == StatusCode::BAD_REQUEST && rejects_context(&mut response).await
+        {
+            return Err(ModelError::Request("materialCapacity"));
+        }
+        return Err(ModelError::Status(status.as_u16()));
     }
     let send = |event| {
         on_event
@@ -247,4 +253,21 @@ async fn send(
         })?;
     }
     Ok(())
+}
+
+/// Some compatible services report context-window overflow as a structured HTTP 400.
+async fn rejects_context(response: &mut reqwest::Response) -> bool {
+    let mut body = Vec::new();
+    while let Ok(Some(chunk)) = response.chunk().await {
+        if body.len() + chunk.len() > 16 * 1024 {
+            return false;
+        }
+        body.extend_from_slice(&chunk);
+    }
+    serde_json::from_slice::<serde_json::Value>(&body)
+        .ok()
+        .is_some_and(|value| {
+            value.pointer("/error/code").and_then(|code| code.as_str())
+                == Some("context_length_exceeded")
+        })
 }

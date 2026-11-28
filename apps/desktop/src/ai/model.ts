@@ -157,6 +157,7 @@ export function createModelSender(transport: ModelTransport): SendModelMessage {
     let sawEnd = false;
     let malformed = false;
     let limitReached = false;
+    let contextRejected = false;
     let buffer = "";
     let eventData: string[] = [];
 
@@ -164,7 +165,7 @@ export function createModelSender(transport: ModelTransport): SendModelMessage {
       if (!eventData.length) return;
       const payload = eventData.join("\n");
       eventData = [];
-      if (sawEnd || malformed || limitReached) return;
+      if (sawEnd || malformed || limitReached || contextRejected) return;
       if (payload === "[DONE]") {
         sawEnd = true;
         return;
@@ -172,6 +173,10 @@ export function createModelSender(transport: ModelTransport): SendModelMessage {
       try {
         const event = JSON.parse(payload);
         const code = event?.error?.code;
+        if (code === "context_length_exceeded") {
+          contextRejected = true;
+          return;
+        }
         if (code === "insufficient_quota" || code === "rate_limit_exceeded") {
           limitReached = true;
           return;
@@ -224,6 +229,7 @@ export function createModelSender(transport: ModelTransport): SendModelMessage {
       await transport({ url, apiKey, body: { ...body, model } }, receive, options?.signal);
     }
     if (streamed) {
+      if (contextRejected) throw "materialCapacity";
       if (limitReached) throw "limit";
       if (malformed) throw "invalidReply";
       if (!sawEnd && !finishReason) throw "interrupted";

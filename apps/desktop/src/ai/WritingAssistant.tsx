@@ -12,6 +12,11 @@ import {
 import { useT } from "../i18n/index.ts";
 import type { Platform } from "../platform/platform.ts";
 import { useTabStore } from "../tabs/context.ts";
+import {
+  type MaterialPlan,
+  MaterialPlanPreview,
+  useMaterialCapacity,
+} from "./MaterialCapacity.tsx";
 import { MaterialRequestNotice, useMaterialRequests } from "./MaterialRequest.tsx";
 import { ProposedSelectionEdit } from "./ProposedSelectionEdit.tsx";
 import { ReplyExcerpt } from "./ReplyExcerpt.tsx";
@@ -21,6 +26,7 @@ import { useWritingTask, WritingTaskMaterials } from "./WritingTasks.tsx";
 import {
   type AttemptStatus,
   failureStatus,
+  isMaterialCapacityError,
   replyStatus,
   writingMaterialNames,
 } from "./writing-attempt.ts";
@@ -66,6 +72,7 @@ interface Origin extends WritingSelection {
 
 interface Task {
   readonly request: WritingRequest;
+  readonly plan?: MaterialPlan;
   readonly action: Action;
   readonly scope: Scope;
   readonly searchFolder: string | null;
@@ -82,6 +89,7 @@ interface Attempt {
   readonly partial: string;
   readonly approved: readonly NamedMaterial[];
   readonly newDecisions?: number;
+  readonly capacityRejected?: boolean;
 }
 
 interface Turn extends Omit<SavedTurn, "suggestions"> {
@@ -416,6 +424,15 @@ function Composer({
     scope !== "selection"
       ? "comment"
       : (actionOverride ?? (explicitDirect ? "direct" : turns.length ? "comment" : "preview"));
+
+  const capacity = useMaterialCapacity({
+    recipient: recipient && labelFor(recipient),
+    selectedText,
+    draft: currentDraft,
+    entries: named.entries,
+    folderSearch: !!searchFolder,
+    editing: action !== "comment",
+  });
 
   const snapshot = useCallback(
     (taskTitle: string): SavedWritingTask => {
@@ -826,6 +843,7 @@ function Composer({
     if (
       !instruction.trim() ||
       !recipient ||
+      !capacity.plan ||
       busy ||
       loading ||
       named.loading ||
@@ -852,21 +870,12 @@ function Composer({
           ) ?? []),
         ])
       : [];
-    const draftSnapshot = sendDraft
-      ? { name, text: origin.editor.getText().replace(/^\uFEFF/, "") }
-      : undefined;
     const task: Task = {
+      plan: capacity.plan,
       request: {
         instruction: instruction.trim(),
-        selectedText,
-        taskContext:
-          draftSnapshot || named.materials.length || searchFolder
-            ? {
-                currentDraft: draftSnapshot,
-                materials: named.materials.length ? named.materials : undefined,
-                folderSearch: searchFolder ? true : undefined,
-              }
-            : undefined,
+        selectedText: capacity.plan.selectedText,
+        taskContext: capacity.plan.contexts[0],
         history: history.length ? history : undefined,
         responseFormat: action === "comment" ? undefined : "replacement",
       },
@@ -904,6 +913,7 @@ function Composer({
     let approved: NamedMaterial[] = [];
     let status: AttemptStatus;
     let finalReplacement: string | undefined;
+    let capacityRejected = false;
     setRetryId("");
     setError(null);
     setAttempt({ ...entry, approved, status: "working", partial: "" });
@@ -933,35 +943,35 @@ function Composer({
       setSaveFailed(false);
       onSaved();
     }
-    onSavedRequest?.();
-
     let sentContext = submitted.context;
     try {
       const result = await materialRequests.send(
-        (outbound, options) => {
-          sentContext = outbound.taskContext;
-          pending.current = { ...submitted, context: sentContext };
-          persist(taskTitle);
-          return connection.send(outbound, options);
-        },
+        connection.send,
         task.request,
         recipient,
         task.searchFolder,
         {
           taskId: origin.id,
           signal,
-          onApproval: () => {
-            text = "";
+          plan: task.plan,
+          onContext: (context) => {
+            sentContext = context;
+            pending.current = { ...submitted, context };
+            persist(taskTitle);
+          },
+          onApproval: (completed) => {
+            text = completed;
             setAttempt({ ...entry, approved, status: "approval", partial: "" });
           },
-          onResume: (decision) => {
-            text = "";
+          onResume: (decision, completed) => {
+            text = completed;
             if (decision?.outcome === "allowed") approved = [...approved, decision.material];
-            if (!signal.aborted) setAttempt({ ...entry, approved, status: "working", partial: "" });
+            if (!signal.aborted)
+              setAttempt({ ...entry, approved, status: "working", partial: text });
           },
-          onDelta: (delta) => {
+          onProgress: (progress) => {
             if (signal.aborted) return;
-            text += delta;
+            text = progress;
             setAttempt({ ...entry, approved, status: "working", partial: text });
           },
         },
@@ -971,10 +981,15 @@ function Composer({
       if (editing && status === "complete") finalReplacement = replacementFromReply(result);
     } catch (problem) {
       status = failureStatus(problem, signal);
-      if (mounted.current && status === "failed") reportSendError(problem);
+      capacityRejected = !signal.aborted && isMaterialCapacityError(problem);
+      if (mounted.current) {
+        if (capacityRejected) capacity.reject(recipient);
+        if (status === "failed" && (!capacityRejected || task.rewrite)) reportSendError(problem);
+      }
     }
     if (!mounted.current) return false;
 
+    if (!capacityRejected) onSavedRequest?.();
     if (signal.aborted) status = "stopped";
     const canApplyDirectly =
       status === "complete" && task.action === "direct" && task.seen.size === 0;
@@ -1033,7 +1048,7 @@ function Composer({
     if (!mounted.current) return false;
     if (signal.aborted) status = "stopped";
     pending.current = undefined;
-    if (!rewrite || partial)
+    if (partial || (!rewrite && !capacityRejected))
       setTurns((previous) => [
         ...previous,
         {
@@ -1046,12 +1061,14 @@ function Composer({
           partial,
         },
       ]);
+    else persist(taskTitle);
     setAttempt({
       ...entry,
       approved,
       status,
       partial: "",
       newDecisions: suggestions?.filter(({ status }) => status === "preview").length,
+      capacityRejected,
     });
     controller.current = null;
     taskRunning.current = false;
@@ -1141,7 +1158,7 @@ function Composer({
   );
   useWritingTask(report);
 
-  const canRetry = attempt && !busy && attempt.status !== "complete";
+  const canRetry = attempt && !busy && !attempt.capacityRejected && attempt.status !== "complete";
   const sameConnection = canRetry && recipients.find(({ id }) => id === attempt.recipientId);
   const otherConnection = canRetry && recipients.find(({ id }) => id === retryId);
   if (!placement) return null;
@@ -1476,6 +1493,12 @@ function Composer({
                     ))}
                 </select>
               </label>
+              {attempt.task.plan && otherConnection && (
+                <MaterialPlanPreview
+                  plan={attempt.task.plan}
+                  recipient={labelFor(otherConnection)}
+                />
+              )}
               <button
                 type="button"
                 className={buttonClass}
@@ -1592,10 +1615,12 @@ function Composer({
               selection={selectedText}
               draft={currentDraft}
               includeDraft={scope === "selection" ? setIncludeDraft : undefined}
+              handlingFull={capacity.method === "full"}
               folder={origin.folder && origin.folder !== folder ? null : folder}
               searchEnabled={!!searchFolder}
               onSearchChange={(checked) => setAllowedFolder(checked ? folder : null)}
             />
+            {capacity.controls}
             {turns.length > 0 && (
               <label className="flex items-start gap-2 text-xs">
                 <input
@@ -1612,6 +1637,7 @@ function Composer({
                 className={buttonClass}
                 disabled={
                   !recipient ||
+                  !capacity.plan ||
                   loading ||
                   !instruction.trim() ||
                   named.loading ||
