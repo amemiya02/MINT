@@ -196,7 +196,7 @@ test("a working-folder source can be reread locally without sending another requ
   const address = "https://folder-sources.example.test/v1";
   const source = "/notes/ridge.md";
   const original = "The north ridge reopened Tuesday.";
-  const revised = "The north ridge stayed closed.";
+  const revised = `Correction: “${original}” was incorrect. The ridge stayed closed.`;
   const requests: unknown[] = [];
   await page.route(`${address}/chat/completions`, (route) => {
     requests.push(JSON.parse(route.request().postDataJSON().messages.at(-1).content));
