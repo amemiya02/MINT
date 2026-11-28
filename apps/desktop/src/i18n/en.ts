@@ -7,7 +7,10 @@ export const en = {
   "plugin.templateEmpty": "Open a document to insert a template.",
   "plugin.insertTemplate": "Insert template · {name}",
   "plugin.file": "Install a MINT plugin file",
-  "plugin.invalid": "Unsupported plugin package or plugin already installed.",
+  "plugin.update": "Update {name}",
+  "plugin.allowUpdate": "Allow and update",
+  "plugin.keep": "Keep current version",
+  "plugin.invalid": "Unsupported plugin package.",
   "plugin.title": "Plugins",
   "plugin.exampleMarkdown": "Example Markdown",
   "plugin.timingSyntax":
