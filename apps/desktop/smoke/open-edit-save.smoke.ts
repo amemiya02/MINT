@@ -4184,6 +4184,10 @@ test("Codex provides manuscript and folder reviews from approved task copies", a
   const batchBaseline = changed.replace("Unsaved note.", "Unsaved note. New note.");
   const batchDraft = batchBaseline.replace("Revised.", "Batch revision.");
   const approved = "Only the approved passage.";
+  const preference = {
+    topic: "Interview quotations",
+    guidance: "Keep the interviewee's words verbatim.",
+  };
   const skillInstruction = [
     "Correct spelling, punctuation, and grammar.",
     "Check capitalization and terminology for consistency.",
@@ -4212,6 +4216,10 @@ const config = args.flatMap((arg, i) =>
 const sample = prompt.instruction.startsWith("Suggest one concise rewrite");
 const folder = prompt.folderDocuments !== undefined;
 const batch = prompt.folderWriteTargets !== undefined;
+if (folder) {
+  require("node:assert/strict").deepEqual(prompt.preferences, [${JSON.stringify(preference)}]);
+  require("node:assert/strict").match(prompt.instruction, /explicit current instruction takes precedence/);
+}
 if (!sample && !folder && (!prompt.instruction.startsWith(${JSON.stringify(`${skillInstruction}\n\n`)}) ||
   !prompt.instruction.includes("Write the resulting Markdown to draft.md."))) process.exit(12);
 if (folder && !batch && JSON.stringify(prompt.folderDocuments) !== JSON.stringify([
@@ -4509,6 +4517,15 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   for (const path of ["manuscript.md", "index.md", "old.md"]) {
     await clickPath(`${assistant}//label[normalize-space(.)='${path}']/input[@type='checkbox']`);
   }
+  const preferenceBox = `${assistant}//fieldset[legend[normalize-space(.)='Writing preferences to send']]`;
+  await clickPath(`${preferenceBox}//summary[normalize-space(.)='Remember a correction']`);
+  await select("Remember for", "folder");
+  await clickPath(`${preferenceBox}//label[normalize-space(.)='Topic']/input`);
+  await keyActions(typing(preference.topic));
+  await clickPath(`${preferenceBox}//label[normalize-space(.)='Writing guidance']/textarea`);
+  await keyActions(typing(preference.guidance));
+  await clickPath(`${preferenceBox}//button[normalize-space(.)='Save writing preference']`);
+  await showsIn('aside[aria-label="Writing Assistant"]', preference.guidance);
   await clickPath(`${assistant}//label[normalize-space(.)='Instruction']/input`);
   await keyActions([...typing("Organize these documents."), ...typing(keys.enter)]);
   await shows("Requires chapter/renamed.md, notes.md");
@@ -4657,6 +4674,15 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   await keyActions(typing(keys.enter));
   await clickPath(
     `//dialog[@aria-label='All writing tasks']//button[normalize-space(.)='${instruction}']`,
+  );
+  await waitForView(
+    "the working-folder preference to be available to send after restarting",
+    `const panel = [...document.querySelectorAll('aside[aria-label="Writing Assistant"] fieldset')]
+      .find(group => group.querySelector(':scope > legend')?.textContent === 'Writing preferences to send');
+      return [...(panel?.querySelectorAll('li') ?? [])].some(row =>
+        row.textContent.includes("Working folder") &&
+        row.textContent.includes(${JSON.stringify(preference.topic)}) &&
+        row.textContent.includes(${JSON.stringify(preference.guidance)}));`,
   );
   await clickPath(
     `${assistant}//fieldset[@aria-label='Create batch-new.md']//button[normalize-space(.)='Revert this file change']`,

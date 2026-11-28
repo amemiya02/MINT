@@ -16,6 +16,11 @@ import {
   WritingCallPause,
   WritingCallPlan,
 } from "./WritingCallLimit.tsx";
+import {
+  AppliedWritingPreferences,
+  useWritingPreferences,
+  WritingPreferences,
+} from "./WritingPreferences.tsx";
 import { useWritingTask } from "./WritingTasks.tsx";
 import {
   useWritingToolPicker,
@@ -86,6 +91,7 @@ export function ExternalAgentDialog({
   onReveal,
   onResult,
   name,
+  folder,
   tabId,
   visible,
   renderReply,
@@ -97,6 +103,7 @@ export function ExternalAgentDialog({
   readonly onReveal: () => void;
   readonly onResult: (id: string, turn: SavedTurn) => void;
   readonly name: string;
+  readonly folder: string | null;
   readonly tabId: number;
   readonly visible: boolean;
   readonly renderReply: (reply: string, close: () => void) => ReactNode;
@@ -149,6 +156,7 @@ export function ExternalAgentDialog({
       <ExternalAgentPanel
         platform={platform.externalAgent}
         materialsPlatform={platform}
+        folder={folder}
         selection={selection}
         target={target}
         renderReply={(reply) =>
@@ -166,6 +174,7 @@ function ExternalAgentPanel({
   platform,
   onConnectionsChanged,
   materialsPlatform,
+  folder = null,
   selection,
   renderReply,
   target,
@@ -174,6 +183,7 @@ function ExternalAgentPanel({
   readonly onConnectionsChanged?: (agents: ExternalAgent[]) => void;
   readonly selection?: string;
   readonly materialsPlatform?: Platform;
+  readonly folder?: string | null;
   readonly renderReply?: (reply: string) => ReactNode;
   readonly target?: AgentTaskTarget;
 }) {
@@ -184,6 +194,7 @@ function ExternalAgentPanel({
   const [saved, setSaved] = useState<ExternalAgent[]>([]);
   const [found, setFound] = useState<string[] | null>(null);
   const [instruction, setInstruction] = useState("");
+  const preferences = useWritingPreferences(materialsPlatform, folder);
   const named = useNamedMaterials();
   const materialRequests = useMaterialRequests(materialsPlatform?.sendMcpRequest);
   const callLimit = useWritingCallLimit();
@@ -417,6 +428,7 @@ function ExternalAgentPanel({
       function record(reply: string, status: AttemptStatus) {
         target?.record(entry.id, {
           instruction: request.instruction,
+          preferences: request.preferences,
           material: request.selectedText,
           context,
           reply,
@@ -588,6 +600,7 @@ function ExternalAgentPanel({
               event.preventDefault();
               if (
                 busy ||
+                !preferences.available ||
                 picker.incomplete ||
                 named.loading ||
                 named.unconfirmed ||
@@ -596,6 +609,7 @@ function ExternalAgentPanel({
                 return;
               const request = {
                 instruction: selection === undefined ? sampleInstruction : instruction.trim(),
+                preferences: preferences.request,
                 selectedText: material,
                 responseFormat:
                   access === "taskCopy" && selection === undefined
@@ -674,7 +688,16 @@ function ExternalAgentPanel({
                 />
               </label>
             )}
-            {materialsPlatform && <WritingToolPicker picker={picker} />}
+            {materialsPlatform && (
+              <>
+                <WritingPreferences
+                  preferences={preferences}
+                  correction={instruction}
+                  disabled={busy}
+                />
+                <WritingToolPicker picker={picker} />
+              </>
+            )}
             {showCallPlan && (
               <WritingCallPlan
                 recipient={t("writing.recipient.agent", { path: agent.path })}
@@ -690,6 +713,7 @@ function ExternalAgentPanel({
                 className={buttonClass}
                 disabled={
                   busy ||
+                  !preferences.available ||
                   picker.incomplete ||
                   named.loading ||
                   named.unconfirmed ||
@@ -733,6 +757,9 @@ function ExternalAgentPanel({
               access: t(`agent.${access}`),
             })}
           </p>
+          {pending.request.preferences && (
+            <AppliedWritingPreferences preferences={pending.request.preferences} />
+          )}
           <div className="flex flex-wrap gap-2">
             <button
               type="button"

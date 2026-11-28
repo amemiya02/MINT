@@ -101,6 +101,7 @@ const sendTauriModelMessage = createModelSender(async (request, receive, signal)
 export function createTauriPlatform(): Platform {
   return {
     locale: navigator.language,
+    saveWritingPreference: (preference) => invoke("save_writing_preference", { preference }),
     writingTasks: {
       list: (path, all) => invoke("list_writing_tasks", { path, all }),
       listReviewsInFolder: (folder) => invoke("list_writing_reviews_in_folder", { folder }),

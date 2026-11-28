@@ -35,6 +35,9 @@ export function recordWritingResult(
   if (!tab || !editor) return;
 
   const reading = editor.getSelection();
+  const taskPreferences = turn.preferences
+    ?.filter(({ scope }) => scope === "task")
+    .map(({ topic, guidance }) => ({ topic, guidance }));
   const record: SavedWritingTask = {
     version: 1,
     id,
@@ -47,6 +50,7 @@ export function recordWritingResult(
     reviewScroll: 0,
     showSource: false,
     turns: [turn],
+    taskPreferences: taskPreferences?.length ? taskPreferences : undefined,
   };
   const created = writeTaskCheckpoint(tasks, () => tasks.create(record));
   void created.catch(onError);
