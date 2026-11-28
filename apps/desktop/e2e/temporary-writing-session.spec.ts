@@ -130,7 +130,7 @@ test("a temporary session allows selective reversion before clearing its review 
 
   await runMenuItem(page, "edit.writingTasks");
   const historyDialog = page.getByRole("dialog", { name: "Writing tasks", exact: true });
-  await historyDialog.getByRole("button", { name: savedTask.title }).click();
+  await historyDialog.getByRole("button", { name: savedTask.title, exact: true }).click();
   await expect(historyDialog.getByRole("alert")).toContainText(
     "Close the temporary session before opening a saved task in this pane.",
   );
@@ -143,8 +143,8 @@ test("a temporary session allows selective reversion before clearing its review 
   await expect(page.getByRole("button", { name: "Resume conversation" })).toHaveCount(0);
   await runMenuItem(page, "edit.allWritingTasks");
   const allTasks = page.getByRole("dialog", { name: "All writing tasks" });
-  await expect(allTasks.getByRole("button", { name: savedTask.title })).toBeVisible();
-  await expect(allTasks.getByRole("button", { name: instruction })).toHaveCount(0);
+  await expect(allTasks.getByRole("button", { name: savedTask.title, exact: true })).toBeVisible();
+  await expect(allTasks.getByRole("button", { name: instruction, exact: true })).toHaveCount(0);
   expect(await readFile(page, path)).toBe(retained);
   const data = await storedData();
   expect(JSON.stringify(data)).not.toContain(instruction);
