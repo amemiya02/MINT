@@ -2464,6 +2464,7 @@ test("a native model reply stays editable and untitled until the author chooses 
   const sources = join(folder, "sources");
   const source = join(sources, "field-log.md");
   const excerpt = "The north ridge reopened on Tuesday.";
+  const revision = "The north ridge will remain closed until Friday.";
   const unapproved = "Private crew contact details.";
   await mkdir(sources);
   await writeFile(source, `${unapproved}\n${excerpt}\n`);
@@ -2501,7 +2502,9 @@ test("a native model reply stays editable and untitled until the author chooses 
               query: "north ridge reopened",
             },
           })
-        : groundedReply;
+        : requests.length === 2
+          ? groundedReply
+          : JSON.stringify([{ id: 1, assessment: "The revised log contradicts this statement." }]);
     response.end(JSON.stringify({ choices: [{ message: { content }, finish_reason: "stop" }] }));
   });
 
@@ -2638,7 +2641,14 @@ test("a native model reply stays editable and untitled until the author chooses 
       {
         from: 0,
         claim: supported,
-        excerpts: [{ name: "field-log.md · line 2", quote: excerpt, line: 1 }],
+        excerpts: [
+          {
+            name: "field-log.md · line 2",
+            quote: excerpt,
+            line: 1,
+            sourceFile: { path: source, line: 2 },
+          },
+        ],
       },
       { from: supported.length + 1, claim: unsupported, excerpts: [] },
     ]);
@@ -2651,6 +2661,74 @@ test("a native model reply stays editable and untitled until the author chooses 
       async () => (await readFile(path, "utf8")) === cited || null,
     );
     assert.equal(requests.length, 2);
+
+    await writeFile(source, `${unapproved}\n${revision}\n`);
+    await restart([sources, path]);
+    await invokeNative("save_model_connection", {
+      connection: {
+        name: "Source check fixture",
+        address: `http://127.0.0.1:${address.port}/v1`,
+        model: "native-source-check",
+        apiKey: "source-check-fixture",
+        lifetime: "session",
+      },
+    });
+    await nativeShortcut("ctrl+shift+p");
+    await waitForView(
+      "the Command Palette to receive focus",
+      `return document.activeElement?.matches('dialog[aria-label="Command Palette"] input');`,
+    );
+    await keyActions(typing("All writing tasks"));
+    await shows("All writing tasks");
+    await keyActions(typing(keys.enter));
+    await clickPath(
+      `//dialog[@aria-label='All writing tasks']//button[normalize-space(.)='${instruction}']`,
+    );
+    await clickPath(chooseClaim);
+    await waitForView(
+      "the original excerpt and the new on-disk source after restart",
+      `const review = document.querySelector('section[aria-label="Source passages"]');
+       const passage = review?.querySelector('section[aria-label="Excerpt used for this draft"]');
+       const comparison = passage?.querySelector('section[aria-label="Source comparison"]');
+       return passage?.querySelector('blockquote')?.textContent === ${JSON.stringify(excerpt)} &&
+         comparison?.querySelector('blockquote')?.textContent === ${JSON.stringify(revision)};`,
+    );
+    assert.equal(requests.length, 2, "restoring and comparing a changed source makes no request");
+    const affected = '//section[@aria-label="Affected statements"]';
+    await waitForView(
+      "the source check model to be selected",
+      `const select = document.querySelector('section[aria-label="Affected statements"] select');
+       const option = [...(select?.options ?? [])].find(item => item.label.startsWith('Source check fixture'));
+       if (!option) return false;
+       select.value = option.value;
+       select.dispatchEvent(new Event('change', { bubbles: true }));
+       return true;`,
+    );
+    await clickPath(
+      `${affected}//button[not(@disabled) and normalize-space(.)='Verify affected statements']`,
+    );
+    await waitForView(
+      "the assessment next to the affected statement",
+      `const affected = document.querySelector('section[aria-label="Affected statements"]');
+       return affected?.textContent.includes('The revised log contradicts this statement.') &&
+         affected.textContent.includes(${JSON.stringify(supported)}) &&
+         !affected.textContent.includes(${JSON.stringify(unsupported)});`,
+    );
+    assert.equal(requests.length, 3);
+    assert.equal(requests[2]?.path, "/v1/chat/completions");
+    assert.equal(requests[2]?.authorization, "Bearer source-check-fixture");
+    assert.equal(requests[2]?.body.model, "native-source-check");
+    const check = JSON.parse(requests[2]?.body.messages.at(-1)?.content ?? "");
+    assert.deepEqual(Object.keys(check).sort(), ["instruction", "selectedText"]);
+    assert.deepEqual(JSON.parse(check.selectedText), [
+      {
+        id: 1,
+        claim: supported,
+        evidence: [{ source: "field-log.md · line 2", original: excerpt, revised: revision }],
+      },
+    ]);
+    assert.equal(await readFile(path, "utf8"), cited);
+    assert.equal(await readFile(source, "utf8"), `${unapproved}\n${revision}\n`);
   } finally {
     endpoint.closeAllConnections();
     await new Promise<void>((resolve) => endpoint.close(() => resolve()));

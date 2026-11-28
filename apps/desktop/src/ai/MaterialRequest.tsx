@@ -250,6 +250,7 @@ export function MaterialRequestNotice({
                     line: String(line),
                   }),
                   text,
+                  sourceFile: { path: file.path, line },
                 },
               }));
             count += additions.length;

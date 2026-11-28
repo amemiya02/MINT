@@ -3,7 +3,7 @@ import { type MessageKey, useT } from "../i18n/index.ts";
 import type { Platform } from "../platform/platform.ts";
 import { useTabStore } from "../tabs/context.ts";
 import { ExternalAgentAccessNotice } from "./ExternalAgentPanel.tsx";
-import { type ExternalAgent, externalAgentSender } from "./external-agent.ts";
+import { type AgentAccess, type ExternalAgent, externalAgentSender } from "./external-agent.ts";
 import {
   type MaterialPlan,
   MaterialPlanPreview,
@@ -39,6 +39,7 @@ import {
 import {
   hasTaskImages,
   type NamedMaterial,
+  type TaskContext,
   type WritingRequest,
   type WritingSender,
 } from "./writing-sender.ts";
@@ -53,6 +54,7 @@ interface DraftConnection {
   readonly label: string;
   readonly send: WritingSender;
   readonly visionTarget?: VisionTarget;
+  readonly agentAccess?: AgentAccess;
 }
 
 interface DraftTask {
@@ -118,6 +120,8 @@ export function DraftComposer({
   const [applied, setApplied] = useState<{
     text: string;
     passages: readonly SourcePassage[];
+    context?: TaskContext;
+    connection: DraftConnection;
   } | null>(null);
   const appliedReply = applied?.text ?? "";
   const [showAppliedReply, setShowAppliedReply] = useState(false);
@@ -238,6 +242,7 @@ export function DraftComposer({
       id: `agent:${item.path}`,
       label: t("writing.recipient.agent", { path: item.path }),
       send: externalAgentSender(platform.externalAgent, item, item.preferredAccess),
+      agentAccess: item.preferredAccess,
     })),
   ];
 
@@ -372,7 +377,7 @@ export function DraftComposer({
           },
         });
         if (inserted) {
-          setApplied({ text: reply.text, passages });
+          setApplied({ text: reply.text, passages, context: sentContext, connection });
           setAttempt({ ...entry, approved, status, partial: "" });
           if (store.getState().activeId === tabId) store.editor(tabId)?.focus();
           return;
@@ -486,6 +491,14 @@ export function DraftComposer({
               draft={applied.text}
               passages={applied.passages}
               editor={store.editor(tabId)}
+              context={applied.context}
+              platform={platform}
+              recipients={
+                applied.connection.id
+                  ? connections
+                  : [{ ...applied.connection, id: "one-time-model" }, ...connections]
+              }
+              originalRecipient={applied.connection.id || "one-time-model"}
             />
           </div>
         )}
