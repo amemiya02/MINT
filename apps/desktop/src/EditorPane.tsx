@@ -1,4 +1,5 @@
 import {
+  type CodeBlockRenderer,
   createEditor,
   type EditorSettings,
   type LinkTarget,
@@ -16,6 +17,7 @@ import { useSettings } from "./settings/useSettings.ts";
 interface EditorPaneProps {
   /** Initial file text. The editor is recreated only when the pane is remounted (use a `key`). */
   readonly text: string;
+  readonly codeBlockRenderers: readonly CodeBlockRenderer[];
   readonly document: SharedDocument;
   /** Whether the pane is the one on screen; it takes focus when it becomes active. */
   readonly active: boolean;
@@ -40,6 +42,7 @@ const wordCountDelay = 150;
 export function EditorPane({
   text,
   document,
+  codeBlockRenderers,
   active,
   onReady,
   onChange,
@@ -136,6 +139,11 @@ export function EditorPane({
   useEffect(() => {
     editor.current?.setDialect(dialect);
   }, [dialect]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: text and document recreate the editor above.
+  useEffect(() => {
+    editor.current?.setCodeBlockRenderers(codeBlockRenderers);
+  }, [codeBlockRenderers, text, document]);
 
   const { focusMode, typewriterMode, vim, spellcheck } = editorSettings;
   useEffect(() => {

@@ -1,5 +1,5 @@
 import type { WordCount } from "@mint/editor";
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { createAutosave } from "./autosave/autosave.ts";
 import { CommandPalette } from "./command-palette/CommandPalette.tsx";
 import {
@@ -20,6 +20,7 @@ import type { Platform } from "./platform/platform.ts";
 import { insertTemplate } from "./plugins/host.ts";
 import { PluginEntries, pluginName, useInstallations } from "./plugins/Plugins.tsx";
 import { TagBrowser } from "./plugins/TagBrowser.tsx";
+import { timingRenderer } from "./plugins/timing-diagrams.ts";
 import { QuickOpen } from "./quick-open/QuickOpen.tsx";
 import { createRecovery, type Recovery } from "./recovery/recovery.ts";
 import { FolderSearch } from "./search/FolderSearch.tsx";
@@ -119,7 +120,13 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   );
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [sidebarView, setSidebarView] = useState<Exclude<SidebarTool, "search">>("outline");
-  const sidebarPlugins = useInstallations().filter((i) => i.enabled && "sidebar" in i.manifest);
+  const plugins = useInstallations();
+  const timingEnabled = plugins.some((i) => i.enabled && i.granted && "diagram" in i.manifest);
+  const codeBlockRenderers = useMemo(
+    () => (timingEnabled ? [timingRenderer(t)] : []),
+    [timingEnabled, t],
+  );
+  const sidebarPlugins = plugins.filter((i) => i.enabled && "sidebar" in i.manifest);
   const selectedPlugin = sidebarPlugins.find((i) => sidebarView === `plugin:${i.manifest.id}`);
   const removed = sidebarView.startsWith("plugin:") && !selectedPlugin;
   useEffect(() => {
@@ -417,6 +424,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
               <TabPanel
                 key={tab.id}
                 tab={tab}
+                codeBlockRenderers={codeBlockRenderers}
                 active={tab.id === activeId}
                 visible={selected[tab.pane] === tab.id}
                 platform={platform}

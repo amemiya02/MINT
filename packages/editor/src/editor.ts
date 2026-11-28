@@ -37,6 +37,7 @@ import { type FormattingCommands, formattingCommands } from "./formatting.ts";
 import { type ImageFile, imageFileInsertion } from "./image-files.ts";
 import { type LinkTarget, linkOpening } from "./links.ts";
 import { codeBlocks, setCodeBlockLanguage } from "./live-preview/code-blocks.ts";
+import { type CodeBlockRenderer, fencedRenderers } from "./live-preview/fenced-renderers.ts";
 import { footnotes } from "./live-preview/footnotes.ts";
 import { frontMatterPreview } from "./live-preview/front-matter.ts";
 import { headings } from "./live-preview/headings.ts";
@@ -188,6 +189,8 @@ export interface MintEditor {
   getSelections(): TextSelection[];
   /** Put a cursor or selection at each range; there must be at least one. The last range is the main one. */
   setSelections(ranges: readonly { readonly anchor: number; readonly head?: number }[]): void;
+  /** Replace the host-provided fenced block previews in this view. */
+  setCodeBlockRenderers(renderers: readonly CodeBlockRenderer[]): void;
   getMode(): EditorMode;
   getSettings(): EditorSettings;
   /** Change some settings; the others keep their value. Takes effect at once. */
@@ -252,6 +255,7 @@ export function createEditor(options: EditorOptions): MintEditor {
   const listeners = new Set<(event: EditorEvent) => void>();
   const parsed = options.document?.currentDocument() ?? parseFileText(options.text);
   const host = options.host ?? {};
+  const fences = new Compartment();
   const preview = new Compartment();
   const syntax = new Compartment();
   let mode: EditorMode = options.mode ?? "livePreview";
@@ -285,6 +289,7 @@ export function createEditor(options: EditorOptions): MintEditor {
           ...defaultKeymap.filter((b) => !b.key || !hostKeys.has(b.key)),
           ...historyKeymap,
         ]),
+        fences.of([]),
         syntax.of(dialectExtensions(options.dialect ?? defaultDialect)),
         markupContinuation,
         themeable(),
@@ -395,6 +400,9 @@ export function createEditor(options: EditorOptions): MintEditor {
         ranges.length - 1,
       );
       view.dispatch({ selection });
+    },
+    setCodeBlockRenderers(renderers) {
+      view.dispatch({ effects: fences.reconfigure(fencedRenderers(renderers)) });
     },
     getMode: () => mode,
     getSettings: () => settings,

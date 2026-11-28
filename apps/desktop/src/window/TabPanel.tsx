@@ -1,4 +1,4 @@
-import type { LinkTarget, WordCount } from "@mint/editor";
+import type { CodeBlockRenderer, LinkTarget, WordCount } from "@mint/editor";
 import { useCallback, useRef, useState } from "react";
 import { createImageHost, type ImageSaveFailure } from "../assets/image-host.ts";
 import { EditorPane } from "../EditorPane.tsx";
@@ -14,6 +14,7 @@ import type { Tab, TabStore } from "../tabs/tab-store.ts";
 /** Every open tab keeps its editor mounted, so undo history and selection survive switching. */
 export function TabPanel({
   tab,
+  codeBlockRenderers,
   active,
   visible,
   platform,
@@ -23,6 +24,7 @@ export function TabPanel({
   onWordCount,
 }: {
   readonly tab: Tab;
+  readonly codeBlockRenderers: readonly CodeBlockRenderer[];
   readonly active: boolean;
   readonly visible: boolean;
   readonly platform: Platform;
@@ -94,6 +96,7 @@ export function TabPanel({
       )}
       <div className="min-h-0 flex-1">
         <EditorPane
+          codeBlockRenderers={codeBlockRenderers}
           text={tab.text}
           document={tab.document}
           active={active}
