@@ -48,7 +48,7 @@ export function CommandPalette({ onRun, onTemplate, onClose }: CommandPalettePro
         });
     }
     for (const { enabled, manifest } of plugins) {
-      if (!enabled || !("templates" in manifest)) continue;
+      if (!enabled || !manifest.templates) continue;
       for (const template of manifest.templates) {
         const title = t("plugin.insertTemplate", { name: template.name });
         const match = fuzzyMatch(query, title);

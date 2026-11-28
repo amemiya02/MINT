@@ -469,8 +469,9 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
       const tab = state.tabs.find((t) => t.path === path);
       if (!select || !tab) return;
       const editor = editors.get(tab.id);
-      // Opening a tab may still need React to show its panel before scrolling.
-      if (editor) setTimeout(() => reveal(tab.id, editor, select));
+      // Set the selection before the next keystroke. CodeMirror measures scrolling
+      // when the view is displayed; an editor still mounting consumes it below.
+      if (editor) reveal(tab.id, editor, select);
       else pendingSelections.set(tab.id, select);
     },
 
@@ -683,7 +684,7 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
       editors.set(id, editor);
       const select = pendingSelections.get(id);
       pendingSelections.delete(id);
-      if (select) setTimeout(() => reveal(id, editor, select));
+      if (select) reveal(id, editor, select);
     },
 
     markChanged(viewId, fromHistory = false) {

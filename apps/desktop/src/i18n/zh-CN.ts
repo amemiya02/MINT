@@ -8,7 +8,10 @@ export const zhCN: Messages = {
   "plugin.templateEmpty": "请先打开文档以插入模板。",
   "plugin.insertTemplate": "插入模板 · {name}",
   "plugin.file": "从文件安装 MINT 插件",
-  "plugin.invalid": "插件包不受支持，或插件已安装。",
+  "plugin.update": "更新{name}",
+  "plugin.allowUpdate": "允许并更新",
+  "plugin.keep": "保留当前版本",
+  "plugin.invalid": "插件包不受支持。",
   "plugin.title": "插件",
   "plugin.exampleMarkdown": "Markdown 示例",
   "plugin.timingSyntax":

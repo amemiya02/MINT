@@ -2,7 +2,9 @@
 
 In Settings → Plugins, choose a JSON file containing a MINT version 1 manifest. Review the requested action and choose **Allow access** or **Deny access**. A denied installation can be authorized later. Enabled statistics plugins contribute a named button below the document. The view reads the active draft through the host, including unsaved edits.
 
-A statistics package contains one declarative view. For example, save the following as `character-budget.mint.json`.
+To update an installed package, choose a file with the same identifier. MINT preserves its enabled state and existing grants. If the package adds actions, Settings lists them for approval. Choose **Keep current version** to continue using the installed package with its existing grants. A package can combine statistics, templates, a sidebar and a diagram. Its `permissions` array must contain exactly the actions used by those contributions.
+
+A statistics package can contribute a declarative view. For example, save the following as `character-budget.mint.json`.
 
 ```json
 {

@@ -254,26 +254,26 @@ test("history restores and undo autosave the exact native file", async () => {
   assert.deepEqual(await readdir(dir), ["smoke.md"]);
 });
 
-test("the native statistics view refuses a denied read and allows an explicit grant", async () => {
-  const click = async (label: string) => {
-    const element = await until(label, async () => {
-      const result = await command<Record<string, string>>("POST", `/session/${session}/element`, {
-        using: "xpath",
-        value: `//button[normalize-space(.)='${label}']`,
-      });
-      return result[elementKey] ?? null;
-    }).catch(explain);
-    await command("POST", `/session/${session}/element/${element}/click`, {});
-  };
-  const shows = (text: string) =>
-    until(text, () =>
-      command<boolean>("POST", `/session/${session}/execute/sync`, {
-        script:
-          "return document.querySelector('dialog[open]')?.innerText.includes(arguments[0]) === true",
-        args: [text],
-      }).then((found) => (found ? true : null)),
-    ).catch(explain);
+const click = async (label: string) => {
+  const element = await until(label, async () => {
+    const result = await command<Record<string, string>>("POST", `/session/${session}/element`, {
+      using: "xpath",
+      value: `//button[normalize-space(.)='${label}']`,
+    });
+    return result[elementKey] ?? null;
+  }).catch(explain);
+  await command("POST", `/session/${session}/element/${element}/click`, {});
+};
+const shows = (text: string) =>
+  until(text, () =>
+    command<boolean>("POST", `/session/${session}/execute/sync`, {
+      script:
+        "return document.querySelector('dialog[open]')?.innerText.includes(arguments[0]) === true",
+      args: [text],
+    }).then((found) => (found ? true : null)),
+  ).catch(explain);
 
+test("the native statistics view refuses a denied read and allows an explicit grant", async () => {
   await nativeShortcut("ctrl+n");
   await until("the new document to receive focus", async () => {
     const ready = await command<boolean>("POST", `/session/${session}/execute/sync`, {
@@ -298,6 +298,76 @@ test("the native statistics view refuses a denied read and allows an explicit gr
   await click("Writing statistics");
   await shows("Words: 3");
   await click("Close");
+  await nativeShortcut("ctrl+comma");
+  await click("Uninstall");
+  await click("Close");
+});
+
+test("declining a plugin update keeps its native read grant and withholds its write command", async () => {
+  const original = {
+    apiVersion: 1,
+    id: "smoke.draft-tools",
+    name: "Smoke metrics",
+    permissions: ["document.read"],
+    statistics: ["words"],
+  };
+  const expanded = {
+    ...original,
+    name: "Smoke toolkit",
+    permissions: ["document.read", "document.write"],
+    templates: [{ name: "Smoke marker", text: "SMOKE WRITE" }],
+  };
+  const upload = async (manifest: object) => {
+    await until("plugin file chooser", () =>
+      command<boolean>("POST", `/session/${session}/execute/sync`, {
+        script: `const input = document.querySelector('dialog[open] input[type=file][accept*=json]');
+          if (!input) return false;
+          const transfer = new DataTransfer();
+          transfer.items.add(new File([JSON.stringify(arguments[0])], 'smoke.mint.json', {type: 'application/json'}));
+          input.files = transfer.files;
+          input.dispatchEvent(new Event('change', {bubbles: true}));
+          return true;`,
+        args: [manifest],
+      }).then((ready) => ready || null),
+    ).catch(explain);
+  };
+  await nativeShortcut("ctrl+n");
+  await until("the new plugin update draft to receive focus", () =>
+    command<boolean>("POST", `/session/${session}/execute/sync`, {
+      script:
+        "return document.activeElement?.matches('.cm-content') && !document.activeElement.textContent",
+      args: [],
+    }).then((ready) => ready || null),
+  ).catch(explain);
+  await keyActions(typing("plugin update draft"));
+  await nativeShortcut("ctrl+comma");
+  await upload(original);
+  await click("Allow access");
+  await upload(expanded);
+  await shows("Modify the current document at the selection");
+  await click("Keep current version");
+  await click("Close");
+  await click("Smoke metrics");
+  await shows("Words: 3");
+  await click("Close");
+  await nativeShortcut("ctrl+shift+p");
+  await keyActions(typing("Smoke marker"));
+  await shows("No matching commands");
+  await keyActions(typing("\uE00C"));
+  await nativeShortcut("ctrl+comma");
+  await upload(expanded);
+  await click("Allow and update");
+  await click("Close");
+  await nativeShortcut("ctrl+shift+p");
+  await keyActions(typing("Smoke marker"));
+  await shows("Insert template · Smoke marker");
+  await keyActions(typing(keys.enter));
+  await until("the newly authorized write command to edit the native draft", () =>
+    command<boolean>("POST", `/session/${session}/execute/sync`, {
+      script: "return document.querySelector('.cm-content')?.innerText.includes('SMOKE WRITE')",
+      args: [],
+    }).then((written) => written || null),
+  ).catch(explain);
   await nativeShortcut("ctrl+comma");
   await click("Uninstall");
   await click("Close");
