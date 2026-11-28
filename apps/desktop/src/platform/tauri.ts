@@ -42,6 +42,7 @@ const nativeItems = {
 export function createTauriPlatform(): Platform {
   return {
     locale: navigator.language,
+    savesPdfDirectly: /Windows/.test(navigator.userAgent),
     readTextFile: (path) => invoke<string>("read_text_file", { path }),
     writeBinaryFile: (path, bytes) =>
       invoke<void>("write_binary_file", { path, data: toBase64(bytes) }),
@@ -61,10 +62,11 @@ export function createTauriPlatform(): Platform {
       invoke<string | null>("show_open_dialog", { title, filters }),
     showSaveDialog: ({ title, defaultPath, filters }) =>
       invoke<string | null>("show_save_dialog", { title, defaultPath, filters }),
-    async printDocument(html, { title, paper }) {
+    async printDocument(html, options) {
       // A window of its own shows the document and opens the print dialog on it (src/print/main.ts).
       const label = `print-${crypto.randomUUID()}`;
-      const job: PrintJob = { html, title, paper };
+      const { title } = options;
+      const job: PrintJob = { html, ...options };
       let deliver = (_sent: Promise<void>) => {};
       const delivered = new Promise<void>((resolve) => {
         deliver = resolve;

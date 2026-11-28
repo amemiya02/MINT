@@ -13,9 +13,10 @@ const current = getCurrentWebviewWindow();
 const stop = await current.listen<PrintJob>(printEvents.document, (event) => {
   stop();
   void show(event.payload)
-    .then(() => {
-      closeAfterPrinting();
-      return invoke("print_pages", { paper: event.payload.paper });
+    .then(async () => {
+      const { paper, target } = event.payload;
+      await invoke("print_pages", { paper, target });
+      if (target) await current.close();
     })
     .catch((reason) => {
       const error = document.createElement("p");
@@ -25,15 +26,6 @@ const stop = await current.listen<PrintJob>(printEvents.document, (event) => {
     });
 });
 await emit(printEvents.ready, current.label);
-
-/**
- * WebView2 reports completion through afterprint. GTK closes the window from
- * the native print operation. The macOS sheet can outlive afterprint.
- */
-function closeAfterPrinting() {
-  if (!/Windows/.test(navigator.userAgent)) return;
-  window.addEventListener("afterprint", () => void current.close(), { once: true });
-}
 
 /** Replace this page with the document, and wait until its fonts and images are in. */
 async function show({ html, title }: PrintJob): Promise<void> {

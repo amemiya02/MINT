@@ -94,6 +94,26 @@ jobs:
         run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets -- -D warnings
       - name: Rust tests
         run: pnpm test:rust
+      - name: Build MINT for WebView2 PDF verification
+        if: runner.os == 'Windows'
+        working-directory: apps/desktop/src-tauri
+        run: cargo build --locked --features tauri/custom-protocol --bin mint
+      - name: Verify native WebView2 PDF output
+        if: runner.os == 'Windows'
+        working-directory: apps/desktop
+        timeout-minutes: 5
+        env:
+          MINT_PDF_PROOF: ${{ runner.temp }}/mint-webview2-proof
+        run: node --test smoke/windows-pdf.smoke.ts
+      - name: Upload WebView2 PDF and preview
+        if: runner.os == 'Windows' && !cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-webview2-pdf
+          path: |
+            ${{ runner.temp }}/mint-webview2-proof/field.pdf
+            ${{ runner.temp }}/mint-webview2-proof/preview.json
+          if-no-files-found: ignore
 
   # The real app (Tauri, WebKitGTK, Rust backend) driven over WebDriver by tauri-driver:
   # open a document from the command line, edit it, save it. Linux only, since

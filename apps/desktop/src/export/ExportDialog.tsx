@@ -154,7 +154,23 @@ export function ExportDialog({
       const name = stem(path);
       if (format === "pdf") {
         if (!preview || !ready) throw new Error(t("export.pdf.preview"));
-        await platform.printDocument(preview.html, { title: name, paper: layout.paper });
+        const target = platform.savesPdfDirectly
+          ? await platform.showSaveDialog({
+              title: t("export.pdf.saveTitle"),
+              defaultPath: `${path.slice(0, path.length - baseName(path).length)}${name}.pdf`,
+              filters: [{ name: "PDF", extensions: ["pdf"] }],
+            })
+          : undefined;
+        if (target === null) {
+          close();
+          return;
+        }
+        if (target === path) throw new Error(t("export.docx.chooseAnotherFile"));
+        await platform.printDocument(preview.html, {
+          title: name,
+          paper: layout.paper,
+          ...(target ? { target } : {}),
+        });
         close();
         return;
       }
@@ -400,7 +416,9 @@ export function ExportDialog({
                   />
                 )}
               {ready && <output>{t("export.pdf.pages", { count: String(preview.count) })}</output>}
-              <p className="text-(--mint-muted)">{t("export.pdf.hint")}</p>
+              {!platform.savesPdfDirectly && (
+                <p className="text-(--mint-muted)">{t("export.pdf.hint")}</p>
+              )}
             </>
           )}
           {error && !importing && (
@@ -430,7 +448,9 @@ export function ExportDialog({
                 busy
                   ? "export.html.exporting"
                   : format === "pdf"
-                    ? "export.pdf.print"
+                    ? platform.savesPdfDirectly
+                      ? "export.pdf.save"
+                      : "export.pdf.print"
                     : "export.html.export",
               )}
             </button>

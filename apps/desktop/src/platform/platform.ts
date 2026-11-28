@@ -10,6 +10,8 @@ import type { PrintJob } from "../print/protocol.ts";
 export interface Platform {
   /** The user's preferred UI language as a BCP 47 tag, e.g. `zh-CN` or `en-US`. */
   readonly locale: string;
+  /** Whether PDF export uses a save dialog and writes the selected file directly. */
+  readonly savesPdfDirectly?: boolean;
 
   /**
    * Read a document as UTF-8 text, exactly as stored: a byte order mark is kept
@@ -51,7 +53,7 @@ export interface Platform {
    * system print dialog, where the user saves it as a PDF. `title` names the
    * print job, and so the suggested PDF file. Resolves once the dialog is up.
    */
-  printDocument(html: string, options: Pick<PrintJob, "title" | "paper">): Promise<void>;
+  printDocument(html: string, options: Omit<PrintJob, "html">): Promise<void>;
 
   /** Ask the user to pick a folder. Resolves to its path, or `null` if cancelled. */
   showOpenFolderDialog(options: { readonly title: string }): Promise<string | null>;
