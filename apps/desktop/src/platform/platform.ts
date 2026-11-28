@@ -19,6 +19,11 @@ export interface Platform {
   /** Write text as UTF-8 atomically: either the whole new content lands or the old file stays intact. */
   writeTextFile(path: string, text: string): Promise<void>;
 
+  /** App-data snapshots in save order. Their IDs are millisecond timestamps. */
+  listVersions(path: string): Promise<number[]>;
+  recordVersion(path: string, text: string): Promise<void>;
+  readVersion(path: string, id: number): Promise<string>;
+
   /**
    * Watch one document for changes made on disk: modified, created, deleted or
    * renamed away. `onChange` is called after each (debounced) batch of changes,

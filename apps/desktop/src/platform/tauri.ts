@@ -44,6 +44,9 @@ export function createTauriPlatform(): Platform {
     locale: navigator.language,
     readTextFile: (path) => invoke<string>("read_text_file", { path }),
     writeTextFile: (path, text) => invoke<void>("write_text_file", { path, text }),
+    recordVersion: (path, text) => invoke<void>("record_version", { path, text }),
+    listVersions: (path) => invoke<number[]>("list_versions", { path }),
+    readVersion: (path, id) => invoke<string>("read_version", { path, id }),
     async watchFile(path, onChange) {
       const channel = new Channel<null>();
       channel.onmessage = () => onChange();

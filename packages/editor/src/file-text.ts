@@ -42,6 +42,12 @@ export function parseFileText(raw: string): ParsedFileText {
   return { doc, extension: lineEndingsField.init(() => endings) };
 }
 
+/** A second view starts from the same persistent text and original line-ending policy. */
+export function copyFileDocument(state: EditorState): ParsedFileText {
+  const endings = state.field(lineEndingsField);
+  return { doc: state.doc, extension: lineEndingsField.init(() => endings) };
+}
+
 /**
  * A transaction that turns the document into `raw` (e.g. the file reloaded
  * from disk). Only the differing middle part is replaced, so the selection
@@ -201,4 +207,9 @@ function mapBreaks(breaks: readonly string[], fallback: string, tr: Transaction)
     next.splice(edit.at, edit.removed, ...Array<string>(edit.added).fill(fallback));
   }
   return next;
+}
+
+/** File metadata that must accompany a document change in every view. */
+export function sharedFileEffects(tr: Transaction) {
+  return tr.effects.filter((effect) => effect.is(resetEndings) || effect.is(restoreBreaks));
 }

@@ -16,6 +16,11 @@ body {
   color: var(--mint-fg);
 }
 
+[role="tabpanel"]:has([role="toolbar"] :focus-visible) {
+  outline: 2px solid var(--mint-accent);
+  outline-offset: -2px;
+}
+
 .mint-editor .cm-editor {
   height: 100%;
   font-size: var(--mint-font-size);
