@@ -94,6 +94,13 @@ export const zhCN: Messages = {
   "writing.viewChanges": "查看改动",
   "writing.continue": "在侧栏继续",
   "writing.resume": "继续会话",
+  "writing.temporary.label": "临时会话",
+  "writing.temporary.close": "关闭临时会话",
+  "writing.temporary.closeBeforeOpening": "请先关闭临时会话，再在此分栏打开已保存的任务。",
+  "writing.temporary.closePrompt":
+    "MINT 会清除此设备上的会话、任务副本和审阅记录，保留已经写入的正文及本地版本历史。关闭后将无法按任务撤回改动。",
+  "writing.temporary.wait": "请等待任务完成，或先停止任务再关闭会话。",
+  "writing.temporary.cleanupFailed": "MINT 无法清理任务副本，请再次尝试关闭会话。",
   "writing.tasks": "写作任务",
   "writing.tasks.loading": "正在加载写作任务…",
   "writing.tasks.empty": "当前文档没有已保存的写作任务。",
@@ -146,6 +153,8 @@ export const zhCN: Messages = {
     "已配置的 MCP 工具和钩子可能拥有独立的文件与网络访问权限。运行命令时，Agent 不会逐次询问。",
   "agent.usesLogin":
     "Codex 沿用现有登录并把提示发送给其服务提供方。MINT 在空白临时目录中启动每次请求。",
+  "agent.retention":
+    "Codex 以临时模式运行，跳过本机会话记录的保存。已登录的服务及配置的服务商或工具各自适用其数据留存规则。",
   "agent.material": "任务材料 · 仅发送选中文本",
   "agent.sampleText": "我们目前正在开展对这份草稿的审阅工作。",
   "agent.sampleInstruction": "为这段选中文本提供一个更简洁的改写。",
@@ -402,6 +411,16 @@ export const zhCN: Messages = {
   "models.reply": "模型回复",
   "models.partial": "未完成的回复",
   "models.capabilities": "连接能力",
+  "models.retention": "数据留存",
+  "models.retention.custom":
+    "数据留存取决于所配置的服务。请向服务运营方了解日志和上游服务商的规则。关闭临时会话只清除 MINT 的本机任务数据。",
+  "models.retention.openai":
+    "OpenAI API 的滥用监控日志可能包含提示词和回复。默认最多留存 30 天，具体还取决于例外情况和账户的数据控制设置。",
+  "models.retention.deepseek":
+    "DeepSeek API 默认将请求上下文缓存到磁盘。不再使用的缓存通常在数小时至数天内清除。其他数据留存遵循 DeepSeek 的服务政策。",
+  "models.retention.ollama":
+    "如果此地址运行的是仅本地模式的 Ollama，提示词会留在服务运行的设备中。本地日志及是否使用云模型取决于服务配置。",
+  "models.retention.policy": "打开服务方文档",
   "models.conversation": "对话：{state}",
   "models.streaming": "流式生成：{state}",
   "models.proposedEdit": "修改建议：{state}",

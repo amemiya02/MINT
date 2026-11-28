@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useT } from "../i18n/index.ts";
+import { type MessageKey, useT } from "../i18n/index.ts";
 import { useModalDialog } from "../window/useModalDialog.ts";
 import {
   openWritingReviews,
@@ -12,6 +12,7 @@ export function WritingTasksDialog({
   tasks,
   path,
   busyTask,
+  openFailure,
   onClose,
   onOpen,
   onDelete,
@@ -19,6 +20,7 @@ export function WritingTasksDialog({
   readonly tasks: WritingTasksPlatform;
   readonly path: string | null;
   readonly busyTask: string | null;
+  readonly openFailure: MessageKey;
   readonly onClose: () => void;
   readonly onOpen: (task: SavedWritingTask) => boolean;
   readonly onDelete: (id: string, remaining: number) => void;
@@ -92,7 +94,7 @@ export function WritingTasksDialog({
           {t("settings.close")}
         </button>
       </header>
-      {openFailed && <p role="alert">{t("writing.tasks.openUntitled")}</p>}
+      {openFailed && <p role="alert">{t(openFailure)}</p>}
       {failed ? (
         <p role="alert">{t("writing.tasks.loadFailed")}</p>
       ) : !entries ? (

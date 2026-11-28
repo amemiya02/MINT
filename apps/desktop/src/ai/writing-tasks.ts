@@ -53,6 +53,8 @@ export interface WritingTasksPlatform {
   create(task: SavedWritingTask): Promise<void>;
   update(task: SavedWritingTask, expectedUpdatedAt: number): Promise<void>;
   remove(id: string): Promise<void>;
+  createTemporary(id: string): Promise<void>;
+  removeTemporary(id: string): Promise<void>;
 }
 
 interface OpenWritingReview {
