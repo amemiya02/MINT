@@ -112,6 +112,9 @@ export interface TabStore {
   getState(): TabsState;
   subscribe(listener: () => void): () => void;
 
+  /** Refresh the on-disk state of the open document before applying a proposed edit. */
+  refreshDisk(id: number): Promise<boolean>;
+
   /** Once the document shows, select a line range or move to a linked heading. */
   openDocument(path: string, select?: DocumentLocation): Promise<void>;
   /** Follow an anchor in the currently open tab, including an untitled document. */
@@ -406,14 +409,14 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
     markClean(id, diskText);
   }
 
-  /** React to a watcher event: compare the document on disk with what the tab knows. */
+  /** Compare disk with the tab. Return false if the read needs to be retried. */
   async function checkDisk(id: number) {
     if (savesInFlight.has(id)) {
       recheck.add(id);
-      return;
+      return false;
     }
     const tab = documentTab(id);
-    if (!tab || tab.path === null) return;
+    if (!tab || tab.path === null) return true;
     const epoch = saveEpochs.get(id);
     let diskText: string | null;
     try {
@@ -422,12 +425,12 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
       diskText = null;
     }
     const current = documentTab(id);
-    if (!current || current.path !== tab.path) return;
+    if (!current || current.path !== tab.path) return false;
     if (saveEpochs.get(id) !== epoch || savesInFlight.has(id)) {
       // A save overlapped the read: what was read may already be stale.
       recheck.add(id);
       if (!savesInFlight.has(id)) void runRecheck(id);
-      return;
+      return false;
     }
 
     if (diskText === null) {
@@ -435,10 +438,10 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
         // Closing the tab now would lose the text, so it counts as unsaved.
         updateTab(id, { dirty: true, external: { kind: "missing" } });
       }
-      return;
+      return true;
     }
     // MINT's own save, or a change that left the content as it was.
-    if (diskText === diskTexts.get(id) && current.external?.kind !== "missing") return;
+    if (diskText === diskTexts.get(id) && current.external?.kind !== "missing") return true;
 
     if (!hasOwnEdits(id)) {
       loadDiskText(id, diskText);
@@ -447,6 +450,7 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
     } else {
       updateTab(id, { external: { kind: "conflict", diskText } });
     }
+    return true;
   }
 
   /** Snapshot this request now. A queued Save follows the path established by the preceding Save As. */
@@ -527,6 +531,18 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
+    },
+
+    async refreshDisk(id) {
+      const document = documentId(id);
+      // A watcher can defer to a later check. An edit needs a completed check before it applies.
+      while (state.tabs.some((tab) => tab.id === id)) {
+        await savesInFlight.get(document);
+        if (await checkDisk(document)) {
+          return state.tabs.some((tab) => tab.id === id && !tab.external);
+        }
+      }
+      return false;
     },
 
     openDocument,

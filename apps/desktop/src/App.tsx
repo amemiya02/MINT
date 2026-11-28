@@ -12,11 +12,7 @@ import { DraftComposer } from "./ai/DraftComposer.tsx";
 import { ExternalAgentDialog } from "./ai/ExternalAgentPanel.tsx";
 import { inlineCompletionSender } from "./ai/inline-completion.ts";
 import { ReplyExcerpt } from "./ai/ReplyExcerpt.tsx";
-import {
-  applyWritingSelection,
-  captureWritingSelection,
-  type WritingSelection,
-} from "./ai/writing-selection.ts";
+import { captureWritingSelection, type WritingSelection } from "./ai/writing-selection.ts";
 import { AnnotationDialog, AnnotationPanel } from "./annotations/Annotations.tsx";
 import { createAnnotationStorage } from "./annotations/annotation-storage.ts";
 import { createAutosave } from "./autosave/autosave.ts";
@@ -153,7 +149,6 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     tabId: number;
     origin: WritingSelection;
   } | null>(null);
-  const agentTab = tabs.find((tab) => tab.id === agentSelection?.tabId);
   useEffect(() => () => agentSelection?.origin.range.release(), [agentSelection]);
   const [historyPath, setHistoryPath] = useState<string | null>(null);
   const [annotationsOpen, setAnnotationsOpen] = useState(false);
@@ -884,24 +879,15 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
           }}
         />
       )}
-      {agentSelection && agentTab && (
+      {agentSelection && (
         <ExternalAgentDialog
           platform={platform.externalAgent}
           selection={agentSelection.origin.text}
           renderReply={(reply, close) => (
             <ReplyExcerpt
               reply={reply}
-              originName={tabName(t, agentTab)}
-              originPath={agentTab.path}
-              originalText={agentSelection.origin.text}
-              onReplace={(excerpt) => {
-                const { tabId, origin } = agentSelection;
-                const canApply =
-                  store.editor(tabId) === origin.editor &&
-                  store.getState().tabs.some((tab) => tab.id === tabId && !tab.external);
-                const result = applyWritingSelection(origin, excerpt, canApply);
-                return result.status === "conflict" ? result.current : null;
-              }}
+              origin={agentSelection.origin}
+              originId={agentSelection.tabId}
               onUsed={close}
             />
           )}

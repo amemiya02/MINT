@@ -25,7 +25,8 @@ export function applyWritingSelection(
 ) {
   const range = origin.range.current();
   const current = origin.editor.getText().slice(range.from, range.to);
-  if (!canApply || current !== origin.text) return { status: "conflict", current } as const;
+  if (!canApply || !origin.range.hasBoundaries() || current !== origin.text)
+    return { status: "conflict", current } as const;
   if (replacement !== origin.text) origin.editor.replaceRange(range, replacement);
   return { status: "applied" } as const;
 }

@@ -6,6 +6,10 @@ export interface DiffLine {
   readonly text: string;
 }
 
+export function rawLines(text: string): string[] {
+  return text.match(/[^\r\n]*(?:\r\n|\r|\n)|[^\r\n]+$/g) ?? [];
+}
+
 /**
  * Compare two texts line by line (longest common subsequence). `removed` lines
  * are only in `before`, `added` lines only in `after`.

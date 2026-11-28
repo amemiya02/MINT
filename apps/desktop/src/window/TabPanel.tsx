@@ -167,16 +167,15 @@ export function TabPanel({
         <WritingAssistant
           editor={editor}
           name={tabName(t, tab)}
-          path={path}
+          tabId={id}
           active={active}
           platform={platform}
           askRequest={askWriting}
           settingsOpen={settingsOpen}
           onAsk={onAskWriting}
           onSettings={onOpenSettings}
-          canApply={() =>
-            store.getState().tabs.some((current) => current.id === id && !current.external)
-          }
+          externalChange={!!tab.external}
+          refreshDisk={() => store.refreshDisk(id)}
         >
           <EditorPane
             codeBlockRenderers={codeBlockRenderers}
