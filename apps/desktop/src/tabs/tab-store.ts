@@ -112,6 +112,9 @@ export interface TabStore {
   getState(): TabsState;
   subscribe(listener: () => void): () => void;
 
+  /** Refresh the on-disk state of the open document before applying a proposed edit. */
+  refreshDisk(id: number): Promise<boolean>;
+
   /** Once the document shows, select a line range or move to a linked heading. */
   openDocument(path: string, select?: DocumentLocation): Promise<void>;
   /** Follow an anchor in the currently open tab, including an untitled document. */
@@ -527,6 +530,13 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
+    },
+
+    async refreshDisk(id) {
+      const document = documentId(id);
+      await savesInFlight.get(document);
+      await checkDisk(document);
+      return !!state.tabs.find((tab) => tab.id === id && !tab.external);
     },
 
     openDocument,

@@ -1,10 +1,6 @@
 import { Fragment, useMemo } from "react";
 import { useT } from "../i18n/index.ts";
-import { compareLines, type DiffLine, diffLines } from "./line-diff.ts";
-
-function rawLines(text: string) {
-  return text.match(/[^\r\n]*(?:\r\n|\r|\n)|[^\r\n]+$/g) ?? [];
-}
+import { compareLines, type DiffLine, diffLines, rawLines } from "./line-diff.ts";
 
 /** Offsets in the draft and the exact historical bytes for each consecutive change. */
 function restoreRanges(lines: DiffLine[]) {

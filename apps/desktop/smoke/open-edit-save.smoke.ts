@@ -1047,6 +1047,8 @@ test("a model receives only the sample or the chosen selection through the nativ
   await restart([draft]);
   const requests: { url?: string; method?: string; authorization?: string; body: unknown }[] = [];
   let pendingReply: ServerResponse | undefined;
+  let pendingPreview: ServerResponse | undefined;
+  const previewInstruction = "Revise the opening and closing.";
   const endpoint = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(chunk);
@@ -1061,7 +1063,12 @@ test("a model receives only the sample or the chosen selection through the nativ
       response.writeHead(404).end();
       return;
     }
-    if (!JSON.parse(body).stream) {
+    const payload = JSON.parse(body);
+    if (!payload.stream) {
+      if (payload.messages.at(-1)?.content.includes(previewInstruction)) {
+        pendingPreview = response;
+        return;
+      }
       response.writeHead(200, { "Content-Type": "application/json" }).end(
         JSON.stringify({
           choices: [
@@ -1092,6 +1099,24 @@ test("a model receives only the sample or the chosen selection through the nativ
     });
     assert.ok(found[elementKey], `input for ${label}`);
     await command("POST", `/session/${session}/element/${found[elementKey]}/value`, { text });
+  }
+
+  async function askSelection(instruction: string) {
+    await click("Ask AI");
+    await waitForView(
+      "the saved model to appear in the send row",
+      `return [...document.querySelectorAll('section[aria-label="Ask AI"] select option')]
+        .some((option) => option.textContent.startsWith("Selection fixture · "));`,
+    );
+    await command("POST", `/session/${session}/execute/sync`, {
+      script: `const option = [...document.querySelectorAll('section[aria-label="Ask AI"] select option')]
+        .find((item) => item.textContent.startsWith("Selection fixture · "));
+        option.parentElement.value = option.value;
+        option.parentElement.dispatchEvent(new Event('change', { bubbles: true }));`,
+      args: [],
+    });
+    await clickPath("//section[@aria-label='Ask AI']//input");
+    await keyActions([...typing(instruction), ...typing(keys.enter)]);
   }
 
   try {
@@ -1170,22 +1195,8 @@ test("a model receives only the sample or the chosen selection through the nativ
       "return document.activeElement?.matches('.cm-content');",
     );
     await keyActions([...chord(keys.control, keys.end), ...chord(keys.shift, keys.home)]);
-    await click("Ask AI");
-    await waitForView(
-      "the saved model to appear in the send row",
-      `return [...document.querySelectorAll('section[aria-label="Ask AI"] select option')]
-        .some((option) => option.textContent.startsWith("Selection fixture · "));`,
-    );
-    await command("POST", `/session/${session}/execute/sync`, {
-      script: `const option = [...document.querySelectorAll('section[aria-label="Ask AI"] select option')]
-        .find((item) => item.textContent.startsWith("Selection fixture · "));
-        option.parentElement.value = option.value;
-        option.parentElement.dispatchEvent(new Event('change', { bubbles: true }));`,
-      args: [],
-    });
-    await clickPath("//section[@aria-label='Ask AI']//input");
     const instruction = "Shorten this sentence, apply directly";
-    await keyActions([...typing(instruction), ...typing(keys.enter)]);
+    await askSelection(instruction);
     await waitForView(
       "the authorized replacement in the active editor",
       `return document.activeElement?.matches(".cm-content") &&
@@ -1223,6 +1234,76 @@ test("a model receives only the sample or the chosen selection through the nativ
     await until(
       "one undo to restore the original bytes",
       async () => (await readFile(draft, "utf8")) === manuscript || null,
+    ).catch(explain);
+
+    await clickPath("//section[@aria-label='Ask AI']//button[normalize-space(.)='Close']");
+    const reviewSource = "**Opening line.**\r\n\r\nKeep this.  \n\nClosing line.";
+    await writeFile(draft, `\uFEFF${reviewSource}`);
+    await waitForView(
+      "the replacement draft from disk",
+      "return document.querySelector('.cm-content')?.textContent.includes('Closing line.');",
+    );
+    await keyActions(chord(keys.control, "a"));
+    await askSelection(previewInstruction);
+    const previewReply = await until(
+      "the native preview request",
+      async () => pendingPreview ?? null,
+    );
+    assert.equal(requests.length, 3);
+    assert.equal(requests[2]?.authorization, `Bearer ${secret}`);
+    assert.deepEqual(requests[2]?.body, {
+      model: "native-fixture",
+      stream: false,
+      messages: [
+        { role: "system", content: payload.messages[0]?.content },
+        {
+          role: "user",
+          content: JSON.stringify({ instruction: previewInstruction, selectedText: reviewSource }),
+        },
+      ],
+    });
+
+    const externallyEdited = `\uFEFF${reviewSource.replace("Closing line.", "Disk closing.")}`;
+    await writeFile(draft, externallyEdited);
+    await waitForView(
+      "the external change during generation",
+      "return document.querySelector('.cm-content')?.textContent.includes('Disk closing.');",
+    );
+    previewReply.writeHead(200, { "Content-Type": "application/json" }).end(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content:
+                "<replacement>**Revised opening.**\n\nKeep this.  \n\nRevised closing.</replacement>",
+            },
+            finish_reason: "stop",
+          },
+        ],
+      }),
+    );
+    await waitForView(
+      "independent rendered proposals with the changed text compared",
+      `return [...document.querySelectorAll('[aria-label="Proposed edit 1 of 2"] strong')]
+          .some((node) => node.textContent === 'Revised opening.') &&
+        document.querySelector('[aria-label="Proposed edit 2 of 2"]')?.innerText.includes('Disk closing.');`,
+    );
+    assert.equal(await readFile(draft, "utf8"), externallyEdited);
+    const first = "//fieldset[@aria-label='Proposed edit 1 of 2']";
+    const second = "//fieldset[@aria-label='Proposed edit 2 of 2']";
+    await clickPath(`${first}//button[normalize-space(.)='Apply proposed edit']`);
+    await clickPath(`${second}//button[normalize-space(.)='Dismiss proposed edit']`);
+    await until(
+      "only the accepted native change to be autosaved",
+      async () =>
+        (await readFile(draft, "utf8")) ===
+          externallyEdited.replace("Opening line.", "Revised opening.") || null,
+    ).catch(explain);
+    await clickPath("//section[@aria-label='Ask AI']//button[normalize-space(.)='Close']");
+    await keyActions(chord(keys.control, "z"));
+    await until(
+      "undo to preserve the external edit",
+      async () => (await readFile(draft, "utf8")) === externallyEdited || null,
     ).catch(explain);
   } finally {
     endpoint.closeAllConnections();

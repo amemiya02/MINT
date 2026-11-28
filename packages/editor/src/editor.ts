@@ -9,10 +9,13 @@ import {
 import { syntaxTree } from "@codemirror/language";
 import { selectNextOccurrence } from "@codemirror/search";
 import {
+  type ChangeDesc,
+  ChangeSet,
   Compartment,
   EditorSelection,
   EditorState,
   type Extension,
+  MapMode,
   Text,
   Transaction,
 } from "@codemirror/state";
@@ -201,6 +204,13 @@ export type EditorEvent =
   /** The editor scrolled; {@link MintEditor.getVisibleRange} may have changed. */
   | { readonly type: "scroll" };
 
+interface TrackedRange {
+  current(): TextRange;
+  /** Whether edits left both boundaries identifiable. */
+  hasBoundaries(): boolean;
+  release(): void;
+}
+
 export interface MintEditor {
   /** The full file text, ready to be written to disk byte for byte. */
   getText(): string;
@@ -220,7 +230,10 @@ export interface MintEditor {
   /** Every selection range (several when there are several cursors), in document order. */
   getSelections(): TextSelection[];
   /** Follow a range through edits, including edits from a second view. Boundary insertions stay outside it. */
-  trackRange(range: TextRange): { current(): TextRange; release(): void };
+  trackRange(range: TextRange): TrackedRange & {
+    /** Follow a subrange given in file offsets relative to the original range. */
+    trackSubrange(range: TextRange): TrackedRange;
+  };
   /** Put a cursor or selection at each range; there must be at least one. The last range is the main one. */
   setSelections(ranges: readonly { readonly anchor: number; readonly head?: number }[]): void;
   /** Replace the host-provided fenced block previews in this view. */
@@ -289,7 +302,7 @@ function dialectExtensions(dialect: EditorDialect): Extension {
 
 export function createEditor(options: EditorOptions): MintEditor {
   const listeners = new Set<(event: EditorEvent) => void>();
-  const trackedRanges = new Set<{ from: number; to: number }>();
+  const rangeTrackers = new Set<(changes: ChangeDesc) => void>();
   const parsed = options.document?.currentDocument() ?? parseFileText(options.text);
   const host = options.host ?? {};
   const fences = new Compartment();
@@ -352,12 +365,7 @@ export function createEditor(options: EditorOptions): MintEditor {
         EditorView.lineWrapping,
         EditorView.domEventObservers({ scroll: () => emit({ type: "scroll" }) }),
         EditorView.updateListener.of((update) => {
-          if (update.docChanged) {
-            for (const range of trackedRanges) {
-              range.from = update.changes.mapPos(range.from, 1);
-              range.to = Math.max(range.from, update.changes.mapPos(range.to, -1));
-            }
-          }
+          if (update.docChanged) for (const track of rangeTrackers) track(update.changes);
           if (update.docChanged || update.transactions.some((t) => sharedFileEffects(t).length > 0))
             emit(
               update.transactions.some((tr) => tr.annotation(Transaction.remote))
@@ -384,6 +392,26 @@ export function createEditor(options: EditorOptions): MintEditor {
 
   options.document?.attach(view);
   lastOutline = outline(view.state, false);
+
+  function followRange(range: TextRange, changes: ChangeDesc): TrackedRange {
+    const insertion = range.from === range.to;
+    let { from, to } = range;
+    let hasBoundaries = true;
+    function track(change: ChangeDesc) {
+      const start = change.mapPos(from, insertion ? -1 : 1, MapMode.TrackDel);
+      const end = change.mapPos(to, insertion ? 1 : -1, MapMode.TrackDel);
+      hasBoundaries &&= start !== null && end !== null;
+      from = start ?? change.mapPos(from, -1);
+      to = Math.max(from, end ?? change.mapPos(to, 1));
+    }
+    track(changes);
+    rangeTrackers.add(track);
+    return {
+      current: () => ({ from: toFileOffset(view.state, from), to: toFileOffset(view.state, to) }),
+      hasBoundaries: () => hasBoundaries,
+      release: () => rangeTrackers.delete(track),
+    };
+  }
   if (settings.typewriterMode) view.dispatch({ effects: centerCursor(view.state) });
 
   function emit(event: EditorEvent) {
@@ -477,17 +505,22 @@ export function createEditor(options: EditorOptions): MintEditor {
       }));
     },
     trackRange({ from, to }) {
-      const range = {
-        from: fromFileOffset(view.state, from),
-        to: fromFileOffset(view.state, to),
+      const snapshot = view.state;
+      const offset = (pos: number) => fromFileOffset(snapshot, pos);
+      let changes = ChangeSet.empty(snapshot.doc.length).desc;
+      const range = followRange({ from: offset(from), to: offset(to) }, changes);
+      const track = (next: ChangeDesc) => {
+        changes = changes.composeDesc(next);
       };
-      trackedRanges.add(range);
+      rangeTrackers.add(track);
       return {
-        current: () => ({
-          from: toFileOffset(view.state, range.from),
-          to: toFileOffset(view.state, range.to),
-        }),
-        release: () => trackedRanges.delete(range),
+        ...range,
+        trackSubrange: (part) =>
+          followRange({ from: offset(from + part.from), to: offset(from + part.to) }, changes),
+        release: () => {
+          range.release();
+          rangeTrackers.delete(track);
+        },
       };
     },
     setSelections(ranges) {
@@ -573,7 +606,7 @@ export function createEditor(options: EditorOptions): MintEditor {
     destroy: () => {
       options.document?.detach(view);
       listeners.clear();
-      trackedRanges.clear();
+      rangeTrackers.clear();
       view.destroy();
     },
   };
