@@ -45,7 +45,16 @@
         ?.contentDocument?.querySelectorAll(".mint-sheet");
       if (save?.disabled || !save || !sheets?.length || !dialog.querySelector("output")) return;
       const text = [...sheets].map((sheet) => sheet.innerText);
-      if (text.at(-1).includes("Observation-450")) return { save, text };
+      if (!text.at(-1).includes("Observation-450")) return;
+      const image = dialog
+        .querySelector("iframe")
+        .contentDocument.querySelector('.mint-sheet img[alt="chart"]');
+      if (!image?.src.startsWith("data:image/png") || image.naturalWidth !== 1) {
+        throw new Error(
+          `Preview image failed to embed: ${image?.getAttribute("src")}, width ${image?.naturalWidth}`,
+        );
+      }
+      return { save, text };
     });
     await write("preview.json", text);
     save.click();
