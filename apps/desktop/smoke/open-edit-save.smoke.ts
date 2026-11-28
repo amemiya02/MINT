@@ -1120,7 +1120,9 @@ test("a native model receives only the sample or live selection and edits throug
   await restart([draft]);
   const requests: { url?: string; method?: string; authorization?: string; body: unknown }[] = [];
   let pendingReply: ServerResponse | undefined;
+  let pendingDirect: ServerResponse | undefined;
   let pendingPreview: ServerResponse | undefined;
+  const directInstruction = "Shorten these lines, apply directly";
   const previewInstruction = "Revise the opening and closing.";
   const endpoint = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
@@ -1138,6 +1140,10 @@ test("a native model receives only the sample or live selection and edits throug
     }
     const payload = JSON.parse(body);
     if (!payload.stream) {
+      if (payload.messages.at(-1)?.content.includes(directInstruction)) {
+        pendingDirect = response;
+        return;
+      }
       if (payload.messages.at(-1)?.content.includes(previewInstruction)) {
         pendingPreview = response;
         return;
@@ -1352,23 +1358,88 @@ test("a native model receives only the sample or live selection and edits throug
     await openSettings();
     await setAutosave(true);
     await click("Close");
+    const concurrentSource =
+      "\uFEFFOpening line.\r\nExtra opening detail.\r\n\r\nMiddle line.\r\n\r\nKeep café spaces.  \r\n\r\nClosing line.\r\nClosing detail.\r\n";
+    const authorSource = concurrentSource.replace("Middle line.", "Author's middle line.");
+    const mergedSource = authorSource
+      .replace("Opening line.\r\nExtra opening detail.", "Short opening.")
+      .replace("Closing line.\r\nClosing detail.", "Short close.\r\nShort detail.");
+    const authorBytes = Buffer.from(authorSource);
+    const mergedBytes = Buffer.from(mergedSource);
+    await writeFile(draft, concurrentSource);
     await waitForView(
-      "the remaining view to regain focus",
-      "return document.querySelectorAll('.cm-content').length === 1 && document.activeElement?.matches('.cm-content');",
+      "the remaining view to show the CRLF manuscript",
+      `return document.querySelectorAll('.cm-content').length === 1 &&
+        document.activeElement?.matches('.cm-content') &&
+        document.activeElement.textContent.includes('Closing detail.');`,
     );
-    await keyActions([...chord(keys.control, keys.end), ...chord(keys.shift, keys.home)]);
-    await askSelection(instruction, authorization);
+    await keyActions(chord(keys.control, "a"));
+    await askSelection(directInstruction, authorization);
+    const directReply = await until(
+      "the native direct edit request",
+      async () => pendingDirect ?? null,
+    );
+    assert.deepEqual(requests[2], {
+      ...sent,
+      body: {
+        ...payload,
+        messages: [
+          payload.messages[0],
+          {
+            role: "user",
+            content: JSON.stringify({
+              instruction: directInstruction,
+              selectedText: concurrentSource.slice(1),
+            }),
+          },
+        ],
+      },
+    });
+    await clickPath("//div[contains(@class, 'cm-line') and normalize-space(.)='Middle line.']");
+    await keyActions([
+      ...typing(keys.home),
+      ...chord(keys.shift, keys.end),
+      ...typing("Author's middle line."),
+    ]);
     await until(
-      "the direct edit to autosave the exact native file",
-      async () => (await readFile(draft)).equals(Buffer.from(edited)) || null,
+      "the author's concurrent edit to autosave while the model is still responding",
+      async () => (await readFile(draft)).equals(authorBytes) || null,
     ).catch(explain);
-    assert.deepEqual(requests[2], sent);
+    directReply.writeHead(200, { "Content-Type": "application/json" }).end(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content:
+                "<replacement>Short opening.\n\nModel's middle line.\n\nKeep café spaces.  \n\nShort close.\nShort detail.\n</replacement>",
+            },
+            finish_reason: "stop",
+          },
+        ],
+      }),
+    );
+    await until(
+      "only the independent direct edits to autosave with the original BOM and CRLF",
+      async () => (await readFile(draft)).equals(mergedBytes) || null,
+    ).catch(explain);
+    await click("View changes");
+    await waitForView(
+      "the author's middle line to remain available for comparison",
+      `const conflict = document.querySelector('[aria-label="Proposed edit 2 of 3"]');
+       return conflict?.innerText.includes("Author's middle line.") &&
+         [...conflict.querySelectorAll('button')].some((button) => button.textContent.trim() === 'Apply to compared text');`,
+    );
+    await clickPath("//aside[@aria-label='Writing Assistant']//button[normalize-space(.)='Close']");
     await keyActions(chord(keys.control, "z"));
     await until(
-      "one undo to autosave the selected baseline",
-      async () => (await readFile(draft)).equals(Buffer.from(liveManuscript)) || null,
+      "one undo to autosave the precise author-edited baseline",
+      async () => (await readFile(draft)).equals(authorBytes) || null,
     ).catch(explain);
-    await clickPath("//section[@aria-label='Ask AI']//button[normalize-space(.)='Close']");
+    await keyActions(chord(keys.control, "y"));
+    await until(
+      "redo to autosave the precise merged bytes",
+      async () => (await readFile(draft)).equals(mergedBytes) || null,
+    ).catch(explain);
 
     const reviewSource = "**Opening line.**\r\n\r\nKeep this.  \n\nClosing line.";
     await writeFile(draft, `\uFEFF${reviewSource}`);

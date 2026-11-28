@@ -357,6 +357,8 @@ export function createEditor(options: EditorOptions): MintEditor {
         keymap.of([
           ...defaultKeymap.filter((b) => !b.key || !hostKeys.has(b.key)),
           ...historyKeymap,
+          // Keep Ctrl+Y and also support the shifted undo shortcut on Windows.
+          { win: "Ctrl-Shift-z", run: redo, preventDefault: true },
         ]),
         fences.of([]),
         syntax.of(dialectExtensions(options.dialect ?? defaultDialect)),
