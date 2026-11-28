@@ -1489,6 +1489,24 @@ test("a native model receives only the sample or live selection and edits throug
       "redo to autosave the precise merged bytes",
       async () => (await readFile(draft)).equals(mergedBytes) || null,
     ).catch(explain);
+    await click("Resume conversation");
+    await click("View changes");
+    await clickPath(
+      "//fieldset[@aria-label='Proposed edit 2 of 3']//button[normalize-space(.)='Apply to compared text']",
+    );
+    const comparedBytes = Buffer.from(
+      mergedSource.replace("Author's middle line.", "Model's middle line."),
+    );
+    await until(
+      "accepting the comparison to save the entire replacement with the original BOM and CRLF",
+      async () => (await readFile(draft)).equals(comparedBytes) || null,
+    ).catch(explain);
+    await clickPath("//aside[@aria-label='Writing Assistant']//button[normalize-space(.)='Close']");
+    await keyActions(chord(keys.control, "z"));
+    await until(
+      "one undo to restore the author's line and retain the independent direct edits",
+      async () => (await readFile(draft)).equals(mergedBytes) || null,
+    ).catch(explain);
 
     const reviewSource = "**Opening line.**\r\n\r\nKeep this.  \n\nClosing line.";
     await writeFile(draft, `\uFEFF${reviewSource}`);

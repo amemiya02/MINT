@@ -54,6 +54,7 @@ const scopes = ["selection", "document", "instruction"] as const;
 type Scope = (typeof scopes)[number];
 const actions = ["comment", "preview", "direct"] as const;
 type Action = (typeof actions)[number];
+const proposedEditTracking = { followReplacedEdges: true };
 
 function editKey({ from, to, before, after }: SelectionEdit) {
   return JSON.stringify([from, to, before, after]);
@@ -99,8 +100,12 @@ function savedRange(range: TrackedRange): ReviewRange {
   return { ...range.current(), located: range.hasBoundaries() };
 }
 
-function restoreRange(editor: MintEditor, range: ReviewRange): Origin["range"] {
-  const tracked = editor.trackRange(range);
+function restoreRange(
+  editor: MintEditor,
+  range: ReviewRange,
+  options?: Parameters<MintEditor["trackRange"]>[1],
+): Origin["range"] {
+  const tracked = editor.trackRange(range, options);
   return { ...tracked, hasBoundaries: () => range.located && tracked.hasBoundaries() };
 }
 
@@ -516,7 +521,11 @@ function Composer({
         task.turns.map((turn) => ({
           ...turn,
           suggestions: turn.suggestions?.map((item) => {
-            const range = restoreRange(origin.editor, mapper.range(item.range));
+            const range = restoreRange(
+              origin.editor,
+              mapper.range(item.range),
+              item.status === "preview" ? proposedEditTracking : undefined,
+            );
             tracked.add(range);
             return { ...item, range };
           }),
@@ -723,7 +732,7 @@ function Composer({
 
   function preview(edits: SelectionEdit[]): Suggestion[] {
     return edits.map((edit) => {
-      const range = origin.range.trackSubrange(edit);
+      const range = origin.range.trackSubrange(edit, proposedEditTracking);
       trackedSuggestions.current.add(range);
       return { id: edit.from, before: edit.before, after: edit.after, range, status: "preview" };
     });

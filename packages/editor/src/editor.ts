@@ -216,6 +216,11 @@ interface TrackedRange {
   release(): void;
 }
 
+interface RangeTrackingOptions {
+  /** Keep typing at an edge inside the range once the text at that edge has been replaced. */
+  readonly followReplacedEdges?: boolean;
+}
+
 export interface MintEditor {
   /** The full file text, ready to be written to disk byte for byte. */
   getText(): string;
@@ -244,10 +249,13 @@ export interface MintEditor {
   revealAnnotation(annotation: Annotation): void;
   /** Every selection range (several when there are several cursors), in document order. */
   getSelections(): TextSelection[];
-  /** Follow a range through edits, including edits from a second view. Boundary insertions stay outside it. */
-  trackRange(range: TextRange): TrackedRange & {
+  /** Follow edits from either view. By default, boundary insertions stay outside a nonempty range. */
+  trackRange(
+    range: TextRange,
+    options?: RangeTrackingOptions,
+  ): TrackedRange & {
     /** Follow a subrange given in file offsets relative to the original range. */
-    trackSubrange(range: TextRange): TrackedRange;
+    trackSubrange(range: TextRange, options?: RangeTrackingOptions): TrackedRange;
   };
   /** Put a cursor or selection at each range; there must be at least one. The last range is the main one. */
   setSelections(ranges: readonly { readonly anchor: number; readonly head?: number }[]): void;
@@ -425,13 +433,24 @@ export function createEditor(options: EditorOptions): MintEditor {
   options.document?.attach(view);
   lastOutline = outline(view.state, false);
 
-  function followRange(range: TextRange, changes: ChangeDesc): TrackedRange {
-    const insertion = range.from === range.to;
+  function followRange(
+    range: TextRange,
+    changes: ChangeDesc,
+    { followReplacedEdges = false }: RangeTrackingOptions = {},
+  ): TrackedRange {
     let { from, to } = range;
+    let includeStart = from === to;
+    let includeEnd = includeStart;
     let hasBoundaries = true;
     function track(change: ChangeDesc) {
-      const start = change.mapPos(from, insertion ? -1 : 1, MapMode.TrackDel);
-      const end = change.mapPos(to, insertion ? 1 : -1, MapMode.TrackDel);
+      if (followReplacedEdges) {
+        // Replacing a selection by typing can produce a replacement followed by
+        // separate insertions at its edge, even in a composed change description.
+        includeStart ||= change.mapPos(from, 1, MapMode.TrackAfter) === null;
+        includeEnd ||= change.mapPos(to, -1, MapMode.TrackBefore) === null;
+      }
+      const start = change.mapPos(from, includeStart ? -1 : 1, MapMode.TrackDel);
+      const end = change.mapPos(to, includeEnd ? 1 : -1, MapMode.TrackDel);
       hasBoundaries &&= start !== null && end !== null;
       from = start ?? change.mapPos(from, -1);
       to = Math.max(from, end ?? change.mapPos(to, 1));
@@ -571,19 +590,23 @@ export function createEditor(options: EditorOptions): MintEditor {
         head: toFileOffset(view.state, head),
       }));
     },
-    trackRange({ from, to }) {
+    trackRange({ from, to }, options) {
       const snapshot = view.state;
       const offset = (pos: number) => fromFileOffset(snapshot, pos);
       let changes = ChangeSet.empty(snapshot.doc.length).desc;
-      const range = followRange({ from: offset(from), to: offset(to) }, changes);
+      const range = followRange({ from: offset(from), to: offset(to) }, changes, options);
       const track = (next: ChangeDesc) => {
         changes = changes.composeDesc(next);
       };
       rangeTrackers.add(track);
       return {
         ...range,
-        trackSubrange: (part) =>
-          followRange({ from: offset(from + part.from), to: offset(from + part.to) }, changes),
+        trackSubrange: (part, options) =>
+          followRange(
+            { from: offset(from + part.from), to: offset(from + part.to) },
+            changes,
+            options,
+          ),
         release: () => {
           range.release();
           rangeTrackers.delete(track);
