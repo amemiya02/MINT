@@ -519,6 +519,10 @@ async function clickPath(xpath: string) {
 
 const click = (label: string, by: "text" | "aria-label" = "text") =>
   clickPath(`//button[${by === "text" ? "normalize-space(.)" : "@aria-label"}='${label}']`);
+const clickSettingsButton = (label: string) =>
+  clickPath(
+    `//dialog[@open][.//h2[normalize-space(.)='Settings']]//button[normalize-space(.)='${label}' and not(@disabled) and not(ancestor::fieldset[@disabled])]`,
+  );
 const shows = (text: string) =>
   until(text, () =>
     command<boolean>("POST", `/session/${session}/execute/sync`, {
@@ -1840,7 +1844,7 @@ test("model keys survive a restart only when remembered and disconnect removes t
       /objectpath '\/org\/freedesktop\/secrets\/collection\//,
     );
 
-    await click("Close");
+    await clickSettingsButton("Close");
     await restart([draft]);
     await openConnections();
     await shows("Remembered model");
@@ -1882,7 +1886,7 @@ test("model keys survive a restart only when remembered and disconnect removes t
         return true;
       }
     }).catch(explain);
-    await click("Close");
+    await clickSettingsButton("Close");
     await restart([draft]);
     await openConnections();
     assert.deepEqual(await invokeNative("list_model_connections", {}), []);
@@ -1891,7 +1895,7 @@ test("model keys survive a restart only when remembered and disconnect removes t
     assert.equal(await versionText(latestId), latest);
     assert.deepEqual(await annotations(), review);
     assert.equal(requests.length, 2, "reopening Settings never sends a model request");
-    await click("Close");
+    await clickSettingsButton("Close");
     await click("Annotations");
     await clickPath("//section[@aria-label='Resolved']//button[normalize-space(.)='Go to target']");
     const target = await command<string>("POST", `/session/${session}/execute/sync`, {
@@ -2173,7 +2177,8 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   await click("Try example");
   await shows("Agent access changed. Review its permissions before sending.");
   assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, 6);
-  await click("Try example");
+  // The warning can render before reinspection finishes and enables the retry.
+  await clickSettingsButton("Try example");
   await click("Decline");
   await shows("Agent access declined.");
   await click("Forget Agent");
