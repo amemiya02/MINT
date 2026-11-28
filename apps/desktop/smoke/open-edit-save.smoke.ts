@@ -194,13 +194,17 @@ test("a document opened from the command line can be edited and saved", async ()
   ).catch(explain);
 });
 
-test("saved versions survive a native restart outside the working folder", async () => {
+async function restart(args: string[]) {
   await command("DELETE", `/session/${session}`);
   session = "";
   const created = await command<{ sessionId: string }>("POST", "/session", {
-    capabilities: { alwaysMatch: { "tauri:options": { application, args: [document] } } },
+    capabilities: { alwaysMatch: { "tauri:options": { application, args } } },
   });
   session = created.sessionId;
+}
+
+test("saved versions survive a native restart outside the working folder", async () => {
+  await restart([document]);
   const historyButton = await until("version history button", async () => {
     const item = await command<Record<string, string>>("POST", `/session/${session}/element`, {
       using: "css selector",
@@ -254,11 +258,11 @@ test("history restores and undo autosave the exact native file", async () => {
   assert.deepEqual(await readdir(dir), ["smoke.md"]);
 });
 
-const click = async (label: string) => {
+const click = async (label: string, by: "text" | "aria-label" = "text") => {
   const element = await until(label, async () => {
     const result = await command<Record<string, string>>("POST", `/session/${session}/element`, {
       using: "xpath",
-      value: `//button[normalize-space(.)='${label}']`,
+      value: `//button[${by === "text" ? "normalize-space(.)" : "@aria-label"}='${label}']`,
     });
     return result[elementKey] ?? null;
   }).catch(explain);
@@ -431,6 +435,59 @@ test("recognizing and previewing a native folder's wikilinks preserves its files
   assert.deepEqual((await readdir(folder)).sort(), ["Report.md", "draft.md"]);
 });
 
+test("reopen a bookmark after a native restart and remove it without touching the working folder", async () => {
+  assert.ok(application);
+  const folder = await mkdtemp(join(dir, "bookmarks-"));
+  const path = join(folder, "reference.md");
+  const original = Buffer.from("\uFEFF# Reference\r\n\r\nField notes.  \r\n");
+  await writeFile(path, original);
+  const checkFolder = async () => {
+    assert.deepEqual(await readFile(path), original);
+    assert.deepEqual(await readdir(folder), ["reference.md"]);
+  };
+  const waitForDocument = () =>
+    until("the bookmarked manuscript to open", () =>
+      command<boolean>("POST", `/session/${session}/execute/sync`, {
+        script: `return document.querySelector('[role=tab][aria-selected=true]')?.title === arguments[0]
+          && document.querySelector('[role=tabpanel]:not([hidden]) .cm-content')?.textContent.includes('Field notes.');`,
+        args: [path],
+      }).then((open) => open || null),
+    ).catch(explain);
+  const waitForBookmark = (present: boolean) =>
+    until(present ? "bookmark added" : "bookmark removed", () =>
+      command<boolean>("POST", `/session/${session}/execute/sync`, {
+        script: `const panel = document.querySelector('aside[aria-label="Bookmarks"]');
+          return !!panel && Array.from(panel.querySelectorAll('button')).some(
+            button => button.getAttribute('aria-label') === arguments[0]) === arguments[1];`,
+        args: [path, present],
+      }).then((ready) => ready || null),
+    ).catch(explain);
+
+  await exec(application, [folder, path], { timeout: 15_000 });
+  await until("the bookmarked document’s folder to open", () =>
+    command<boolean>("POST", `/session/${session}/execute/sync`, {
+      script: `return !!document.querySelector('[role="treeitem"][aria-label="reference.md"]');`,
+      args: [],
+    }).then((open) => open || null),
+  ).catch(explain);
+  await waitForDocument();
+  await click("Bookmarks", "aria-label");
+  await click("Bookmark current document");
+  await waitForBookmark(true);
+  await checkFolder();
+
+  await restart([]);
+  await click("Bookmarks", "aria-label");
+  await click(path, "aria-label");
+  await waitForDocument();
+  await click(`Remove bookmark for ${path}`, "aria-label");
+  await waitForBookmark(false);
+  await checkFolder();
+
+  await restart([]);
+  await click("Bookmarks", "aria-label");
+  await waitForBookmark(false);
+});
 test("moving a Kanban card changes only its status on disk after the writer grants access", async () => {
   assert.ok(application);
   const folder = await mkdtemp(join(dir, "kanban-"));
