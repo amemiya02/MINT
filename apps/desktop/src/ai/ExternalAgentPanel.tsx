@@ -1,5 +1,6 @@
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { type MessageKey, useT } from "../i18n/index.ts";
+import type { Platform } from "../platform/platform.ts";
 import { ConnectionSection } from "./ConnectionSection.tsx";
 import {
   type AgentAccess,
@@ -7,8 +8,15 @@ import {
   type ExternalAgentPlatform,
   externalAgentSender,
 } from "./external-agent.ts";
+import { MaterialRequestNotice, useMaterialRequests } from "./MaterialRequest.tsx";
+import { TaskContextChecklist, useNamedMaterials } from "./TaskContext.tsx";
 import { useWritingTask } from "./WritingTasks.tsx";
-import { type AttemptStatus, failureStatus, replyStatus } from "./writing-attempt.ts";
+import {
+  type AttemptStatus,
+  failureStatus,
+  replyStatus,
+  writingMaterialNames,
+} from "./writing-attempt.ts";
 import type { WritingRequest } from "./writing-sender.ts";
 import type { SavedTurn } from "./writing-tasks.ts";
 
@@ -16,11 +24,6 @@ const buttonClass =
   "rounded-md border border-(--mint-border) px-3 py-1 hover:bg-(--mint-hover) focus-visible:outline-2 focus-visible:outline-(--mint-accent) disabled:opacity-50";
 const fieldClass =
   "w-full rounded-md border border-(--mint-border) bg-(--mint-bg) px-2 py-1 focus-visible:outline-2 focus-visible:outline-(--mint-accent)";
-
-interface Props {
-  readonly platform: ExternalAgentPlatform;
-  readonly selection?: string;
-}
 
 export function ExternalAgentAccessNotice({ access }: { readonly access: AgentAccess }) {
   const t = useT();
@@ -58,6 +61,8 @@ interface AgentTaskTarget {
 }
 
 export function ExternalAgentDialog({
+  platform,
+  selection,
   onClose,
   onHide,
   onReveal,
@@ -66,8 +71,9 @@ export function ExternalAgentDialog({
   tabId,
   visible,
   renderReply,
-  ...props
-}: Props & {
+}: {
+  readonly platform: Platform;
+  readonly selection: string;
   readonly onClose: () => void;
   readonly onHide: () => void;
   readonly onReveal: () => void;
@@ -123,7 +129,9 @@ export function ExternalAgentDialog({
         </button>
       </div>
       <ExternalAgentPanel
-        {...props}
+        platform={platform.externalAgent}
+        materialsPlatform={platform}
+        selection={selection}
         target={target}
         renderReply={(reply) =>
           renderReply(reply, () => {
@@ -138,10 +146,14 @@ export function ExternalAgentDialog({
 
 function ExternalAgentPanel({
   platform,
+  materialsPlatform,
   selection,
   renderReply,
   target,
-}: Props & {
+}: {
+  readonly platform: ExternalAgentPlatform;
+  readonly selection?: string;
+  readonly materialsPlatform?: Platform;
   readonly renderReply?: (reply: string) => ReactNode;
   readonly target?: AgentTaskTarget;
 }) {
@@ -152,6 +164,9 @@ function ExternalAgentPanel({
   const [saved, setSaved] = useState<ExternalAgent[]>([]);
   const [found, setFound] = useState<string[] | null>(null);
   const [instruction, setInstruction] = useState("");
+  const named = useNamedMaterials();
+  const materialRequests = useMaterialRequests();
+  const requested = materialRequests.pending;
   const [pending, setPending] = useState<{ id: string; request: WritingRequest } | null>(null);
   const [busy, setBusy] = useState(true);
   const [status, setStatus] = useState<MessageKey | null>(null);
@@ -172,9 +187,15 @@ function ExternalAgentPanel({
     request: WritingRequest;
   } | null>(null);
   const mounted = useRef(true);
-  const taskStatus = pending ? "approval" : attempt?.status;
+  const taskStatus = pending || requested ? "approval" : attempt?.status;
   if (target) target.engaged.current = !!taskStatus && taskStatus !== "complete";
   const taskRecipient = pending ? agent?.path : attempt?.recipient;
+  const taskRequest = pending?.request ?? lastRequest.current?.request;
+  const taskMaterial = [
+    t("writing.scope.selection"),
+    ...(taskRequest ? writingMaterialNames(taskRequest) : []),
+    ...(requested ? [requested.name] : []),
+  ].join(" · ");
   const stop = useCallback(() => {
     if (controller.current) controller.current.abort();
     else if (taskRecipient) {
@@ -196,16 +217,18 @@ function ExternalAgentPanel({
             title: pending?.request.instruction ?? attempt?.title ?? instruction,
             name: target.name,
             recipient: t("writing.recipient.agent", { path: taskRecipient }),
-            material: t("writing.scope.selection"),
+            material: taskMaterial,
             status: taskStatus,
             count: 0,
-            decisions: Number(!!pending),
+            decisions: Number(!!(pending || requested)),
             background: !target.visible,
             notice: pending
               ? { id: pending.id, decisions: 1 }
-              : attempt?.status === "complete"
-                ? { id: attempt.id }
-                : undefined,
+              : requested && attempt
+                ? { id: `${attempt.id}:${requested.id}`, detail: requested.name, decisions: 1 }
+                : attempt?.status === "complete"
+                  ? { id: attempt.id }
+                  : undefined,
             stop: taskStatus === "working" || taskStatus === "approval" ? stop : undefined,
             forget: () => {
               setAttempt(null);
@@ -214,7 +237,18 @@ function ExternalAgentPanel({
             reveal: target.reveal,
           }
         : null,
-    [attempt, instruction, pending, stop, t, target, taskRecipient, taskStatus],
+    [
+      attempt,
+      instruction,
+      pending,
+      requested,
+      stop,
+      t,
+      target,
+      taskMaterial,
+      taskRecipient,
+      taskStatus,
+    ],
   );
   useWritingTask(task);
 
@@ -316,23 +350,22 @@ function ExternalAgentPanel({
           setSaved((list) => [connection, ...list.filter((item) => item.path !== connection.path)]);
         }
         if (signal?.aborted) throw "stopped";
-        const result = await externalAgentSender(
-          platform,
-          connection,
-          access,
-        )(
-          request,
-          signal
-            ? {
-                signal,
-                onDelta(delta) {
-                  if (signal.aborted) return;
-                  text += delta;
-                  setStreaming(text);
-                },
-              }
-            : undefined,
-        );
+        const sender = externalAgentSender(platform, connection, access);
+        const recipient = t("writing.recipient.agent", { path: current.path });
+        let context = request.taskContext;
+        const result = materialsPlatform
+          ? await materialRequests.send(sender, request, recipient, null, {
+              signal,
+              onContext(sent) {
+                context = sent;
+              },
+              onProgress(progress) {
+                if (signal?.aborted) return;
+                text = progress;
+                setStreaming(text);
+              },
+            })
+          : await sender(request);
         if (!mounted.current) return;
         const outcome = signal?.aborted ? "stopped" : replyStatus(result);
         if (running) setAttempt({ ...entry, status: outcome });
@@ -351,8 +384,9 @@ function ExternalAgentPanel({
         target?.record(entry.id, {
           instruction: request.instruction,
           material: request.selectedText,
+          context,
           reply: result.text,
-          recipient: t("writing.recipient.agent", { path: current.path }),
+          recipient,
           recipientId: `agent:${current.path}`,
           direct: false,
           status: outcome,
@@ -452,10 +486,13 @@ function ExternalAgentPanel({
             className="flex flex-col gap-2 border-t border-(--mint-border) pt-3"
             onSubmit={(event) => {
               event.preventDefault();
-              if (busy) return;
+              if (busy || named.loading || named.unconfirmed) return;
               const request = {
                 instruction: selection === undefined ? sampleInstruction : instruction.trim(),
                 selectedText: material,
+                taskContext: named.entries.length
+                  ? { materials: named.entries.map(({ material }) => material) }
+                  : undefined,
               };
               if (!request.instruction) return;
               if (agent.approved.includes(access)) send(agent, request, false);
@@ -468,7 +505,9 @@ function ExternalAgentPanel({
               }
             }}
           >
-            <p className="break-all">{t("agent.recipient", { path: agent.path })}</p>
+            {!materialsPlatform && (
+              <p className="break-all">{t("agent.recipient", { path: agent.path })}</p>
+            )}
             <label>
               {t("agent.access")}
               <select
@@ -487,10 +526,23 @@ function ExternalAgentPanel({
               </select>
             </label>
             <ExternalAgentAccessNotice access={access} />
-            <p className="font-medium">{t("agent.material")}</p>
-            <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-words rounded bg-(--mint-hover) p-2 text-sm">
-              {material}
-            </pre>
+            {materialsPlatform ? (
+              <fieldset disabled={busy}>
+                <TaskContextChecklist
+                  platform={materialsPlatform}
+                  named={named}
+                  recipient={t("writing.recipient.agent", { path: agent.path })}
+                  selection={material}
+                />
+              </fieldset>
+            ) : (
+              <>
+                <p className="font-medium">{t("agent.material")}</p>
+                <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-words rounded bg-(--mint-hover) p-2 text-sm">
+                  {material}
+                </pre>
+              </>
+            )}
             {selection === undefined ? (
               <p>{sampleInstruction}</p>
             ) : (
@@ -508,7 +560,12 @@ function ExternalAgentPanel({
                 type="submit"
                 ref={sendButton}
                 className={buttonClass}
-                disabled={busy || (selection !== undefined && !instruction.trim())}
+                disabled={
+                  busy ||
+                  named.loading ||
+                  named.unconfirmed ||
+                  (selection !== undefined && !instruction.trim())
+                }
               >
                 {t(selection === undefined ? "agent.try" : "agent.send")}
               </button>
@@ -550,6 +607,14 @@ function ExternalAgentPanel({
             </button>
           </div>
         </fieldset>
+      )}
+      {requested && materialsPlatform && (
+        <MaterialRequestNotice
+          key={requested.id}
+          pending={requested}
+          platform={materialsPlatform}
+          onDecision={materialRequests.decide}
+        />
       )}
       {target && (taskStatus === "approval" || taskStatus === "working") && (
         <button type="button" className={buttonClass} onClick={stop}>

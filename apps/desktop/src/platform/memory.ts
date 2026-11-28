@@ -358,11 +358,19 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     async disconnectModelConnection(id) {
       modelConnections.delete(id);
     },
-    async listZoteroItems(start) {
+    async listZoteroItems(start, query) {
       if (!options.zoteroItems) throw new Error("unavailable");
+      const needle = query?.trim().toLowerCase();
+      const items = needle
+        ? options.zoteroItems.filter(({ title, creators, date }) =>
+            [title, ...(creators ?? []), date ?? ""].some((field) =>
+              field.toLowerCase().includes(needle),
+            ),
+          )
+        : options.zoteroItems;
       return {
-        items: options.zoteroItems.slice(start, start + 50),
-        next: options.zoteroItems.length > start + 50,
+        items: items.slice(start, start + 50),
+        next: items.length > start + 50,
       };
     },
     externalAgent: memoryExternalAgent(
