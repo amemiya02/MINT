@@ -79,7 +79,12 @@ test("one Enter edits the live selection, keeps both panes usable, and saves and
 
   await expect(left).toBeFocused();
   await expect(left.getByText(shortened, { exact: true })).toBeInViewport();
-  expect(await page.evaluate(() => window.getSelection()?.isCollapsed)).toBe(true);
+  expect(
+    await page.evaluate(() => {
+      const caret = window.getSelection();
+      return caret?.isCollapsed && [caret.focusNode?.textContent, caret.focusOffset];
+    }),
+  ).toEqual([shortened, shortened.length]);
   await expect(right.getByText("Keep the opening.", { exact: true })).toBeInViewport();
   expect(requests).toEqual([{ instruction, selectedText: live }]);
   expect(await readFile(page, path)).toBe(source);

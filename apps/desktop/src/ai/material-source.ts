@@ -98,6 +98,7 @@ export async function prepareRangedMaterial(
   range: MaterialRange,
   format: NonNullable<NamedMaterial["format"]>,
   caption: string,
+  textOptions?: MaterialTextOptions,
 ): Promise<NamedMaterial> {
   if (format === "caption") return { name, range, format, text: caption };
   if (range.kind === "pdf" && source.kind === "pdf") {
@@ -108,7 +109,7 @@ export async function prepareRangedMaterial(
         .map((item) => ("str" in item ? item.str + (item.hasEOL ? "\n" : " ") : ""))
         .join("")
         .trim();
-      if (!usableMaterialText(text)) throw new Error("noPageText");
+      if (!usableMaterialText(text, textOptions)) throw new Error("noPageText");
       return { name, range, format, text };
     }
 
