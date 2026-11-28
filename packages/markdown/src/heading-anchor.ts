@@ -1,3 +1,7 @@
+import { fromMarkdown } from "mdast-util-from-markdown";
+import { toString as headingText } from "mdast-util-to-string";
+import { visit } from "unist-util-visit";
+
 /** The base fragment used by Markdown heading links and the exported table of contents. */
 function headingAnchor(text: string): string {
   return text
@@ -35,4 +39,13 @@ export function matchingHeadings<T extends { readonly text: string }>(
     const { base, id } = next(text);
     return fragment === text || fragment === base || fragment === id;
   });
+}
+
+/** Heading text for resolving a fragment in Markdown that is not open in an editor. */
+export function markdownHeadings(source: string) {
+  const headings: { text: string }[] = [];
+  visit(fromMarkdown(source), "heading", (node) => {
+    headings.push({ text: headingText(node).replace(/\s+/g, " ").trim() });
+  });
+  return headings;
 }

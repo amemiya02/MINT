@@ -175,6 +175,9 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@lezer/markdown':
+        specifier: 1.8.1
+        version: 1.8.1
       '@mint/editor':
         specifier: workspace:*
         version: link:../../packages/editor
@@ -202,6 +205,12 @@ importers:
       docx:
         specifier: 9.16.1
         version: 9.16.1
+      fflate:
+        specifier: 0.8.3
+        version: 0.8.3
+      jszip:
+        specifier: 3.10.1
+        version: 3.10.1
       pagedjs:
         specifier: 0.4.3
         version: 0.4.3
@@ -236,9 +245,6 @@ importers:
       '@vitejs/plugin-react':
         specifier: 6.3.0
         version: 6.3.0(vite@8.3.8(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))
-      jszip:
-        specifier: 3.10.1
-        version: 3.10.1
       tailwindcss:
         specifier: 4.3.5
         version: 4.3.5

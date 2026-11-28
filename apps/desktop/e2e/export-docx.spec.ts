@@ -20,8 +20,8 @@ async function chooseWord(page: Page, destination: string | null) {
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.insertText("\nDraft addition");
   await page.keyboard.press("ControlOrMeta+Shift+P");
-  await page.getByRole("option", { name: "Export…", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Export", exact: true });
+  await page.getByRole("option", { name: "Import / Export…", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Import / Export", exact: true });
   await expect(dialog.getByLabel("Format").locator('option[value="docx"]')).toHaveText("DOCX");
   await dialog.getByLabel("Format").selectOption("docx");
   await dialog.getByRole("button", { name: "Export", exact: true }).click();
