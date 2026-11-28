@@ -1,16 +1,11 @@
 import type { AnnotationTarget, WordCount } from "@mint/editor";
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useReducer,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { DraftComposer } from "./ai/DraftComposer.tsx";
 import { ExternalAgentDialog } from "./ai/ExternalAgentPanel.tsx";
-import { inlineCompletionSender } from "./ai/inline-completion.ts";
+import {
+  InlineCompletionRecovery,
+  useInlineWritingCompletion,
+} from "./ai/InlineCompletionRecovery.tsx";
 import { ReplyExcerpt } from "./ai/ReplyExcerpt.tsx";
 import { recordWritingResult, stopTrackingWritingResult } from "./ai/record-writing-result.ts";
 import {
@@ -156,7 +151,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     folderSearch,
     setFolderSearch,
   } = useOverlays();
-  const { shortcuts, wikilinkFolders, inlineCompletionModel } = useSettings().settings;
+  const { shortcuts, wikilinkFolders } = useSettings().settings;
   const active = tabs.find((tab) => tab.id === activeId) ?? null;
   const [writingTasks, setWritingTasks] = useState<ReadonlyMap<string, WritingTask>>(
     () => new Map(),
@@ -349,17 +344,13 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   // Editors attach after their tab mounts; re-render so the outline finds the active one.
   const [, editorsChanged] = useReducer((n: number) => n + 1, 0);
   const activeEditor = activeId === null ? null : store.editor(activeId);
-  useLayoutEffect(() => {
-    if (!activeEditor || !inlineCompletionModel) return;
-    const send = inlineCompletionSender(platform.sendModelMessage, inlineCompletionModel);
-    activeEditor.setInlineCompletion((context) =>
-      store.getState().activeId === activeId &&
-      settings.getSnapshot().settings.inlineCompletionModel === inlineCompletionModel
-        ? send(context)
-        : Promise.resolve(null),
-    );
-    return () => activeEditor.setInlineCompletion(null);
-  }, [activeEditor, activeId, inlineCompletionModel, platform, settings, store]);
+  const completion = useInlineWritingCompletion(
+    platform,
+    store,
+    activeId,
+    activeEditor,
+    settingsOpen,
+  );
   /** Errors from folder actions and other shell commands; document errors live in the tab store. */
   const [shellError, setShellError] = useState<string | null>(null);
   const dialect = useDialect();
@@ -734,6 +725,9 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
         >
           {shellError ?? (error && errorMessage(t, error))}
         </div>
+      )}
+      {completion.failure && (
+        <InlineCompletionRecovery failure={completion.failure} dismiss={completion.dismiss} />
       )}
       <div className="flex min-h-0 flex-1">
         <NavigationRail

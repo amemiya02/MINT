@@ -13,6 +13,7 @@ import {
 import { useT } from "../i18n/index.ts";
 import { isWithin, parentPath } from "../paths.ts";
 import type { Platform } from "../platform/platform.ts";
+import { useSettings } from "../settings/useSettings.ts";
 import { useTabStore } from "../tabs/context.ts";
 import { useModalDialog } from "../window/useModalDialog.ts";
 import { FocusedWritingReview, type ReviewEntry } from "./FocusedWritingReview.tsx";
@@ -24,6 +25,7 @@ import {
 import { MaterialRequestNotice, useMaterialRequests } from "./MaterialRequest.tsx";
 import { useModelVision, VisionControl } from "./ModelVision.tsx";
 import { materialLabel } from "./material-display.ts";
+import { isLocalModelOffline } from "./model.ts";
 import { ProposedSelectionEdit } from "./ProposedSelectionEdit.tsx";
 import { ReplyExcerpt } from "./ReplyExcerpt.tsx";
 import { SourcePassageReview } from "./SourcePassageReview.tsx";
@@ -49,7 +51,13 @@ import {
   replyStatus,
   writingMaterialNames,
 } from "./writing-attempt.ts";
-import { loadWritingRecipients, type WritingRecipient } from "./writing-recipients.ts";
+import {
+  effectiveWritingRecipient,
+  loadWritingRecipients,
+  type WritingRecipient,
+  writingConnectionChoice,
+  writingRecipientLabel,
+} from "./writing-recipients.ts";
 import { captureWritingSelection, type WritingSelection } from "./writing-selection.ts";
 import {
   contextMaterials,
@@ -82,6 +90,12 @@ const fieldClass =
 
 const scopes = ["selection", "document", "instruction"] as const;
 type Scope = (typeof scopes)[number] | "folder";
+
+function connectionSettingForScope(scope: Scope) {
+  if (scope === "folder") return "multiFileWritingConnection";
+  if (scope === "document") return "reviewWritingConnection";
+  return "defaultWritingConnection";
+}
 const actions = ["comment", "preview", "direct"] as const;
 type Action = (typeof actions)[number];
 const proposedEditTracking = { followReplacedEdges: true };
@@ -118,6 +132,7 @@ interface Attempt {
   readonly approved: readonly NamedMaterial[];
   readonly newDecisions?: number;
   readonly capacityRejected?: boolean;
+  readonly localOffline?: boolean;
 }
 
 interface Turn extends Omit<SavedTurn, "suggestions"> {
@@ -460,6 +475,7 @@ function Composer({
 }) {
   const t = useT();
   const [instruction, setInstruction] = useState("");
+  const { settings } = useSettings();
   const [scope, setScope] = useState<Scope>(
     origin.folder ? "folder" : origin.text ? "selection" : "document",
   );
@@ -526,7 +542,11 @@ function Composer({
   const returnTab = useRef(tabId);
   const reading = useRef<ReturnType<MintEditor["captureReadingPosition"]> | null>(null);
   const [draft, setDraft] = useState(() => origin.editor.getText());
-  const recipient = recipients.find((candidate) => candidate.id === recipientId);
+  const connectionChoice = writingConnectionChoice(settings, connectionSettingForScope(scope));
+  const recipient = recipientId
+    ? (recipients.find(({ id }) => id === recipientId) ??
+      effectiveWritingRecipient(recipients, recipientId))
+    : effectiveWritingRecipient(recipients, connectionChoice);
   const checkVision = useModelVision(platform.sendModelMessage);
   const visionFor = (candidate?: WritingRecipient) =>
     checkVision(
@@ -535,10 +555,7 @@ function Composer({
         : undefined,
     );
   const vision = visionFor(recipient);
-  const labelFor = (candidate: WritingRecipient) =>
-    candidate.kind === "agent"
-      ? t("writing.recipient.agent", { path: candidate.path })
-      : t("writing.recipient.model", { name: candidate.name, endpoint: candidate.endpoint });
+  const labelFor = (candidate: WritingRecipient) => writingRecipientLabel(t, candidate);
   const selectedText = scope === "selection" ? origin.text : undefined;
   const sendDraft = scope === "document" || (scope === "selection" && includeDraft);
   const canEditDocument =
@@ -747,18 +764,13 @@ function Composer({
     void loadWritingRecipients(platform).then(({ available, failed }) => {
       if (!current) return;
       setRecipients(available);
-      setRecipientId((previous) =>
-        (restored && previous !== null) || available.some(({ id }) => id === previous)
-          ? previous
-          : (available[0]?.id ?? null),
-      );
       setLoadFailed(failed);
       setLoading(false);
     });
     return () => {
       current = false;
     };
-  }, [platform, restored, settingsOpen]);
+  }, [platform, settingsOpen]);
 
   useEffect(() => {
     if (!placement || !isActive.current || settingsOpen) return;
@@ -1305,6 +1317,7 @@ function Composer({
     let ignoredChanges: boolean | undefined;
     let capacityRejected = false;
     const dispatched: WritingRequest[] = [];
+    let localOffline = false;
     setRetryId("");
     setBaselineId(null);
     setError(null);
@@ -1395,6 +1408,10 @@ function Composer({
     } catch (problem) {
       status = failureStatus(problem, signal);
       capacityRejected = !signal.aborted && !!task.plan && isMaterialCapacityError(problem);
+      localOffline =
+        status === "interrupted" &&
+        connection.kind === "model" &&
+        isLocalModelOffline(connection.endpoint, problem);
       if (mounted.current) {
         if (capacityRejected) capacity.reject(recipient);
         else if (status === "failed") reportSendError(problem);
@@ -1402,7 +1419,7 @@ function Composer({
     }
     if (!mounted.current) return false;
 
-    if (!capacityRejected) onSavedRequest?.();
+    if (!capacityRejected && !localOffline) onSavedRequest?.();
     else if (onSavedRequest) setActionOverride(task.action);
     if (signal.aborted) status = "stopped";
     const canApplyDirectly =
@@ -1501,6 +1518,7 @@ function Composer({
       partial: "",
       newDecisions: suggestions?.filter(({ status }) => status === "preview").length,
       capacityRejected,
+      localOffline,
     });
     controller.current = null;
     taskRunning.current = false;
@@ -2245,6 +2263,11 @@ function Composer({
       )}
       {canRetry && (
         <div className="flex flex-wrap items-end gap-2">
+          {attempt.localOffline && (
+            <p role="alert" className="basis-full">
+              {t("writing.localOffline")}
+            </p>
+          )}
           {retryHasImages && sameVision && !sameVision.verified && (
             <VisionControl check={sameVision} />
           )}
@@ -2310,7 +2333,10 @@ function Composer({
                   void runTask(
                     {
                       ...attempt.task,
-                      action: attempt.task.action === "direct" ? "preview" : attempt.task.action,
+                      action:
+                        attempt.task.action === "direct" && !attempt.localOffline
+                          ? "preview"
+                          : attempt.task.action,
                     },
                     otherConnection,
                   )
@@ -2336,7 +2362,7 @@ function Composer({
         </p>
       )}
       {saveFailed && <p role="alert">{t("writing.tasks.saveFailed")}</p>}
-      {!sidebar && turns.length > 0 && !attempt?.capacityRejected ? (
+      {!sidebar && turns.length > 0 && !attempt?.capacityRejected && !attempt?.localOffline ? (
         <button
           type="button"
           className={`${buttonClass} self-start`}
@@ -2383,7 +2409,22 @@ function Composer({
                 <select
                   className={fieldClass}
                   value={scope}
-                  onChange={(event) => setScope(event.target.value as Scope)}
+                  onChange={(event) => {
+                    const next = event.target.value as Scope;
+                    setScope(next);
+                    const choice = writingConnectionChoice(
+                      settings,
+                      connectionSettingForScope(next),
+                    );
+                    if (
+                      !recipientId &&
+                      effectiveWritingRecipient(recipients, choice)?.id !== recipient?.id
+                    ) {
+                      setAllowedFolder(null);
+                      setIncludeHistory(false);
+                      toolPicker.clear();
+                    }
+                  }}
                 >
                   {(origin.folder ? (["folder"] as const) : scopes).map((id) => (
                     <option key={id} value={id} disabled={id === "selection" && !origin.text}>
@@ -2407,7 +2448,13 @@ function Composer({
                 >
                   {!recipient && (
                     <option value="">
-                      {t(loading ? "writing.loading" : "writing.chooseRecipient")}
+                      {t(
+                        loading
+                          ? "writing.loading"
+                          : connectionChoice || recipientId
+                            ? "settings.modelUnavailable"
+                            : "writing.chooseRecipient",
+                      )}
                     </option>
                   )}
                   {recipients.map((candidate) => (

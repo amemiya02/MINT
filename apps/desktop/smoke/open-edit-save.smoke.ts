@@ -551,9 +551,9 @@ async function clickPath(xpath: string) {
 
 const click = (label: string, by: "text" | "aria-label" = "text") =>
   clickPath(`//button[${by === "text" ? "normalize-space(.)" : "@aria-label"}='${label}']`);
-const clickSettingsButton = (label: string) =>
+const clickSettingsButton = (label: string, group?: string) =>
   clickPath(
-    `//dialog[@open][.//h2[normalize-space(.)='Settings']]//button[normalize-space(.)='${label}']`,
+    `//dialog[@open][.//h2[normalize-space(.)='Settings']]${group ? `//fieldset[legend[normalize-space(.)='${group}']]` : ""}//button[normalize-space(.)='${label}']`,
   );
 const clickPluginReview = (name: string, action: string) =>
   clickPath(
@@ -2150,6 +2150,7 @@ test("inline completion sends the live manuscript excerpt through the native mod
   const initial = "\uFEFF# Route\r\n\r\nThe";
   const continuation = " leads to the ridge.";
   const name = "Completion fixture";
+  let endpointOffline = false;
   await writeFile(draft, initial);
   const requests: {
     method?: string;
@@ -2166,6 +2167,10 @@ test("inline completion sends the live manuscript excerpt through the native mod
       authorization: request.headers.authorization,
       body: JSON.parse(Buffer.concat(chunks).toString("utf8")),
     });
+    if (endpointOffline) {
+      response.destroy();
+      return;
+    }
     response.writeHead(200, { "Content-Type": "application/json" }).end(
       JSON.stringify({
         choices: [{ message: { content: continuation }, finish_reason: "stop" }],
@@ -2193,7 +2198,18 @@ test("inline completion sends the live manuscript excerpt through the native mod
       await keyActions(typing(value));
     }
     await clickPath("//button[not(@disabled) and normalize-space(.)='Use for this launch']");
-    await chooseSettingsOption("Inline completion", name);
+    await chooseSettingsOption("Default writing connection", name);
+    await chooseSettingsOption("Inline completion", "Use the default writing connection");
+    await clickSettingsButton("Run sample", "Inline completion");
+    await shows(continuation.trim());
+    const [sample] = requests.splice(0);
+    assert.ok(sample);
+    assert.equal(sample.path, "/v1/chat/completions");
+    assert.equal(sample.body.model, "completion-fixture");
+    assert.deepEqual(
+      sample.body.messages.filter(({ role }) => role === "user"),
+      [{ role: "user", content: '{"before":"The path follows the","after":""}' }],
+    );
     await click("Close");
     await clickPath("//main//div[@role='textbox']");
     await keyActions([...chord(keys.control, keys.end), ...typing(" trail")]);
@@ -2238,6 +2254,31 @@ test("inline completion sends the live manuscript excerpt through the native mod
     ).catch(explain);
     await new Promise((resolve) => setTimeout(resolve, 800));
     assert.equal(requests.length, 1, "switching inline completion off stops subsequent requests");
+
+    await openSettings();
+    await chooseSettingsOption("Inline completion", "Use the default writing connection");
+    await click("Close");
+    endpointOffline = true;
+    await clickPath("//main//div[@role='textbox']");
+    await keyActions([...chord(keys.control, keys.end), ...typing(" Still writing.")]);
+    await waitForView(
+      "the native local connection failure with the author's typing intact",
+      `return document.querySelector('section[aria-label="Inline completion"]')?.innerText.includes('Local model is unreachable') &&
+        document.querySelector('.cm-content:focus')?.textContent.includes('Still writing.');`,
+    );
+    assert.equal(requests.length, 2);
+    assert.equal(requests[1]?.body.model, "completion-fixture");
+    await nativeShortcut("ctrl+s");
+    await until(
+      "the author's typing to save after the local connection failure",
+      async () =>
+        (await readFile(draft, "utf8")) ===
+          `${initial} trail${continuation} Today. Still writing.` || null,
+    ).catch(explain);
+    await openSettings();
+    await chooseSettingsOption("Inline completion", "Off");
+    await chooseSettingsOption("Default writing connection", "First available connection");
+    await click("Close");
   } finally {
     endpoint.closeAllConnections();
     await new Promise<void>((resolve) => endpoint.close(() => resolve()));
@@ -3907,10 +3948,20 @@ if (prompt.instruction === ${JSON.stringify(cancelInstruction)}) {
     await invokeNative<unknown[]>("list_writing_tasks", { path: draft }),
     taskRecordsBefore,
   );
-  const callsBeforeReplacement = (await readFile(calls, "utf8")).trim().split("\n").length;
-  assert.equal(callsBeforeReplacement, callsBeforeTemporary + 1);
-
+  assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, callsBeforeTemporary + 1);
   await openSettings();
+  await chooseSettingsOption("Multi-file connection", executable);
+  await clickSettingsButton("Run sample", "Multi-file connection");
+  await shows("Fixture Agent reply.");
+  const callsBeforeReplacement = callsBeforeTemporary + 2;
+  const callsAfterSample = (await readFile(calls, "utf8")).trim().split("\n");
+  assert.equal(callsAfterSample.length, callsBeforeReplacement);
+  const routedSample = JSON.parse(callsAfterSample.at(-1) ?? "");
+  assert.deepEqual(routedSample.prompt, sample.prompt);
+  assert.equal(routedSample.args.includes("--sandbox"), false);
+  assert.equal(routedSample.args.at(-1), "-");
+  await chooseSettingsOption("Multi-file connection", "Use the default writing connection");
+
   await clickSettingsButton("External Agents");
   // Load the saved revision before replacing the executable so the send rechecks it.
   await shows(configuredAccessNotice);
