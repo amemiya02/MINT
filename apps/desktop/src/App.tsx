@@ -207,7 +207,10 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     const request = openFolderState.current.request;
     let planned: MovePreview;
     try {
-      planned = await previewMove(platform, folder, from, to, dialect);
+      planned = await previewMove(platform, folder, from, to, {
+        ...dialect,
+        wikilinks: wikilinkFolder !== null,
+      });
     } catch (error) {
       setShellError(reasonOf(error));
       return;
@@ -215,8 +218,8 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
       moving.current = false;
     }
     if (request !== openFolderState.current.request) return;
-    if (planned.references.length) setPreview(planned);
-    else await performMove(planned.edits);
+    if (planned.documents.length) setPreview(planned);
+    else await performMove([planned.moveOnly]);
   }
   const { recent, add: addRecent } = useRecent(platform);
 
@@ -426,14 +429,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
           preview={preview}
           folder={folder}
           onClose={() => setPreview(null)}
-          onChoose={(update) => {
-            const edits = update
-              ? preview.edits
-              : preview.edits
-                  .filter((edit) => edit.from !== edit.to)
-                  .map((edit) => ({ ...edit, after: edit.before }));
-            void performMove(edits);
-          }}
+          onChoose={(edits) => void performMove(edits)}
         />
       )}
       {(shellError || error) && (
