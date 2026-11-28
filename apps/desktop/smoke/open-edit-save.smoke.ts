@@ -2213,7 +2213,13 @@ test("a native model reply stays editable and untitled until the author chooses 
   await writeFile(source, `${unapproved}\n${excerpt}\n`);
   const path = join(folder, "field-notes.md");
   const instruction = "Draft an introduction for the field notes.";
-  const generated = "Field notes from the ridge.";
+  const supported = "The north ridge is open again.";
+  const unsupported = "The south trail is open too.";
+  const generated = `${supported} ${unsupported}`;
+  const groundedReply = `${generated}\n\n<source-passages>\n${JSON.stringify([
+    { claim: supported, material: 2, quote: excerpt },
+    { claim: unsupported, material: 2, quote: unapproved },
+  ])}\n</source-passages>`;
   const requests: {
     path: string | undefined;
     method: string | undefined;
@@ -2239,7 +2245,7 @@ test("a native model reply stays editable and untitled until the author chooses 
               query: "north ridge reopened",
             },
           })
-        : generated;
+        : groundedReply;
     response.end(JSON.stringify({ choices: [{ message: { content }, finish_reason: "stop" }] }));
   });
 
@@ -2298,6 +2304,20 @@ test("a native model reply stays editable and untitled until the author chooses 
     await until("the generated Markdown in the untitled editor", () =>
       draftMatches(generated),
     ).catch(explain);
+    const sourceReview = '//section[@aria-label="Source passages"]';
+    const chooseClaim = `${sourceReview}//button[normalize-space(.)='${supported}']`;
+    await clickPath(chooseClaim);
+    await waitForView(
+      "the approved original passage and the unverified conclusion",
+      `const review = document.querySelector('section[aria-label="Source passages"]');
+        const passage = review?.querySelector('section[aria-label="Excerpt used for this draft"]');
+        return passage?.querySelector('blockquote')?.textContent === ${JSON.stringify(excerpt)} &&
+          passage?.textContent.includes('field-log.md · line 2') &&
+          [...review.querySelectorAll('li')].some((line) =>
+            line.textContent.includes(${JSON.stringify(unsupported)}) &&
+            line.textContent.includes('Needs verification')) &&
+          !review.textContent.includes(${JSON.stringify(unapproved)});`,
+    );
     assert.equal(requests.length, 2);
     const initialContext = {
       materials: [{ name: "Pasted text", text: "Field notes are for the visitor bulletin." }],
@@ -2309,6 +2329,11 @@ test("a native model reply stays editable and untitled until the author chooses 
       assert.equal(request.authorization, "Bearer draft-fixture-secret");
       assert.equal(request.body.model, "native-draft-fixture");
       assert.equal(request.body.stream, true);
+      assert.ok(
+        request.body.messages.some(
+          ({ role, content }) => role === "system" && content.includes("<source-passages>"),
+        ),
+      );
       assert.deepEqual(JSON.parse(request.body.messages.at(-1)?.content ?? ""), {
         instruction: `Write a Markdown draft following this instruction. Return only the draft text, without a surrounding code fence.\n\n${instruction}`,
         taskContext:
@@ -2357,6 +2382,13 @@ test("a native model reply stays editable and untitled until the author chooses 
     });
     assert.equal(saved.turns[0]?.reply, generated);
     assert.ok(!JSON.stringify(saved).includes("draft-fixture-secret"));
+    await clickPath(`${sourceReview}//button[normalize-space(.)='Insert Markdown citation']`);
+    await nativeShortcut("ctrl+s");
+    const cited = `${supported}[^mint-source-1] ${unsupported} Author's addition.\n\n[^mint-source-1]: field-log.md · line 2, line 1 of sent material. “${excerpt}”\n`;
+    await until(
+      "only the requested citation to be added to the native manuscript",
+      async () => (await readFile(path, "utf8")) === cited || null,
+    );
     assert.equal(requests.length, 2);
   } finally {
     endpoint.closeAllConnections();

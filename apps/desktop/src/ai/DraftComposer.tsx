@@ -12,6 +12,13 @@ import {
 import { MaterialRequestNotice, useMaterialRequests } from "./MaterialRequest.tsx";
 import { modelEndpoint, modelWritingSender, type SavedModelConnection } from "./model.ts";
 import { recordWritingResult } from "./record-writing-result.ts";
+import { SourcePassageReview } from "./SourcePassageReview.tsx";
+import {
+  draftText,
+  hasSourceMaterials,
+  readDraftPassages,
+  type SourcePassage,
+} from "./source-passages.ts";
 import { TaskContextChecklist, useNamedMaterials } from "./TaskContext.tsx";
 import { useWritingTask, WritingTaskMaterials } from "./WritingTasks.tsx";
 import {
@@ -94,7 +101,11 @@ export function DraftComposer({
   const busy = attempt?.status === "working" || attempt?.status === "approval";
   const [error, setError] = useState<MessageKey | null>(null);
   const [unapplied, setUnapplied] = useState("");
-  const [appliedReply, setAppliedReply] = useState("");
+  const [applied, setApplied] = useState<{
+    text: string;
+    passages: readonly SourcePassage[];
+  } | null>(null);
+  const appliedReply = applied?.text ?? "";
   const [showAppliedReply, setShowAppliedReply] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
   const named = useNamedMaterials();
@@ -239,6 +250,9 @@ export function DraftComposer({
     let partial = "";
     let approved: NamedMaterial[] = [];
     let sentContext = task.request.taskContext;
+    const passages: SourcePassage[] = [];
+    let nextOffset = 0;
+    let readingSources = false;
     let status: AttemptStatus;
     let capacityRejected = false;
     setError(null);
@@ -246,7 +260,13 @@ export function DraftComposer({
     setAttempt({ ...entry, approved, partial, status: "working" });
     try {
       const reply = await materialRequests.send(
-        connection.send,
+        (request, options) => {
+          readingSources = hasSourceMaterials(request.taskContext);
+          return connection.send(
+            { ...request, sourcePassages: readingSources ? true : undefined },
+            options,
+          );
+        },
         task.request,
         connection.label,
         task.folder,
@@ -258,8 +278,18 @@ export function DraftComposer({
           },
           onProgress(text) {
             if (signal.aborted) return;
-            partial = text;
+            partial = readingSources ? draftText(text) : text;
             setAttempt({ ...entry, approved, partial, status: "working" });
+          },
+          mapBatchReply(reply, context) {
+            if (replyStatus(reply) !== "complete")
+              return readingSources ? { ...reply, text: draftText(reply.text) } : reply;
+            const result = readDraftPassages(reply.text, context);
+            if (!result.text.trim()) throw "invalidReply";
+            for (const passage of result.passages)
+              passages.push({ ...passage, from: passage.from + nextOffset });
+            nextOffset += result.text.length + 2; // The sender joins completed batches with a blank line.
+            return { ...reply, text: result.text };
           },
           onApproval(text) {
             partial = text;
@@ -291,6 +321,7 @@ export function DraftComposer({
             recipient: connection.label,
             recipientId: connection.id,
             direct: inserted,
+            sourcePassages: passages.length ? passages : undefined,
             status,
           },
           onError: () => {
@@ -298,7 +329,7 @@ export function DraftComposer({
           },
         });
         if (inserted) {
-          setAppliedReply(reply.text);
+          setApplied({ text: reply.text, passages });
           setAttempt({ ...entry, approved, status, partial: "" });
           if (store.getState().activeId === tabId) store.editor(tabId)?.focus();
           return;
@@ -401,9 +432,18 @@ export function DraftComposer({
   const alternatives = retry ? connections.filter(({ id }) => id !== retry.connection.id) : [];
   const alternate = alternatives.find(({ id }) => id === retryId);
 
-  if (appliedReply)
+  if (applied)
     return (
       <>
+        {applied.passages.length > 0 && (
+          <div className="max-h-[45%] shrink-0 overflow-auto border-b border-(--mint-border) px-4 py-2">
+            <SourcePassageReview
+              draft={applied.text}
+              passages={applied.passages}
+              editor={store.editor(tabId)}
+            />
+          </div>
+        )}
         {showAppliedReply && (
           <section
             aria-label={t("command.file.draftWithAi")}

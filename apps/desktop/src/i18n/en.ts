@@ -695,6 +695,16 @@ export const en = {
   "draft.failed": "Draft generation failed. Check the connection and try again.",
   "draft.requiresEmptyUntitled": "Start with an empty untitled draft.",
   "draft.changed": "This draft changed while AI was writing. Your edits were kept.",
+  "sources.review": "Source passages",
+  "sources.excerpt": "Excerpt used for this draft",
+  "sources.line": "Line {line} of sent material",
+  "sources.unverified": "Needs verification",
+  "sources.insertCitation": "Insert Markdown citation",
+  "sources.citationEntry": "{name}, line {line} of sent material. “{quote}”",
+  "sources.citationInserted": "Citation inserted.",
+  "sources.citationExists": "This conclusion already has a citation.",
+  "sources.claimChanged":
+    "The original conclusion has changed. The excerpt is still available here.",
 
   "quickOpen.title": "Quick Open",
   "quickOpen.placeholder": "Search documents by name",
