@@ -14,6 +14,7 @@ import {
   useNamedMaterials,
 } from "./TaskContext.tsx";
 import { useWritingToolApproval, type WritingToolPlan } from "./WritingTool.tsx";
+import { useWritingCallBudget } from "./WritingCallLimit.tsx";
 import type {
   MaterialDecision,
   TaskContext,
@@ -67,6 +68,7 @@ function requestedMaterial(reply: WritingReply): MaterialRequest | undefined {
 /** Await author decisions while keeping the original prompt, recipient and draft snapshot. */
 export function useMaterialRequests(sendMcpRequest?: McpTransport) {
   const externalTool = useWritingToolApproval();
+  const budget = useWritingCallBudget();
   const [pending, setPending] = useState<PendingMaterial | null>(null);
   const sequence = useRef(0);
   const decision = useRef<((value: MaterialDecision | null) => void) | null>(null);
@@ -82,6 +84,7 @@ export function useMaterialRequests(sendMcpRequest?: McpTransport) {
 
   return {
     pending,
+    paused: budget.paused,
     externalTool,
     decide(value: MaterialDecision) {
       const resolve = decision.current;
@@ -97,10 +100,12 @@ export function useMaterialRequests(sendMcpRequest?: McpTransport) {
       options?: Omit<WritingOptions, "onDelta"> & {
         readonly plan?: MaterialPlan;
         readonly tool?: WritingToolPlan;
+        readonly callLimit?: number;
         readonly fixedRequests?: readonly WritingRequest[];
         readonly onDispatch?: (request: WritingRequest, batch: number) => void;
         readonly onContext?: (context: TaskContext | undefined) => void;
         readonly onApproval?: (text: string) => void;
+        readonly onPause?: (text: string) => void;
         readonly onResume?: (decision: MaterialDecision | null, text: string) => void;
         readonly onProgress?: (text: string) => void;
         readonly mapBatchReply?: (reply: WritingReply, context?: TaskContext) => WritingReply;
@@ -115,6 +120,7 @@ export function useMaterialRequests(sendMcpRequest?: McpTransport) {
         onDispatch,
         onContext,
         onApproval,
+        onPause,
         onResume,
         onProgress,
       } = options ?? {};
@@ -124,23 +130,44 @@ export function useMaterialRequests(sendMcpRequest?: McpTransport) {
       const dispatched: (TaskContext | undefined)[] = [];
       const completed: string[] = [];
       const combined = (text: string) => [...completed, text].filter(Boolean).join("\n\n");
+      const reserveCall = budget.start(
+        options?.callLimit,
+        signal,
+        onPause,
+        (text) => onResume?.(null, text),
+      );
       let approvalId = 0;
       externalTool.resetOutcome();
       let batch = 0;
       // Record the request that reached the connection, including approved material and tool results.
-      const dispatch: WritingSender = (outbound, options) => {
+      const dispatch: WritingSender = async (outbound, options) => {
+        await reserveCall(recipient, combined(""));
+        dispatched[batch] = outbound.taskContext;
+        onContext?.(
+          contexts.length === 1
+            ? outbound.taskContext
+            : {
+                materials: dispatched.flatMap((context) => context?.materials ?? []),
+                materialDecisions: dispatched.flatMap(
+                  (context) => context?.materialDecisions ?? [],
+                ),
+                folderSearch: request.taskContext?.folderSearch,
+              },
+        );
         onDispatch?.(outbound, batch);
         return sender(outbound, options);
       };
+      const tool = !fixedRequests && sendMcpRequest ? options?.tool : undefined;
       const send =
-        !fixedRequests && options?.tool && sendMcpRequest
+        tool && sendMcpRequest
           ? externalTool.wrap(
               sendMcpRequest,
               dispatch,
-              options.tool,
+              tool,
               recipient,
               () => onApproval?.(combined("")),
               () => onResume?.(null, combined("")),
+              () => reserveCall(tool.endpoint, combined("")),
             )
           : dispatch;
 
@@ -155,18 +182,6 @@ export function useMaterialRequests(sendMcpRequest?: McpTransport) {
           const remainingBytes = limit === undefined ? undefined : limit - materialBytes(outbound);
           if (remainingBytes !== undefined && remainingBytes < 0) throw "materialCapacity";
 
-          dispatched[index] = outbound.taskContext;
-          const sentContext =
-            contexts.length === 1
-              ? outbound.taskContext
-              : {
-                  materials: dispatched.flatMap((context) => context?.materials ?? []),
-                  materialDecisions: dispatched.flatMap(
-                    (context) => context?.materialDecisions ?? [],
-                  ),
-                  folderSearch: taskContext?.folderSearch,
-                };
-          onContext?.(sentContext);
           let streamed = "";
           const reply = await send(outbound, {
             taskId,

@@ -21,6 +21,7 @@ import {
   type SourcePassage,
 } from "./source-passages.ts";
 import { materialDropHandlers, TaskContextChecklist, useNamedMaterials } from "./TaskContext.tsx";
+import { useWritingCallLimit, WritingCallPause, WritingCallPlan } from "./WritingCallLimit.tsx";
 import { useWritingTask, WritingTaskMaterials } from "./WritingTasks.tsx";
 import {
   useWritingToolPicker,
@@ -34,6 +35,7 @@ import {
   failureStatus,
   isMaterialCapacityError,
   replyStatus,
+  writingAttemptBusy,
   writingMaterialNames,
 } from "./writing-attempt.ts";
 import {
@@ -63,6 +65,7 @@ interface DraftTask {
   readonly request: WritingRequest;
   readonly plan: MaterialPlan;
   readonly folder: string | null;
+  readonly callLimit?: number;
 }
 
 interface DraftAttempt {
@@ -114,7 +117,7 @@ export function DraftComposer({
   const [agents, setAgents] = useState<ExternalAgent[]>([]);
   const [models, setModels] = useState<readonly SavedModelConnection[]>([]);
   const [choice, setChoice] = useState<string | null>(null);
-  const busy = attempt?.status === "working" || attempt?.status === "approval";
+  const busy = writingAttemptBusy(attempt?.status);
   const [error, setError] = useState<MessageKey | null>(null);
   const [unapplied, setUnapplied] = useState("");
   const [applied, setApplied] = useState<{
@@ -130,6 +133,7 @@ export function DraftComposer({
   const [allowedFolder, setAllowedFolder] = useState<string | null>(null);
   const searchFolder = allowedFolder === folder ? folder : null;
   const materialRequests = useMaterialRequests(platform.sendMcpRequest);
+  const callLimit = useWritingCallLimit();
   const toolPicker = useWritingToolPicker(platform.sendMcpRequest);
   const toolApproval = materialRequests.externalTool;
   const agent = agents.find(({ path }) => `agent:${path}` === choice);
@@ -155,6 +159,7 @@ export function DraftComposer({
     entries: named.entries,
     folderSearch: !!searchFolder,
   });
+  const showCallPlan = named.entries.length > 0 || !!searchFolder || !!toolPicker.plan;
 
   useEffect(() => {
     mounted.current = true;
@@ -222,6 +227,7 @@ export function DraftComposer({
   const canSend =
     !!instruction.trim() &&
     !toolPicker.incomplete &&
+    (!showCallPlan || !callLimit.invalid) &&
     !named.loading &&
     !named.unconfirmed &&
     (!named.hasImages || vision?.verified === true) &&
@@ -275,6 +281,7 @@ export function DraftComposer({
           responseFormat: "draft",
         },
         folder: searchFolder,
+        callLimit: showCallPlan ? callLimit.limit : undefined,
       },
       connection,
       toolPicker.plan,
@@ -320,6 +327,7 @@ export function DraftComposer({
         {
           signal,
           plan: task.plan,
+          callLimit: task.callLimit,
           tool,
           onContext(context) {
             sentContext = context;
@@ -343,6 +351,10 @@ export function DraftComposer({
           onApproval(text) {
             partial = text;
             setAttempt({ ...entry, approved, partial, status: "approval" });
+          },
+          onPause(text) {
+            partial = text;
+            setAttempt({ ...entry, approved, partial, status: "paused" });
           },
           onResume(decision, text) {
             partial = text;
@@ -416,6 +428,7 @@ export function DraftComposer({
     controller.current = null;
   }
 
+  const pause = materialRequests.paused;
   const pending = materialRequests.pending ?? toolApproval.pending;
   const report = useMemo(
     () =>
@@ -433,11 +446,13 @@ export function DraftComposer({
         ].join(" · "),
         status: attempt.status,
         count: 0,
-        decisions: Number(!!pending || !!unapplied),
+        decisions: Number(!!pending || !!pause || !!unapplied),
         background: !active || collapsed,
         notice: pending
           ? { id: `${attempt.id}:approval:${pending.id}`, detail: pending.name, decisions: 1 }
-          : attempt.status === "complete"
+          : pause
+            ? { id: `${attempt.id}:call:${pause.calls}`, detail: pause.recipient, decisions: 1 }
+            : attempt.status === "complete"
             ? { id: attempt.id, decisions: Number(!!unapplied) }
             : undefined,
         stop: busy ? () => controller.current?.abort() : undefined,
@@ -461,6 +476,7 @@ export function DraftComposer({
       collapsed,
       name,
       onClose,
+      pause,
       pending,
       store,
       t,
@@ -566,7 +582,11 @@ export function DraftComposer({
           {t("settings.close")}
         </button>
       </div>
-      <fieldset hidden={!!pending} disabled={busy || !!unapplied} className="space-y-2">
+      <fieldset
+        hidden={!!pending || !!materialRequests.paused}
+        disabled={busy || !!unapplied}
+        className="space-y-2"
+      >
         <label className="block">
           {t("draft.instruction")}
           <input
@@ -665,6 +685,14 @@ export function DraftComposer({
         />
         {capacity.controls}
         <WritingToolPicker picker={toolPicker} />
+        {recipient && capacity.plan && showCallPlan && (
+          <WritingCallPlan
+            recipient={recipient}
+            requests={capacity.plan.contexts.map((taskContext) => ({ taskContext }))}
+            limit={callLimit}
+            toolEndpoint={toolPicker.plan?.endpoint}
+          />
+        )}
         {agent && (
           <details className="space-y-1 text-xs text-(--mint-muted)">
             <summary>{t(`agent.${agent.preferredAccess}`)}</summary>
@@ -680,6 +708,7 @@ export function DraftComposer({
             : t("draft.generate")}
         </button>
       </fieldset>
+      {pause && <WritingCallPause pause={pause} />}
       {toolApproval.pending && (
         <WritingToolNotice pending={toolApproval.pending} onDecision={toolApproval.decide} />
       )}
@@ -693,7 +722,7 @@ export function DraftComposer({
           onDecision={materialRequests.decide}
         />
       ) : (
-        busy && !pending && <p role="status">{t("draft.generating")}</p>
+        busy && !pending && !materialRequests.paused && <p role="status">{t("draft.generating")}</p>
       )}
       {attempt && (
         <WritingTaskMaterials

@@ -3,10 +3,12 @@ import type { WritingReply, WritingRequest } from "./writing-sender.ts";
 export type AttemptStatus =
   | "working"
   | "approval"
+  | "paused"
   | "complete"
   | "stopped"
   | "interrupted"
   | "limit"
+  | "callLimit"
   | "failed";
 
 export function replyStatus(reply: WritingReply): AttemptStatus {
@@ -21,10 +23,15 @@ export function isMaterialCapacityError(problem: unknown): boolean {
 export function failureStatus(problem: unknown, signal: AbortSignal): AttemptStatus {
   if (signal.aborted) return "stopped";
   const code = problem instanceof Error ? problem.message : problem;
+  if (code === "callLimit") return "callLimit";
   if (code === 402 || code === 429 || code === "limit") return "limit";
   return code === "network" || code === "timeout" || code === "interrupted"
     ? "interrupted"
     : "failed";
+}
+
+export function writingAttemptBusy(status?: AttemptStatus): boolean {
+  return status === "working" || status === "approval" || status === "paused";
 }
 
 export function writingMaterialNames(request: WritingRequest): string[] {

@@ -69,7 +69,7 @@ export interface SavedWritingTask {
   readonly reviewSelection?: string;
   readonly showSource: boolean;
   readonly turns: readonly SavedTurn[];
-  readonly pending?: Omit<SavedTurn, "reply" | "suggestions" | "direct" | "status" | "partial">;
+  readonly pending?: Omit<SavedTurn, "reply" | "suggestions" | "direct" | "status">;
 }
 
 export interface WritingTasksPlatform {

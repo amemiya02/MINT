@@ -141,6 +141,36 @@ test("a bounded endpoint receives every section in the previewed batches", async
   ]);
 });
 
+test("a draft call limit pauses between batches and keeps the first result", async ({ page }) => {
+  const first = "# Water\nRidge is open.\n";
+  const second = "# Trail\nTrail is open.\n";
+  const { received, ready } = materialEndpoint(page, 24);
+  await ready;
+  const draft = await draftWithNotes(page);
+  await dropNotes(draft, first + second);
+  await draft.getByLabel("Material limit (UTF-8 bytes)").fill("24");
+  await draft.getByLabel("Material handling").selectOption("batch");
+  const plan = draft.getByRole("group", { name: "Task call plan" });
+  await expect(plan).toContainText("46 UTF-8 bytes of material");
+  await expect(plan).toContainText(endpoint);
+  await expect(plan).toContainText("2 planned writing calls");
+  await plan.getByLabel("Task call limit").fill("1");
+  expect(received).toHaveLength(0);
+
+  await draft.getByRole("button", { name: "Generate draft" }).click();
+  const paused = draft.getByRole("group", { name: "Task paused at call limit" });
+  await expect(paused).toContainText("Bulletin part 1.");
+  expect(received).toEqual([[{ name: "field-notes.md · lines 1–2 · Water", text: first }]]);
+
+  await paused.getByRole("button", { name: "Allow one more call" }).click();
+  await expect(page.getByRole("tabpanel").getByRole("textbox", { name: "", exact: true }))
+    .toHaveText("Bulletin part 1.Bulletin part 2.");
+  expect(received).toEqual([
+    [{ name: "field-notes.md · lines 1–2 · Water", text: first }],
+    [{ name: "field-notes.md · lines 3–4 · Trail", text: second }],
+  ]);
+});
+
 test("Ask AI sends the approved local summary with the selection to the chosen model", async ({
   page,
 }) => {
