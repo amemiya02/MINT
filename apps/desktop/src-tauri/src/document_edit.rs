@@ -45,6 +45,28 @@ fn remove_checked(path: &Path, expected: &[u8]) -> io::Result<()> {
     Ok(())
 }
 
+/// Windows may briefly refuse replacement while an indexer or another reader
+/// holds the destination. Recheck the preview before each atomic publish.
+fn publish_rewrite(mut temp: NamedTempFile, to: &Path, before: &[u8]) -> io::Result<()> {
+    let mut retries = 0;
+    loop {
+        check(to, before)?;
+        match temp.persist(to) {
+            Ok(_) => return Ok(()),
+            Err(e)
+                if cfg!(windows)
+                    && retries < 20
+                    && matches!(e.error.raw_os_error(), Some(5 | 32 | 33)) =>
+            {
+                temp = e.file;
+                retries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(retries * 3));
+            }
+            Err(e) => return Err(e.error),
+        }
+    }
+}
+
 pub fn apply(from: &Path, to: &Path, before: &[u8], after: &[u8]) -> io::Result<()> {
     check(from, before)?;
     if from != to
@@ -87,14 +109,14 @@ pub fn apply(from: &Path, to: &Path, before: &[u8], after: &[u8]) -> io::Result<
     temp.as_file()
         .set_permissions(fs::metadata(from)?.permissions())?;
     temp.as_file().sync_all()?;
-    check(from, before)?;
     if from == to {
-        temp.persist(to).map_err(|e| e.error)?;
+        publish_rewrite(temp, to, before)?;
         crate::fs::sync_dir(destination);
         return Ok(());
     }
     // Publish the rewritten document before removing the old name. Even a
     // crash during a cross-directory move leaves a complete, visible copy.
+    check(from, before)?;
     temp.persist_noclobber(to).map_err(|e| e.error)?;
     crate::fs::sync_dir(destination);
     if let Err(error) = remove_checked(from, before) {
