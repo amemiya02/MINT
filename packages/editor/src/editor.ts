@@ -41,6 +41,7 @@ import {
   fromFileOffset,
   parseFileText,
   replaceFileText,
+  replacementLineEndings,
   sharedFileEffects,
   toFileOffset,
 } from "./file-text.ts";
@@ -225,6 +226,14 @@ export interface MintEditor {
   replaceText(text: string): void;
   /** Replace one range in its own undo step, preserving the surrounding file text. */
   replaceRange(range: TextRange, text: string): void;
+  /** Replace disjoint ranges in document order in one undo step. Return the inserted ranges. */
+  replaceRanges(
+    replacements: readonly (TextRange & { readonly text: string })[],
+    options?: {
+      readonly collapseSelection?: TextRange;
+      readonly lineEndings?: "match" | "preserve";
+    },
+  ): readonly TextRange[];
   /** Capture a bounded passage of ordinary prose at the cursor for proofreading. */
   getProofreadingPassage(): ProsePassage | null;
   /** The main selection range. */
@@ -431,6 +440,48 @@ export function createEditor(options: EditorOptions): MintEditor {
     for (const listener of listeners) listener(event);
   }
 
+  function replaceRanges(
+    replacements: readonly (TextRange & { readonly text: string })[],
+    {
+      collapseSelection,
+      lineEndings,
+    }: {
+      readonly collapseSelection?: TextRange;
+      readonly lineEndings?: "match" | "preserve";
+    } = {},
+  ) {
+    if (!replacements.length) return [];
+    const state = view.state;
+    const entries = replacements.map(({ from, to, text }) => ({
+      from: fromFileOffset(state, from),
+      to: fromFileOffset(state, to),
+      text,
+      insert: Text.of(text.split(/\r\n|\r|\n/)),
+    }));
+    const changes = state.changes(entries);
+    const { main, ranges } = state.selection;
+    const end =
+      collapseSelection &&
+      ranges.length === 1 &&
+      main.from === fromFileOffset(state, collapseSelection.from) &&
+      main.to === fromFileOffset(state, collapseSelection.to)
+        ? changes.mapPos(main.to, 1)
+        : undefined;
+    view.dispatch({
+      changes,
+      selection: end === undefined ? undefined : { anchor: end },
+      effects: lineEndings ? replacementLineEndings(state, entries, lineEndings) : undefined,
+      annotations: isolateHistory.of("full"),
+    });
+    let delta = 0;
+    return entries.map(({ from, to, insert }) => {
+      const start = from + delta;
+      const end = start + insert.length;
+      delta += insert.length - (to - from);
+      return { from: toFileOffset(view.state, start), to: toFileOffset(view.state, end) };
+    });
+  }
+
   const commands: { [C in EditorCommand]: (...args: EditorCommands[C]) => boolean } = {
     ...findCommands(view),
     ...tableCommands(view, runInFocusedTable, focusTableCell),
@@ -470,20 +521,9 @@ export function createEditor(options: EditorOptions): MintEditor {
       view.dispatch(replaceFileText(view.state, text));
     },
     replaceRange(range, text) {
-      const state = view.state;
-      const from = fromFileOffset(state, range.from);
-      const to = fromFileOffset(state, range.to);
-      const insert = Text.of(text.split(/\r\n|\r|\n/));
-      const { main, ranges } = state.selection;
-      view.dispatch({
-        changes: { from, to, insert },
-        selection:
-          ranges.length === 1 && main.from === from && main.to === to
-            ? { anchor: from + insert.length }
-            : undefined,
-        annotations: isolateHistory.of("full"),
-      });
+      replaceRanges([{ ...range, text }], { collapseSelection: range });
     },
+    replaceRanges,
     getProofreadingPassage: () =>
       view.compositionStarted ? null : prosePassageAtCursor(view.state),
     getSelection() {

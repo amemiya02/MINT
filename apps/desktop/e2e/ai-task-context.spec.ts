@@ -144,7 +144,9 @@ for (const decision of ["allow", "skip"] as const) {
     await expect(folderSearch).not.toBeChecked();
     if (decision === "allow") await folderSearch.check();
     await composer.getByRole("textbox", { name: "Instruction", exact: true }).fill(instruction);
-    await composer.getByRole("button", { name: "Send", exact: true }).click();
+    await composer
+      .getByRole("button", { name: /^Apply directly · Current selection · Trail model/ })
+      .click();
 
     let approval = composer.getByRole("group", { name: "Additional material requested" });
     await expect(approval.getByText("Check the exact opening time.")).toBeVisible();
@@ -191,6 +193,7 @@ for (const decision of ["allow", "skip"] as const) {
         ? "The ridge gate opens at 07:30."
         : "The ridge gate opens each morning.",
     );
+    await expect(editor).toBeFocused();
     expect(await readFile(page, draft)).toBe(`Trail notes.\n\n${selection}`);
     expect(requests).toHaveLength(2);
     expect(requests[1]).toEqual({

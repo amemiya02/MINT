@@ -1,4 +1,4 @@
-import type { MintEditor } from "@mint/editor";
+import type { MintEditor, TextRange } from "@mint/editor";
 import { type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useT } from "../i18n/index.ts";
 import type { Platform } from "../platform/platform.ts";
@@ -16,11 +16,7 @@ import {
   writingMaterialNames,
 } from "./writing-attempt.ts";
 import { loadWritingRecipients, type WritingRecipient } from "./writing-recipients.ts";
-import {
-  applyWritingSelection,
-  captureWritingSelection,
-  type WritingSelection,
-} from "./writing-selection.ts";
+import { captureWritingSelection, type WritingSelection } from "./writing-selection.ts";
 import {
   replacementFromReply,
   splitWritingProgress,
@@ -70,7 +66,7 @@ interface Turn extends WritingTurn {
   readonly material?: string;
   readonly recipient: string;
   readonly recipientId: string;
-  readonly appliedDirectly?: boolean;
+  readonly direct: boolean;
   readonly suggestions?: readonly Suggestion[];
 }
 
@@ -79,8 +75,22 @@ type Suggestion = Pick<SelectionEdit, "before" | "after"> & {
   readonly id: number;
   readonly range: TrackedRange;
   readonly status: EditStatus;
+  readonly appliedText?: string;
   readonly comments?: readonly (WritingTurn & { readonly id: number })[];
 };
+
+function currentText({ range }: Suggestion, draft: string) {
+  const { from, to } = range.current();
+  return draft.slice(from, to);
+}
+
+function isApplied(suggestion: Suggestion, draft: string) {
+  return (
+    suggestion.status === "applied" &&
+    suggestion.appliedText !== undefined &&
+    currentText(suggestion, draft) !== suggestion.before
+  );
+}
 
 interface Props {
   readonly editor: MintEditor | null;
@@ -246,6 +256,8 @@ function Composer({
     null,
   );
   const input = useRef<HTMLInputElement>(null);
+  const heading = useRef<HTMLSpanElement>(null);
+  const openingChanges = useRef(false);
   const mounted = useRef(true);
   const isActive = useRef(active);
   isActive.current = active;
@@ -305,8 +317,19 @@ function Composer({
   }, [platform, settingsOpen]);
 
   useEffect(() => {
-    if (placement && isActive.current && !settingsOpen) input.current?.focus();
+    if (!placement || !isActive.current || settingsOpen) return;
+    if (openingChanges.current) {
+      heading.current?.focus();
+      openingChanges.current = false;
+    } else {
+      input.current?.focus();
+    }
   }, [placement, settingsOpen]);
+
+  function viewChanges() {
+    openingChanges.current = placement !== "sidebar";
+    setPlacement("sidebar");
+  }
 
   function close() {
     setPlacement(null);
@@ -323,13 +346,100 @@ function Composer({
     origin.editor.focus();
   }
 
-  async function applyDirectly(replacement: string, signal: AbortSignal): Promise<boolean> {
-    return (
-      (await refreshDisk()) &&
-      mounted.current &&
-      !signal.aborted &&
-      applyWritingSelection(origin, replacement, true).status === "applied"
-    );
+  function releaseRange(range: TrackedRange) {
+    if (trackedSuggestions.current.delete(range)) range.release();
+  }
+
+  function recordApplied(
+    suggestion: Suggestion,
+    range: TextRange,
+    appliedText: string,
+    before = suggestion.before,
+  ): Suggestion {
+    releaseRange(suggestion.range);
+    const tracked = origin.editor.trackRange(range);
+    trackedSuggestions.current.add(tracked);
+    return { ...suggestion, range: tracked, appliedText, before, status: "applied" };
+  }
+
+  async function applyDirectly(
+    suggestions: Suggestion[],
+    signal: AbortSignal,
+  ): Promise<Suggestion[]> {
+    if (!(await refreshDisk()) || !mounted.current || signal.aborted) return suggestions;
+    const draft = origin.editor.getText();
+    const applicable = suggestions.flatMap((suggestion) => {
+      if (!suggestion.range.hasBoundaries()) return [];
+      const range = suggestion.range.current();
+      return draft.slice(range.from, range.to) === suggestion.before
+        ? [{ ...range, text: suggestion.after, id: suggestion.id }]
+        : [];
+    });
+    const target = origin.range.current();
+    const { anchor, head } = origin.editor.getSelection();
+    const stillAtTarget =
+      isActive.current &&
+      Math.min(anchor, head) === target.from &&
+      Math.max(anchor, head) === target.to;
+    const inserted = origin.editor.replaceRanges(applicable, {
+      collapseSelection: stillAtTarget ? target : undefined,
+      lineEndings: "match",
+    });
+    const applied = new Map(applicable.map(({ id }, index) => [id, inserted[index]]));
+    const edited = origin.editor.getText();
+    return suggestions.map((suggestion) => {
+      const range = applied.get(suggestion.id);
+      return range
+        ? recordApplied(suggestion, range, edited.slice(range.from, range.to))
+        : suggestion;
+    });
+  }
+
+  async function revertDirect(
+    index: number,
+    suggestions: readonly Suggestion[],
+    compared?: string,
+  ) {
+    if (busy || checkingDisk.current) return;
+    checkingDisk.current = true;
+    try {
+      if (!(await refreshDisk()) || !mounted.current) {
+        if (mounted.current) viewChanges();
+        return;
+      }
+      const live = origin.editor.getText();
+      let needsComparison = false;
+      const replacements = suggestions.flatMap(({ id, status, appliedText, range, before }) => {
+        if (status !== "applied" || appliedText === undefined) return [];
+        const { from, to } = range.current();
+        const current = live.slice(from, to);
+        if (current === before) return [];
+        if (!range.hasBoundaries() || current !== (compared ?? appliedText)) {
+          needsComparison = true;
+          return [];
+        }
+        return [{ id, from, to, text: before }];
+      });
+      origin.editor.replaceRanges(replacements, { lineEndings: "preserve" });
+      const reverted = new Set(replacements.map(({ id }) => id));
+      for (const { id, range } of suggestions) if (reverted.has(id)) releaseRange(range);
+      setTurns((previous) =>
+        previous.map((turn, i) =>
+          i === index
+            ? {
+                ...turn,
+                suggestions: turn.suggestions?.map((suggestion) =>
+                  reverted.has(suggestion.id) ? { ...suggestion, status: "reverted" } : suggestion,
+                ),
+              }
+            : turn,
+        ),
+      );
+      if (needsComparison) viewChanges();
+      else if (isActive.current && placement === "inline") origin.editor.focus();
+    } finally {
+      checkingDisk.current = false;
+    }
   }
 
   function preview(edits: SelectionEdit[]): Suggestion[] {
@@ -362,23 +472,36 @@ function Composer({
     acceptedText?: string,
   ) {
     if (busy || checkingDisk.current || suggestion.status !== "preview") return;
+    let update: Partial<Suggestion> = { status: "discarded" };
     if (acceptedText !== undefined) {
       checkingDisk.current = true;
       try {
         if (!(await refreshDisk()) || !mounted.current || !suggestion.range.hasBoundaries()) return;
         const range = suggestion.range.current();
         if (origin.editor.getText().slice(range.from, range.to) !== acceptedText) return;
-        if (acceptedText !== suggestion.after) origin.editor.replaceRange(range, suggestion.after);
+        update = { status: "applied" };
+        if (acceptedText !== suggestion.after) {
+          const [inserted] = origin.editor.replaceRanges([{ ...range, text: suggestion.after }], {
+            collapseSelection: range,
+            lineEndings: "match",
+          });
+          if (turns[index]?.direct && inserted) {
+            const edited = origin.editor.getText();
+            update = recordApplied(
+              suggestion,
+              inserted,
+              edited.slice(inserted.from, inserted.to),
+              acceptedText,
+            );
+          }
+        }
         if (isActive.current) origin.editor.focus();
       } finally {
         checkingDisk.current = false;
       }
     }
-    const status = acceptedText === undefined ? "discarded" : "applied";
-    if (trackedSuggestions.current.delete(suggestion.range)) {
-      suggestion.range.release();
-    }
-    updateSuggestion(index, position, { status });
+    releaseRange(suggestion.range);
+    updateSuggestion(index, position, update);
   }
 
   function reportSendError(problem: unknown) {
@@ -519,16 +642,9 @@ function Composer({
     }
     if (!mounted.current) return false;
 
-    let appliedDirectly = false;
-    if (finalReplacement !== undefined && task.action === "direct" && task.seen.size === 0) {
-      try {
-        appliedDirectly = await applyDirectly(finalReplacement, signal);
-      } catch {
-        // The proposal remains available for comparison if the disk cannot be refreshed.
-      }
-    }
-    if (!mounted.current) return false;
-    if (signal.aborted && !appliedDirectly) status = "stopped";
+    const canApplyDirectly =
+      status === "complete" && task.action === "direct" && task.seen.size === 0;
+    if (signal.aborted) status = "stopped";
     const progress = splitWritingProgress(text, editing);
     const replacement = status === "complete" ? finalReplacement : progress.replacement;
     const partial = status === "complete" ? "" : progress.partial;
@@ -570,7 +686,16 @@ function Composer({
         ),
       );
     }
-    const suggestions = !rewrite && newEdits && !appliedDirectly ? preview(newEdits) : undefined;
+    let suggestions = !rewrite && newEdits ? preview(newEdits) : undefined;
+    if (canApplyDirectly && suggestions?.length) {
+      try {
+        suggestions = await applyDirectly(suggestions, signal);
+      } catch {
+        // The proposal remains available for comparison if the disk cannot be refreshed.
+      }
+    }
+    if (!mounted.current) return false;
+    if (signal.aborted) status = "stopped";
     if (!rewrite || partial)
       setTurns((previous) => [
         ...previous,
@@ -580,7 +705,7 @@ function Composer({
           material: task.request.selectedText ?? task.request.taskContext?.currentDraft?.text,
           recipient,
           recipientId: connection.id,
-          appliedDirectly,
+          direct: task.action === "direct",
           suggestions,
           status,
           partial,
@@ -644,6 +769,47 @@ function Composer({
   const otherConnection = canRetry && recipients.find(({ id }) => id === retryId);
   if (!placement) return null;
   const sidebar = placement === "sidebar";
+  const latest = turns.at(-1);
+  if (
+    !sidebar &&
+    !busy &&
+    latest?.status === "complete" &&
+    latest.direct &&
+    latest.suggestions?.length
+  ) {
+    const { suggestions } = latest;
+    const applied = suggestions.filter((suggestion) => isApplied(suggestion, draft)).length;
+    const pending = suggestions.filter(({ status }) => status === "preview").length;
+    const summary =
+      pending === 0 && applied === 0
+        ? t("writing.edit.noneApplied")
+        : applied === 1 && pending === 0
+          ? t("writing.edit.applied")
+          : t("writing.edit.summary", { applied: String(applied), pending: String(pending) });
+    return (
+      <section
+        aria-label={t("writing.ask")}
+        className="absolute right-3 bottom-3 z-10 flex max-w-[calc(100%-1.5rem)] flex-wrap items-center gap-2 rounded-lg border border-(--mint-border) bg-(--mint-bg) p-2 text-sm shadow-lg"
+      >
+        <span role="status">{summary}</span>
+        <button type="button" className={buttonClass} onClick={viewChanges}>
+          {t("writing.viewChanges")}
+        </button>
+        {applied > 0 && (
+          <button
+            type="button"
+            className={buttonClass}
+            onClick={() => void revertDirect(turns.length - 1, suggestions)}
+          >
+            {t("writing.edit.undoDirect")}
+          </button>
+        )}
+        <button type="button" className={buttonClass} onClick={close}>
+          {t("settings.close")}
+        </button>
+      </section>
+    );
+  }
   const Container = sidebar ? "aside" : "section";
   const messages = sidebar ? turns : turns.slice(-1);
 
@@ -680,7 +846,9 @@ function Composer({
       }}
     >
       <header className="flex flex-wrap items-center justify-between gap-2">
-        <span className="font-medium">{t(sidebar ? "writing.title" : "writing.ask")}</span>
+        <span ref={heading} tabIndex={-1} className="font-medium">
+          {t(sidebar ? "writing.title" : "writing.ask")}
+        </span>
         <button type="button" className={buttonClass} onClick={close}>
           {t("settings.close")}
         </button>
@@ -724,13 +892,33 @@ function Composer({
                   )}
                 </details>
               )}
+              {sidebar &&
+                turn.direct &&
+                suggestions?.some((suggestion) => isApplied(suggestion, draft)) && (
+                  <button
+                    type="button"
+                    className={buttonClass}
+                    disabled={busy}
+                    onClick={() => void revertDirect(index, suggestions)}
+                  >
+                    {t("writing.edit.undoDirect")}
+                  </button>
+                )}
               {suggestions?.length ? (
                 suggestions.map((suggestion, position) => {
-                  const { from, to } = suggestion.range.current();
-                  const current = draft.slice(from, to);
-                  const conflict = suggestion.status === "preview" && current !== suggestion.before;
-                  const hasBoundaries = suggestion.range.hasBoundaries();
-                  const blocked = externalChange || !hasBoundaries;
+                  const current = currentText(suggestion, draft);
+                  const pending = suggestion.status === "preview";
+                  const conflict = pending && current !== suggestion.before;
+                  const canRevert =
+                    suggestion.status === "applied" && suggestion.appliedText !== undefined;
+                  const reverted = canRevert && current === suggestion.before;
+                  const revertConflict =
+                    canRevert && !reverted && current !== suggestion.appliedText;
+                  const blocked = externalChange
+                    ? "disk"
+                    : !suggestion.range.hasBoundaries()
+                      ? "boundaries"
+                      : undefined;
                   return (
                     <ProposedSelectionEdit
                       key={suggestion.id}
@@ -739,11 +927,12 @@ function Composer({
                         total: String(suggestions.length),
                       })}
                       before={suggestion.before}
-                      after={suggestion.after}
-                      status={suggestion.status}
+                      after={suggestion.appliedText ?? suggestion.after}
+                      status={reverted ? "reverted" : suggestion.status}
+                      showAppliedComparison={turn.direct}
                       source={showSource}
-                      current={conflict ? current : undefined}
-                      blocked={externalChange ? "disk" : !hasBoundaries ? "boundaries" : undefined}
+                      current={conflict || revertConflict ? current : undefined}
+                      blocked={pending || (canRevert && !reverted) ? blocked : undefined}
                       busy={busy}
                       recipient={turn.recipient}
                       conversation={suggestion.comments?.map(({ id, instruction, reply }) => (
@@ -753,13 +942,20 @@ function Composer({
                         </div>
                       ))}
                       onApply={
-                        blocked
+                        blocked || !pending
                           ? undefined
                           : () => void decide(index, position, suggestion, current)
                       }
-                      onDiscard={() => void decide(index, position, suggestion)}
+                      onDiscard={
+                        pending ? () => void decide(index, position, suggestion) : undefined
+                      }
+                      onRevert={
+                        canRevert && !reverted && !blocked
+                          ? () => void revertDirect(index, [suggestion], current)
+                          : undefined
+                      }
                       onRewrite={
-                        blocked || !canRewrite
+                        blocked || !pending || !canRewrite
                           ? undefined
                           : (prompt) => rewrite(index, position, turn, suggestion, current, prompt)
                       }
@@ -768,11 +964,6 @@ function Composer({
                 })
               ) : suggestions ? (
                 <p>{t("writing.edit.unchanged")}</p>
-              ) : turn.appliedDirectly ? (
-                <>
-                  <p>{t("writing.edit.applied")}</p>
-                  <pre className="whitespace-pre-wrap wrap-anywhere">{turn.reply}</pre>
-                </>
               ) : null}
               {turn.partial && (
                 <div>
@@ -780,8 +971,7 @@ function Composer({
                   <pre className="whitespace-pre-wrap wrap-anywhere">{turn.partial}</pre>
                 </div>
               )}
-              {!!turn.reply &&
-                renderReplyExcerpt(turn.reply, !!(suggestions || turn.appliedDirectly))}
+              {!!turn.reply && renderReplyExcerpt(turn.reply, suggestions !== undefined)}
             </article>
           );
         })}
@@ -973,7 +1163,13 @@ function Composer({
                 className={buttonClass}
                 disabled={!recipient || loading || !instruction.trim() || named.loading}
               >
-                {t("writing.send")}
+                {recipient
+                  ? t("writing.sendAuthorized", {
+                      action: t(`writing.${action}`),
+                      scope: t(`writing.scope.${scope}`),
+                      recipient: labelFor(recipient),
+                    })
+                  : t("writing.send")}
               </button>
               <button type="button" className={buttonClass} onClick={onSettings}>
                 {t("writing.manage")}
@@ -987,7 +1183,10 @@ function Composer({
           key={materialRequests.pending.id}
           pending={materialRequests.pending}
           platform={platform}
-          onDecision={materialRequests.decide}
+          onDecision={(decision) => {
+            if (!sidebar && active && action === "direct") origin.editor.focus();
+            materialRequests.decide(decision);
+          }}
         />
       )}
     </Container>
