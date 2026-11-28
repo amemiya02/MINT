@@ -5,7 +5,7 @@ import {
   writingMaterialChart,
   writingMaterialPdf,
 } from "../test-fixtures/writing-materials.ts";
-import { launch, readFile, runMenuItem } from "./memory-platform.ts";
+import { launch, pickFile, readFile, runMenuItem } from "./memory-platform.ts";
 
 const address = "https://ranges.example.test/v1";
 const endpoint = `${address}/chat/completions`;
@@ -24,7 +24,9 @@ async function dropPdf(context: Locator, withAudience = false) {
   );
 }
 
-test("draft from two materials and send only the selected PDF page as text", async ({ page }) => {
+test("draft from two materials and cite the selected PDF page after the source changes", async ({
+  page,
+}) => {
   const supported = "The deck opens Tuesday.";
   const unsupported = "There is a private access code.";
   const generated = `${supported} ${unsupported}`;
@@ -33,13 +35,15 @@ test("draft from two materials and send only the selected PDF page as text", asy
     { claim: unsupported, material: 1, quote: otherPageText },
   ])}\n</source-passages>`;
   const draftPath = "/notes/bulletin.md";
-  await page.route(endpoint, (route) =>
-    route.fulfill({
+  let sends = 0;
+  await page.route(endpoint, (route) => {
+    sends++;
+    return route.fulfill({
       json: {
         choices: [{ message: { content: reply }, finish_reason: "stop" }],
       },
-    }),
-  );
+    });
+  });
   await launch(page, {
     locale: "en-US",
     directories: ["/notes"],
@@ -81,6 +85,7 @@ test("draft from two materials and send only the selected PDF page as text", asy
     { name: "audience.txt", text: "Visitor bulletin." },
   ]);
   const editor = page.getByRole("tabpanel").getByRole("textbox", { name: "", exact: true });
+  await expect(page.getByRole("tab", { name: /^Untitled/ })).toBeVisible();
   await expect(editor).toHaveText(generated);
   const review = page.getByRole("region", { name: "Source passages" });
   await expect(review.getByRole("listitem").filter({ hasText: unsupported })).toContainText(
@@ -90,7 +95,29 @@ test("draft from two materials and send only the selected PDF page as text", asy
   const passage = review.getByRole("region", { name: "Excerpt used for this draft" });
   await expect(passage.getByText(selectedPageText, { exact: true })).toBeVisible();
   await expect(passage).toContainText("field-notes.pdf · Page 2 of 2 · Extracted text");
-  await passage.getByRole("button", { name: "Insert Markdown citation" }).click();
+  await runMenuItem(page, "file.save");
+  await expect.poll(() => readFile(page, draftPath)).toBe(generated);
+
+  const revised = "Revised page: the observation deck will stay closed.";
+  const compare = async (pageTwo: string) => {
+    await pickFile(page, passage.getByRole("button", { name: "Choose revised source" }), {
+      name: "field-notes.pdf",
+      mimeType: "application/pdf",
+      buffer: Buffer.from(writingMaterialPdf(pageTwo)),
+    });
+  };
+  const comparison = passage.getByRole("region", { name: "Source comparison" });
+  await compare(revised);
+  await expect(comparison).toContainText(revised);
+  await compare("");
+  await expect(comparison).toContainText(
+    "The original excerpt no longer has text at this location.",
+  );
+  await expect(passage.getByText(selectedPageText, { exact: true })).toBeVisible();
+  expect(sends).toBe(1);
+  expect(await readFile(page, draftPath)).toBe(generated);
+
+  await passage.getByRole("button", { name: "Cite the original excerpt in Markdown" }).click();
   await runMenuItem(page, "file.save");
   await expect
     .poll(() => readFile(page, draftPath))

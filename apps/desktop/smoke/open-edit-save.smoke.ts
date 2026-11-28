@@ -916,6 +916,18 @@ const waitForView = (message: string, script: string) =>
       })) || null,
   ).catch(explain);
 
+async function tabToView(what: string, script: string) {
+  for (let step = 0; step < 24; step++) {
+    const focused = await command<boolean>("POST", `/session/${session}/execute/sync`, {
+      script,
+      args: [],
+    });
+    if (focused) return;
+    await keyActions(typing(keys.tab));
+  }
+  assert.fail(`could not reach ${what} by keyboard`);
+}
+
 test("the task summary reads only granted folder documents and preserves their bytes", async () => {
   const folder = await mkdtemp(join(dir, "tasks-"));
   const draft = join(folder, "draft.md");
@@ -1834,8 +1846,10 @@ test("a native model receives only the sample or live selection and edits throug
 test("a saved writing review resumes after a native restart without contacting its model", async () => {
   const draft = join(dir, "resume-writing-review.md");
   const renamedDraft = join(dir, "renamed-writing-review.md");
-  const original =
-    "# Methods\n\n| Group | Finding |\n| --- | --- |\n| Coast | First draft. |\n\nSecond draft.\n\nThird draft.\n\nFourth draft.\n\nFifth draft.\n\n# Results\n\nLast draft.";
+  const background = Array.from({ length: 40 }, (_, index) => `Background ${index + 1}.`).join(
+    "\n\n",
+  );
+  const original = `# Methods\n\n| Group | Finding |\n| --- | --- |\n| Coast | First draft. |\n\nSecond draft.\n\nThird draft.\n\nFourth draft.\n\nFifth draft.\n\n# Results\n\n${background}\n\nLast draft.`;
   const replacement = original.replaceAll("draft.", "edit.");
   const instruction = "Review all six passages.";
   const excerpt = "The Tuesday field notes support the first passage.";
@@ -1914,11 +1928,20 @@ test("a saved writing review resumes after a native restart without contacting i
       "return [...document.querySelectorAll('button')].some(button => button.textContent.trim() === 'Review proposed edits');",
     );
     await waitForView(
-      "the manuscript to be available before review",
-      "const editor = document.querySelector('.cm-content'); editor.focus(); return editor === document.activeElement;",
+      "the manuscript to regain keyboard focus after sending",
+      "return document.activeElement?.matches('.cm-content');",
     );
     await keyActions(chord(keys.control, keys.end));
-    await click("Review proposed edits");
+    await waitForView(
+      "the manuscript to scroll to its last paragraph",
+      "return document.querySelector('.cm-scroller')?.scrollTop > 0;",
+    );
+    await tabToView(
+      "the proposed edits button",
+      `return document.activeElement?.matches('section[aria-label="Ask AI"] button') &&
+        document.activeElement.textContent.trim() === 'Review proposed edits';`,
+    );
+    await keyActions(typing(keys.enter));
     const reviewRoot =
       "document.querySelector('dialog[open][aria-label=\"Review proposed edits\"]')";
     const focusedEdit = (number: number, type = "Replacement") =>
@@ -1928,19 +1951,13 @@ test("a saved writing review resumes after a native restart without contacting i
           document.activeElement.textContent.trim() === '${type} · Edit ${number} of 6';`,
       );
     const pressReviewButton = async (label: string) => {
-      for (let index = 0; index < 20; index++) {
-        await keyActions(typing(keys.tab));
-        const found = await command<boolean>("POST", `/session/${session}/execute/sync`, {
-          script: `return ${reviewRoot}?.contains(document.activeElement) &&
-            document.activeElement?.matches('button') &&
-            document.activeElement.textContent.trim() === arguments[0];`,
-          args: [label],
-        });
-        if (!found) continue;
-        await keyActions(typing(keys.enter));
-        return;
-      }
-      assert.fail(`could not reach ${label} by keyboard`);
+      await tabToView(
+        label,
+        `return ${reviewRoot}?.contains(document.activeElement) &&
+          document.activeElement?.matches('button') &&
+          document.activeElement.textContent.trim() === ${JSON.stringify(label)};`,
+      );
+      await keyActions(typing(keys.enter));
     };
     await focusedEdit(1, "Table · Replacement");
     await waitForView(
@@ -1960,15 +1977,13 @@ test("a saved writing review resumes after a native restart without contacting i
     );
     await keyActions([...typing(note), ...typing(keys.enter)]);
     await focusedEdit(4);
-    await waitForView(
-      "Methods to report two remaining edits",
-      `const option = [...${reviewRoot}?.querySelectorAll('select option') ?? []]
-        .find(option => option.textContent.trim() === 'Methods · 2 pending of 5 edits');
-       if (!option) return false;
-       option.parentElement.value = option.value;
-       option.parentElement.dispatchEvent(new Event('change', { bubbles: true }));
-       return true;`,
+    await tabToView(
+      "the Section selector",
+      `const active = document.activeElement;
+       return ${reviewRoot}?.contains(active) && active?.matches('select') &&
+         active.options[0].textContent.trim() === 'All sections';`,
     );
+    await keyActions(typing("m"));
     await pressReviewButton("Accept remaining edits in Methods");
     await shows("Accepted 2 edits.");
     await keyActions(typing(keys.escape));
@@ -2504,19 +2519,23 @@ test("a native model reply stays editable and untitled until the author chooses 
   const folder = await mkdtemp(join(homedir(), "mint-ai-draft-"));
   const sources = join(folder, "sources");
   const source = join(sources, "field-log.md");
+  const pdf = join(sources, "deck-observations.pdf");
   const excerpt = "The north ridge reopened on Tuesday.";
   const revision = "The north ridge will remain closed until Friday.";
   const unapproved = "Private crew contact details.";
   await mkdir(sources);
   await writeFile(source, `${unapproved}\n${excerpt}\n`);
+  await writeFile(pdf, writingMaterialPdf());
   const path = join(folder, "field-notes.md");
   const instruction = "Draft an introduction for the field notes.";
   const supported = "The north ridge is open again.";
   const unsupported = "The south trail is open too.";
-  const generated = `${supported} ${unsupported}`;
+  const deckClaim = "The observation deck opens Tuesday.";
+  const generated = `${supported} ${unsupported} ${deckClaim}`;
   const groundedReply = `${generated}\n\n<source-passages>\n${JSON.stringify([
-    { claim: supported, material: 2, quote: excerpt },
-    { claim: unsupported, material: 2, quote: unapproved },
+    { claim: supported, material: 3, quote: excerpt },
+    { claim: unsupported, material: 3, quote: unapproved },
+    { claim: deckClaim, material: 2, quote: selectedPageText },
   ])}\n</source-passages>`;
   const requests: {
     path: string | undefined;
@@ -2585,6 +2604,15 @@ test("a native model reply stays editable and untitled until the author chooses 
       await keyActions(typing(value));
     }
     await addPastedWritingMaterial("Field notes are for the visitor bulletin.");
+    await chooseWebViewFile("Choose material file", pdf, "body");
+    await clickPath(
+      "//form//fieldset[legend='deck-observations.pdf']//label[normalize-space(text()[1])='PDF page']/input",
+    );
+    await keyActions([...chord(keys.control, "a"), ...typing("2")]);
+    await clickPath(
+      "//form//fieldset[legend='deck-observations.pdf']//button[not(@disabled) and normalize-space(.)='Use selected material']",
+    );
+    await showsIn("form", "deck-observations.pdf · Page 2 of 2 · Extracted text");
     await clickPath(
       "//form//label[normalize-space(.)='Allow searching the current working folder']/input",
     );
@@ -2620,7 +2648,15 @@ test("a native model reply stays editable and untitled until the author chooses 
     );
     assert.equal(requests.length, 2);
     const initialContext = {
-      materials: [{ name: "Pasted text", text: "Field notes are for the visitor bulletin." }],
+      materials: [
+        { name: "Pasted text", text: "Field notes are for the visitor bulletin." },
+        {
+          name: "deck-observations.pdf",
+          text: selectedPageText,
+          range: { kind: "pdf", page: 2, pages: 2 },
+          format: "extractedText",
+        },
+      ],
       folderSearch: true,
     };
     for (const [index, request] of requests.entries()) {
@@ -2692,11 +2728,24 @@ test("a native model reply stays editable and untitled until the author chooses 
         ],
       },
       { from: supported.length + 1, claim: unsupported, excerpts: [] },
+      {
+        from: generated.indexOf(deckClaim),
+        claim: deckClaim,
+        excerpts: [
+          {
+            name: "deck-observations.pdf",
+            range: { kind: "pdf", page: 2, pages: 2 },
+            format: "extractedText",
+            quote: selectedPageText,
+            line: 1,
+          },
+        ],
+      },
     ]);
     assert.ok(!JSON.stringify(saved).includes("draft-fixture-secret"));
     await clickPath(`${sourceReview}//button[normalize-space(.)='Insert Markdown citation']`);
     await nativeShortcut("ctrl+s");
-    const cited = `${supported}[^mint-source-1] ${unsupported} Author's addition.\n\n[^mint-source-1]: field-log.md · line 2, line 1 of sent material. “${excerpt}”\n`;
+    const cited = `${supported}[^mint-source-1] ${unsupported} ${deckClaim} Author's addition.\n\n[^mint-source-1]: field-log.md · line 2, line 1 of sent material. “${excerpt}”\n`;
     await until(
       "only the requested citation to be added to the native manuscript",
       async () => (await readFile(path, "utf8")) === cited || null,
@@ -2770,6 +2819,21 @@ test("a native model reply stays editable and untitled until the author chooses 
     ]);
     assert.equal(await readFile(path, "utf8"), cited);
     assert.equal(await readFile(source, "utf8"), `${unapproved}\n${revision}\n`);
+
+    // Upload the same source after its second page has lost all text.
+    await writeFile(pdf, writingMaterialPdf(""));
+    await clickPath(`${sourceReview}//button[normalize-space(.)='${deckClaim}']`);
+    await chooseWebViewFile("Choose revised source", pdf, "body");
+    await waitForView(
+      "the persisted PDF excerpt and its now blank page in the revised source",
+      `const passage = document.querySelector('section[aria-label="Excerpt used for this draft"]');
+       return passage?.querySelector('blockquote')?.textContent === ${JSON.stringify(selectedPageText)} &&
+         passage.textContent.includes('deck-observations.pdf · Page 2 of 2 · Extracted text') &&
+         passage.querySelector('section[aria-label="Source comparison"]')?.textContent
+          .includes('The original excerpt no longer has text at this location.');`,
+    );
+    assert.equal(requests.length, 3, "comparing the revised PDF makes no request");
+    assert.equal(await readFile(path, "utf8"), cited);
   } finally {
     endpoint.closeAllConnections();
     await new Promise<void>((resolve) => endpoint.close(() => resolve()));
