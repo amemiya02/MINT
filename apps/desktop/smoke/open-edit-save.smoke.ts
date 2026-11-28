@@ -1983,6 +1983,7 @@ test("external Agent consent gates a real CLI process and keeps the manuscript o
   const calls = join(fixture, "calls.jsonl");
   const writeTarget = join(fixture, "agent-write.txt");
   const initial = "Unsent paragraph.\n\nOn-disk sentence.";
+  const configuredAccessNotice = "Configured file access may include writes across your account.";
   await writeFile(draft, initial);
   await writeFile(
     executable,
@@ -2109,18 +2110,22 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   assert.equal(await readFile(draft, "utf8"), initial);
   await clickPath("//aside[@aria-label='Writing Assistant']//button[normalize-space(.)='Close']");
   await openSettings();
-  await click("External Agents");
+  await clickSettingsButton("External Agents");
 
-  await command("POST", `/session/${session}/execute/sync`, {
-    script: `const select = Array.from(document.querySelectorAll('dialog[open] select'))
-      .find((control) => control.querySelector('option[value="configured"]'));
+  await waitForView(
+    "the saved Agent's permissions control in Settings",
+    `const select = Array.from(document.querySelectorAll('dialog[open] select:enabled'))
+      .find((control) => !control.closest('[hidden]') && control.querySelector('option[value="configured"]'));
+      if (!select) return false;
       select.value = 'configured';
-      select.dispatchEvent(new Event('change', { bubbles: true }));`,
-    args: [],
-  });
-  await shows("Configured file access may include writes across your account.");
-  await click("Try example");
-  await click("Decline");
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;`,
+  );
+  await shows(configuredAccessNotice);
+  await clickSettingsButton("Try example");
+  await shows("Change this Agent’s approved permissions?");
+  await clickSettingsButton("Decline");
+  await shows("Agent access declined.");
   await assert.rejects(
     invokeNative("send_external_agent", { path, revision, access: "configured", request }),
     /agentAccessRequired/,
@@ -2128,22 +2133,23 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, 3);
   await assert.rejects(readFile(writeTarget), { code: "ENOENT" });
 
-  await click("Try example");
-  await click("Allow and send");
+  await clickSettingsButton("Try example");
+  await clickSettingsButton("Allow and send");
   await shows("Fixture Agent reply.");
   assert.equal(await readFile(writeTarget, "utf8"), "configured access ran");
   assert.equal(await readFile(draft, "utf8"), initial);
 
   // Reopening Settings after an actual app restart retains the connection and the granted scope.
-  await click("Close");
+  await clickSettingsButton("Close");
   await restart([draft]);
   await openSettings();
-  await click("External Agents");
+  await clickSettingsButton("External Agents");
   await shows(executable);
-  await click("Try example");
+  await shows(configuredAccessNotice);
+  await clickSettingsButton("Try example");
   await shows("Fixture Agent reply.");
   assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, 5);
-  await click("Close");
+  await clickSettingsButton("Close");
   await nativeShortcut("ctrl+n");
   await click("Draft with AI");
   await until("the approved Agent to appear as a draft recipient", () =>
@@ -2177,14 +2183,16 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   assert.equal(await readFile(draft, "utf8"), initial);
 
   await openSettings();
-  await click("External Agents");
+  await clickSettingsButton("External Agents");
+  // Load the saved revision before replacing the executable so the send rechecks it.
+  await shows(configuredAccessNotice);
   await writeFile(
     executable,
     `${await readFile(executable, "utf8")}
 // replacement
 `,
   );
-  await click("Try example");
+  await clickSettingsButton("Try example");
   await shows("Agent access changed. Review its permissions before sending.");
   assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, 6);
   await clickSettingsButton("Try example");
