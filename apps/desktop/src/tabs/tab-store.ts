@@ -663,6 +663,7 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
       for (const tab of new Map(state.tabs.map((t) => [t.documentId, t])).values()) {
         if (tab.path !== null && before.find((t) => t.id === tab.id)?.path !== tab.path) {
           watch(tab.documentId, tab.path);
+          void checkDisk(tab.documentId);
         }
       }
     },

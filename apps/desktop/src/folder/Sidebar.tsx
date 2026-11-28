@@ -10,7 +10,16 @@ import {
 } from "react";
 import { useT } from "../i18n/index.ts";
 import { Outline } from "../outline/Outline.tsx";
-import { baseName, isDocumentPath, isValidName, joinPath, parentPath } from "../paths.ts";
+import {
+  baseName,
+  isAbsolutePath,
+  isDocumentPath,
+  isValidName,
+  isWithin,
+  joinPath,
+  parentPath,
+  resolveFrom,
+} from "../paths.ts";
 import type { DirectoryEntry } from "../platform/platform.ts";
 import type { FolderTree, TreeRow } from "./file-tree.ts";
 
@@ -127,6 +136,7 @@ interface FileTreeProps {
   /** The single way the sidebar opens a document. */
   readonly onOpenDocument: (path: string) => void;
   /** An entry was renamed; open documents at or under `from` now live under `to`. */
+  readonly onMoveDocument: (from: string, to: string) => Promise<void>;
   readonly onRenamed: (from: string, to: string) => void;
   /** An entry was moved to the trash. */
   readonly onTrashed: (path: string) => void;
@@ -136,7 +146,7 @@ interface FileTreeProps {
 /** What the inline name field is for. */
 type NameEdit =
   | { readonly kind: "create"; readonly type: DirectoryEntry["kind"]; readonly parent: string }
-  | { readonly kind: "rename"; readonly entry: DirectoryEntry };
+  | { readonly kind: "rename"; readonly move?: boolean; readonly entry: DirectoryEntry };
 
 interface ContextMenu {
   readonly x: number;
@@ -175,6 +185,21 @@ function FileTree(props: FileTreeProps) {
     let name = typed.trim();
     if (target.kind === "rename" && name === target.entry.name) return;
     if (name === "") return;
+    if (
+      target.kind === "rename" &&
+      target.entry.kind === "file" &&
+      isDocumentPath(target.entry.path)
+    ) {
+      const from = target.entry.path;
+      const to = resolveFrom(from, name);
+      const leaf = name.split(/[\\/]/).at(-1) ?? "";
+      if (isAbsolutePath(name) || !isValidName(leaf) || !isWithin(to, root) || to === root) {
+        onError(t("error.invalidName", { name }));
+        return;
+      }
+      if (from !== to) await props.onMoveDocument(from, to);
+      return;
+    }
     if (!isValidName(name)) {
       onError(t("error.invalidName", { name }));
       return;
@@ -269,7 +294,7 @@ function FileTree(props: FileTreeProps) {
     <div key="name-field" className="px-2 py-0.5" style={{ paddingLeft: `${level * 12}px` }}>
       <NameField
         initial={defaultName(target)}
-        label={t("tree.name")}
+        label={t(target.kind === "rename" && target.move ? "move.path" : "tree.name")}
         onCommit={(value) => void commitName(target, value)}
         onCancel={() => setEdit(null)}
       />
@@ -371,6 +396,18 @@ function FileTree(props: FileTreeProps) {
                       if (menu.entry) setEdit({ kind: "rename", entry: menu.entry });
                     },
                   },
+                  ...(menu.entry.kind === "file" && isDocumentPath(menu.entry.path)
+                    ? [
+                        {
+                          label: t("move.to"),
+                          run: () => {
+                            setMenu(null);
+                            if (menu.entry)
+                              setEdit({ kind: "rename", entry: menu.entry, move: true });
+                          },
+                        },
+                      ]
+                    : []),
                   {
                     label: t("tree.trash"),
                     run: () => {

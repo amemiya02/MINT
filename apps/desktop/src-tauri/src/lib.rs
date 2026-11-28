@@ -4,6 +4,7 @@
 
 mod app_data;
 mod assets;
+mod document_edit;
 mod folder;
 mod fs;
 mod grants;
@@ -373,6 +374,24 @@ async fn create_directory(app: AppHandle, path: PathBuf) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn apply_document_edit(
+    app: AppHandle,
+    from: PathBuf,
+    to: PathBuf,
+    before: String,
+    after: String,
+) -> Result<(), String> {
+    blocking(move || {
+        let grants = app.state::<Grants>();
+        granted(&grants, &from)?;
+        granted(&grants, &to)?;
+        document_edit::apply(&from, &to, before.as_bytes(), after.as_bytes())
+            .map_err(|e| format!("{} → {}: {e}", from.display(), to.display()))
+    })
+    .await
+}
+
+#[tauri::command]
 async fn rename_path(app: AppHandle, from: PathBuf, to: PathBuf) -> Result<(), String> {
     blocking(move || {
         let grants = app.state::<Grants>();
@@ -663,6 +682,7 @@ pub fn run() {
             create_file,
             create_directory,
             rename_path,
+            apply_document_edit,
             move_to_trash,
             list_folder_files,
             search_folder,
