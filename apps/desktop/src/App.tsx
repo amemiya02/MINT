@@ -22,6 +22,7 @@ import { type Translate, useT } from "./i18n/index.ts";
 import { documentExtensions, isWithin } from "./paths.ts";
 import type { DocumentEdit, Platform } from "./platform/platform.ts";
 import { insertTemplate } from "./plugins/host.ts";
+import { KanbanBoard } from "./plugins/KanbanBoard.tsx";
 import { PluginEntries, pluginName, useInstallations } from "./plugins/Plugins.tsx";
 import { PropertyTable } from "./plugins/PropertyTable.tsx";
 import { TagBrowser } from "./plugins/TagBrowser.tsx";
@@ -148,8 +149,9 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   );
   const sidebarPlugins = plugins.filter((i) => i.enabled && "sidebar" in i.manifest);
   const selectedPlugin = sidebarPlugins.find((i) => sidebarView === `plugin:${i.manifest.id}`);
-  const PluginSidebar =
-    selectedPlugin?.manifest.sidebar === "properties" ? PropertyTable : TagBrowser;
+  const PluginSidebar = { properties: PropertyTable, kanban: KanbanBoard, tags: TagBrowser }[
+    selectedPlugin?.manifest.sidebar ?? "tags"
+  ];
   const removed = sidebarView.startsWith("plugin:") && !selectedPlugin;
   useEffect(() => {
     if (removed) {

@@ -2,7 +2,12 @@ import type { WordCount } from "@mint/editor";
 
 import { isPluginFormat, type PluginFormat } from "./export-formats.ts";
 
-export type Permission = "document.read" | "document.write" | "folder.read" | "archive.import";
+export type Permission =
+  | "document.read"
+  | "document.write"
+  | "folder.read"
+  | "folder.status.write"
+  | "archive.import";
 
 /** Packages declare the host operations they use. */
 export interface PluginManifest {
@@ -13,7 +18,7 @@ export interface PluginManifest {
   statistics?: (keyof WordCount)[];
   templates?: { name: string; text: string }[];
   exportFormat?: PluginFormat;
-  sidebar?: "tags" | "properties";
+  sidebar?: "tags" | "properties" | "kanban";
   diagram?: "timing";
   importer?: "notion";
 }
@@ -48,6 +53,14 @@ export const propertyTable: PluginManifest = {
   name: "Property table",
   permissions: ["folder.read"],
   sidebar: "properties",
+};
+
+export const kanbanBoard: PluginManifest = {
+  apiVersion: 1,
+  id: "mint.kanban-board",
+  name: "Kanban board",
+  permissions: ["folder.read", "folder.status.write"],
+  sidebar: "kanban",
 };
 
 export const tagBrowser: PluginManifest = {
@@ -126,7 +139,8 @@ export function isManifest(value: unknown): value is PluginManifest {
     required.add("document.read");
   }
   if ("sidebar" in m) {
-    if (m.sidebar !== "tags" && m.sidebar !== "properties") return false;
+    if (m.sidebar === "kanban") required.add("folder.status.write");
+    else if (m.sidebar !== "tags" && m.sidebar !== "properties") return false;
     required.add("folder.read");
   }
   if ("statistics" in m) {
@@ -259,6 +273,16 @@ export function canReadFolder(id: string): boolean {
   const item = installed(id);
   return Boolean(
     item?.enabled && item.grants.includes("folder.read") && "sidebar" in item.manifest,
+  );
+}
+
+export function canMoveCard(id: string): boolean {
+  const item = installed(id);
+  return Boolean(
+    item?.enabled &&
+      item.manifest.sidebar === "kanban" &&
+      item.grants.includes("folder.read") &&
+      item.grants.includes("folder.status.write"),
   );
 }
 

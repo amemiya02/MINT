@@ -9,6 +9,7 @@ import {
   install,
   installations,
   isManifest,
+  kanbanBoard,
   notionImporter,
   type Permission,
   type PluginManifest,
@@ -44,11 +45,13 @@ export function pluginName(m: PluginManifest, t: Translate) {
   if (m.id === timingDiagrams.id) return t("plugin.timing");
   if (m.id === writingTemplates.id) return t("plugin.templates");
   if (m.id === propertyTable.id) return t("plugin.properties");
+  if (m.id === kanbanBoard.id) return t("kanban.name");
   if (m.id === tagBrowser.id) return t("plugin.tags");
   return m.id === writingStatistics.id ? t("plugin.statistics") : m.name;
 }
 
 function permission(action: Permission, t: Translate) {
+  if (action === "folder.status.write") return t("kanban.permission");
   if (action === "archive.import") return t("notion.permission");
   if (action === "document.write") return t("plugin.write");
   return t(action === "folder.read" ? "plugin.folderRead" : "plugin.read");
@@ -75,6 +78,7 @@ export function PluginSettings() {
     writingStatistics,
     writingTemplates,
     tagBrowser,
+    kanbanBoard,
     propertyTable,
     timingDiagrams,
     notionImporter,
