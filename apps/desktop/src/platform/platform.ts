@@ -19,6 +19,9 @@ export interface Platform {
   /** Write text as UTF-8 atomically: either the whole new content lands or the old file stays intact. */
   writeTextFile(path: string, text: string): Promise<void>;
 
+  /** Atomically write the bytes of an exported file to its selected destination. */
+  writeBinaryFile(path: string, bytes: Uint8Array): Promise<void>;
+
   /** App-data snapshots in save order. Their IDs are millisecond timestamps. */
   listVersions(path: string): Promise<number[]>;
   recordVersion(path: string, text: string): Promise<void>;

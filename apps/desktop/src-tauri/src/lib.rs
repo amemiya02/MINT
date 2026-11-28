@@ -216,6 +216,19 @@ async fn write_text_file(app: AppHandle, path: PathBuf, text: String) -> Result<
     .await
 }
 
+#[tauri::command]
+async fn write_binary_file(app: AppHandle, path: PathBuf, data: String) -> Result<(), String> {
+    use base64::Engine as _;
+    blocking(move || {
+        granted(&app.state::<Grants>(), &path)?;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(data)
+            .map_err(|e| e.to_string())?;
+        fs::write_atomic(&path, &bytes).map_err(|e| e.to_string())
+    })
+    .await
+}
+
 fn history_directory(app: &AppHandle, path: &std::path::Path) -> Result<PathBuf, String> {
     let document = app
         .state::<Grants>()
@@ -633,6 +646,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             read_text_file,
             write_text_file,
+            write_binary_file,
             record_version,
             list_versions,
             read_version,

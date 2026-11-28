@@ -43,6 +43,8 @@ export function createTauriPlatform(): Platform {
   return {
     locale: navigator.language,
     readTextFile: (path) => invoke<string>("read_text_file", { path }),
+    writeBinaryFile: (path, bytes) =>
+      invoke<void>("write_binary_file", { path, data: toBase64(bytes) }),
     writeTextFile: (path, text) => invoke<void>("write_text_file", { path, text }),
     recordVersion: (path, text) => invoke<void>("record_version", { path, text }),
     listVersions: (path) => invoke<number[]>("list_versions", { path }),
