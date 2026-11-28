@@ -1,3 +1,4 @@
+import { outboundWritingPreferences, writingPreferenceInstruction } from "./writing-preferences.ts";
 import {
   materialImageLimit,
   materialRequestInstruction,
@@ -86,6 +87,7 @@ export function modelWritingSender(
   return (
     {
       instruction,
+      preferences,
       selectedText,
       annotationBatch,
       taskContext,
@@ -100,6 +102,8 @@ export function modelWritingSender(
       messages.push({ role: "system", content: replacementInstruction });
     if (taskContext) messages.push({ role: "system", content: materialRequestInstruction });
     if (sourcePassages) messages.push({ role: "system", content: sourcePassageInstruction });
+    if (preferences?.length)
+      messages.push({ role: "system", content: writingPreferenceInstruction });
     for (const turn of history ?? []) {
       messages.push(
         { role: "user", content: turn.instruction },
@@ -109,9 +113,18 @@ export function modelWritingSender(
     const images: ModelMessagePart[] = [];
     const context = modelTaskContext(taskContext, images);
     const text =
-      selectedText === undefined && annotationBatch === undefined && context === undefined
+      selectedText === undefined &&
+      annotationBatch === undefined &&
+      context === undefined &&
+      !preferences?.length
         ? instruction
-        : JSON.stringify({ instruction, selectedText, annotationBatch, taskContext: context });
+        : JSON.stringify({
+            instruction,
+            selectedText,
+            annotationBatch,
+            taskContext: context,
+            preferences: outboundWritingPreferences(preferences),
+          });
     if (images.length) {
       messages.push({
         role: "system",

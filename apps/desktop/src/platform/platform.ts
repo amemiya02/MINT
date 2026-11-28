@@ -1,6 +1,7 @@
 import type { ExternalAgentPlatform } from "../ai/external-agent.ts";
 import type { McpTransport } from "../ai/mcp.ts";
 import type { NewModelConnection, SavedModelConnection, SendModelMessage } from "../ai/model.ts";
+import type { StoredWritingPreference } from "../ai/writing-preferences.ts";
 import type { WritingTasksPlatform } from "../ai/writing-tasks.ts";
 import type { PrintJob } from "../print/protocol.ts";
 
@@ -16,6 +17,7 @@ export type StoredAnnotations = Readonly<Record<string, unknown>>;
 export interface Platform {
   readonly externalAgent: ExternalAgentPlatform;
   readonly writingTasks: WritingTasksPlatform;
+  saveWritingPreference(preference: StoredWritingPreference): Promise<void>;
   readonly sendMcpRequest: McpTransport;
   readonly sendModelMessage: SendModelMessage;
   listModelConnections(): Promise<readonly SavedModelConnection[]>;
@@ -386,4 +388,9 @@ export interface DocumentEdit {
   after: string;
 }
 
-export type FolderDocumentEdit = Omit<DocumentEdit, "before"> & { before?: string | undefined };
+export type FolderDocumentEdit =
+  | (Omit<DocumentEdit, "before" | "after"> & {
+      before?: string;
+      after: string;
+    })
+  | (Omit<DocumentEdit, "after"> & { after?: undefined });

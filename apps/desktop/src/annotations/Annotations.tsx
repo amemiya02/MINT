@@ -81,6 +81,7 @@ function Excerpt({ target }: { readonly target: Pick<Annotation, "kind" | "excer
 export function AnnotationPanel({
   annotations,
   documentId,
+  folder,
   name,
   platform,
   store,
@@ -94,6 +95,7 @@ export function AnnotationPanel({
 }: {
   readonly annotations: SharedDocument["annotations"];
   readonly documentId: number;
+  readonly folder: string | null;
   readonly name: string;
   readonly platform: Platform;
   readonly store: TabStore;
@@ -157,6 +159,7 @@ export function AnnotationPanel({
           unresolved={unresolved}
           annotations={annotations}
           documentId={documentId}
+          folder={folder}
           platform={platform}
           store={store}
           settingsOpen={settingsOpen}

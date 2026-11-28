@@ -44,9 +44,13 @@ pub enum AgentAccess {
 pub struct WritingRequest {
     instruction: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    preferences: Option<Vec<crate::writing_preferences::WritingPreference>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     task_copy: Option<task_copy::Mode>,
     #[serde(skip_serializing_if = "Option::is_none")]
     folder_documents: Option<Vec<task_copy::Document>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    folder_write_targets: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     selected_text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -420,6 +424,19 @@ pub(crate) async fn send_external_agent(
                     .task_context
                     .as_ref()
                     .is_some_and(|context| context.current_draft.is_some()))
+        {
+            return Err(FAILED.to_owned());
+        }
+        if request
+            .folder_write_targets
+            .as_ref()
+            .is_some_and(|targets| {
+                request.folder_documents.is_none()
+                    || targets.is_empty()
+                    || targets
+                        .iter()
+                        .any(|path| !crate::document_edit::valid_folder_document(path))
+            })
         {
             return Err(FAILED.to_owned());
         }

@@ -1,3 +1,5 @@
+import type { AppliedWritingPreference } from "./writing-preferences.ts";
+
 export interface WritingTurn {
   readonly instruction: string;
   readonly reply: string;
@@ -89,6 +91,7 @@ export const taskCopySourcePassageInstruction = `For a draft based on task mater
 /** The material a writing connection receives for a text task. */
 export interface WritingRequest {
   readonly instruction: string;
+  readonly preferences?: readonly AppliedWritingPreference[];
   readonly selectedText?: string;
   readonly annotationBatch?: readonly WritingAnnotation[];
   readonly taskContext?: TaskContext;
@@ -96,6 +99,7 @@ export interface WritingRequest {
   readonly responseFormat?: "replacement" | "draft";
   readonly sourcePassages?: true;
   readonly folderDocuments?: readonly TaskCopyDocument[];
+  readonly folderWriteTargets?: readonly string[];
 }
 
 export interface TaskCopyDocument {

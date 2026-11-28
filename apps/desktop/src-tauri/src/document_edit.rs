@@ -112,7 +112,8 @@ fn move_entry(from: &Path, to: &Path) -> io::Result<()> {
 
 /// Claim the entry being removed, so a newer document is preserved even
 /// if another editor replaced it after our last comparison.
-fn remove_checked(path: &Path, expected: &[u8]) -> io::Result<()> {
+pub(crate) fn remove_checked(path: &Path, expected: &[u8]) -> io::Result<()> {
+    check(path, expected)?;
     let backup = Builder::new()
         .prefix(".mint-move-")
         .tempdir_in(parent(path)?)?;
