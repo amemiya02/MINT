@@ -69,4 +69,4 @@ export function outboundWritingPreferences(preferences?: readonly AppliedWriting
 }
 
 export const writingPreferenceInstruction =
-  "The preferences in the current request are the author's writing defaults. The explicit current instruction takes precedence over every preference that conflicts with it. Apply preferences only where relevant to the task.";
+  "The preferences in the current request are the author's writing defaults. The explicit current instruction takes precedence over every preference that conflicts with it. Apply preferences only where relevant to the task, including when they refine general writing skill steps.";

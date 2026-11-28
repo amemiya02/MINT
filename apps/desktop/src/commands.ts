@@ -117,6 +117,7 @@ export const commands = [
     group: "writing",
   },
   { id: "edit.askFolderAI", title: "writing.askFolder", menu: "edit", group: "writing" },
+  { id: "edit.writingSkills", title: "writing.skill.open", menu: "edit", group: "writing" },
   { id: "edit.writingTasks", title: "writing.tasks", menu: "edit", group: "writing" },
   { id: "edit.allWritingTasks", title: "writing.tasks.all", menu: "edit", group: "writing" },
   {

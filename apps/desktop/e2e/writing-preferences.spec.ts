@@ -76,11 +76,15 @@ test("remember an interview correction at the chosen scope and review what will 
     await expect.poll(() => received.length).toBe(count + 1);
     await expect(composer.getByText(result, { exact: true }).last()).toBeVisible();
     const messages = received.at(-1);
-    expect(JSON.parse(messages?.at(-1)?.content ?? "")).toMatchObject({
+    const input = JSON.parse(messages?.at(-1)?.content ?? "");
+    expect(input).toMatchObject({
       selectedText,
-      instruction,
       preferences: [{ topic: "Interview quotations", guidance }],
     });
+    if (instruction.startsWith("/copyedit ")) {
+      expect(input.instruction).toContain("Correct spelling, punctuation, and grammar.");
+      expect(input.instruction).toContain(instruction.slice("/copyedit ".length));
+    } else expect(input.instruction).toBe(instruction);
     expect(
       messages?.some(
         ({ role, content }) =>
@@ -112,13 +116,18 @@ test("remember an interview correction at the chosen scope and review what will 
 
   await openSelection();
   await expect(preferences(inline)).toContainText(folderRule);
-  await send(inline, "Review the same interview for publication.", folderRule, selectedText);
+  await send(
+    inline,
+    "/copyedit Review the same interview for publication.",
+    folderRule,
+    selectedText,
+  );
   await inline.getByRole("button", { name: "Close", exact: true }).click();
 
   await runMenuItem(page, "edit.writingTasks");
   await page
     .getByRole("dialog", { name: "Writing tasks" })
-    .getByRole("button", { name: originalTask })
+    .getByRole("button", { name: originalTask, exact: true })
     .click();
   await expect(preferences(sidebar)).toContainText(taskRule);
   await sidebar.getByRole("button", { name: "Close", exact: true }).click();
