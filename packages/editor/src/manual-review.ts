@@ -15,6 +15,7 @@ export interface Revision {
 /** Track the inverse of the author's actual edits, including edits from a sibling view. */
 export class ManualReview {
   private revisions: readonly Revision[] | null = null;
+  private rejecting: Revision | null = null;
   private listeners = new Set<() => void>();
   getSnapshot = () => this.revisions;
   subscribe = (listener: () => void) => {
@@ -44,7 +45,13 @@ export class ManualReview {
   reject(change: Revision, editor: MintEditor) {
     if (!this.revisions?.includes(change)) return;
     const draft = editor.getText();
-    editor.replaceText(draft.slice(0, change.from) + change.before + draft.slice(change.to));
+    // Keep the reviewed occurrence when a file replacement has several equivalent text diffs.
+    this.rejecting = change;
+    try {
+      editor.replaceText(draft.slice(0, change.from) + change.before + draft.slice(change.to));
+    } finally {
+      this.rejecting = null;
+    }
   }
 
   record(tr: Transaction) {
@@ -53,7 +60,10 @@ export class ManualReview {
     const after = fileText(tr.state);
     if (before === after) return;
     const inverse: ChangeSpec[] = [];
-    if (sharedFileEffects(tr).length) {
+    if (this.rejecting) {
+      const { from, before: restored, after: replaced } = this.rejecting;
+      inverse.push({ from, to: from + restored.length, insert: replaced });
+    } else if (sharedFileEffects(tr).length) {
       // Reload and history transactions can change file metadata outside their editor range.
       let from = 0;
       while (from < before.length && before[from] === after[from]) from++;

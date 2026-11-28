@@ -69,3 +69,18 @@ test("locate identical rewrites and reject the one in the second paragraph", asy
   await page.keyboard.press("ControlOrMeta+S");
   await expect.poll(() => readFile(page, path)).toBe("\uFEFFTwo\r\n\nOne");
 });
+
+test("rejecting a deletion inside repeated letters clears the reviewed occurrence", async ({
+  page,
+}) => {
+  const path = "/notes/letters.md";
+  await launch(page, { files: { [path]: "aaaa" }, openDialogResults: [path], locale: "en-US" });
+  await page.keyboard.press("ControlOrMeta+O");
+  await page.getByRole("button", { name: "Track changes" }).click();
+  await page.keyboard.press("ControlOrMeta+Home");
+  await page.keyboard.press("Delete");
+  const review = page.getByRole("region", { name: "Tracked changes" });
+  await review.getByRole("button", { name: "Reject" }).click();
+  await expect(page.getByRole("textbox")).toHaveText("aaaa");
+  await expect(review.getByText("No pending changes")).toBeVisible();
+});
