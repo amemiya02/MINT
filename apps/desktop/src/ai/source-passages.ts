@@ -55,10 +55,16 @@ function readEntries(frame: string | undefined): readonly unknown[] {
 const markdown = parser.configure(GFM);
 const sentences = new Intl.Segmenter(undefined, { granularity: "sentence" });
 
-export function readDraftPassages(reply: string, context?: TaskContext) {
+export function readDraftPassages(reply: string, context?: TaskContext, taskCopy?: string) {
   const materials = sourceMaterials(context);
-  if (!materials.length) return { text: reply, passages: [] };
-  const { text, frame } = splitFrame(reply);
+  if (!materials.length) return { text: taskCopy ?? reply, passages: [] };
+  const { text, frame } =
+    taskCopy === undefined
+      ? splitFrame(reply)
+      : {
+          text: taskCopy,
+          frame: /^\s*<source-passages>([\s\S]*)<\/source-passages>\s*$/i.exec(reply)?.[1],
+        };
   const byClaim = new Map<string, SourceExcerpt[]>();
   for (const entry of readEntries(frame)) {
     if (!entry || typeof entry !== "object") continue;

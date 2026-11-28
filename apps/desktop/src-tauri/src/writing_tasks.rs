@@ -12,6 +12,7 @@ use tauri::AppHandle;
 const RECORD: &str = "review.json";
 const SAVED_TASKS: &str = "tasks";
 const TEMPORARY_TASKS: &str = "temporary-tasks";
+const AGENT_RUNS: &str = "agent-runs";
 // Serialize task directory changes and record which directories have an Agent using them.
 static TASKS: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 
@@ -208,7 +209,16 @@ impl AgentScratch {
         self.scratch.as_ref().expect("Agent scratch is live").path()
     }
 
-    pub fn private_spool(&self) -> io::Result<tempfile::TempDir> {
+    pub fn private_spool(&self, task_copy: bool) -> io::Result<tempfile::TempDir> {
+        if task_copy {
+            return tempfile::Builder::new()
+                .prefix(".agent-private-")
+                .tempdir_in(
+                    self.path()
+                        .parent()
+                        .ok_or_else(|| io::Error::other("missing task directory"))?,
+                );
+        }
         // Keep input and output outside the working directory. The temporary task
         // owns them so closing it can also clear files left by an interrupted run.
         match self.task.as_ref().filter(|_| self.temporary) {
@@ -231,10 +241,21 @@ impl Drop for AgentScratch {
     }
 }
 
-pub fn agent_scratch(app: &AppHandle, id: Option<&str>) -> Result<AgentScratch, String> {
+pub fn agent_scratch(
+    app: &AppHandle,
+    id: Option<&str>,
+    task_copy: bool,
+) -> Result<AgentScratch, String> {
     let Some(id) = id else {
+        let scratch = if task_copy {
+            let directory = root(app, AGENT_RUNS)?;
+            fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+            tempfile::tempdir_in(directory)
+        } else {
+            tempfile::tempdir()
+        };
         return Ok(AgentScratch {
-            scratch: Some(tempfile::tempdir().map_err(|error| error.to_string())?),
+            scratch: Some(scratch.map_err(|error| error.to_string())?),
             task: None,
             temporary: false,
         });
@@ -299,6 +320,13 @@ fn delete(root: &Path, id: &str) -> Result<(), String> {
 
 /// On launch there are no live temporary reviews. Clear directories left by an interrupted exit.
 pub fn discard_abandoned_temporary_tasks(app: &AppHandle) -> Result<(), String> {
+    // Settings and the draft composer may have started a run before there was a task record.
+    let runs = root(app, AGENT_RUNS)?;
+    match fs::remove_dir_all(runs) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.to_string()),
+    }
     let root = root(app, TEMPORARY_TASKS)?;
     let entries = match fs::read_dir(&root) {
         Ok(entries) => entries,
