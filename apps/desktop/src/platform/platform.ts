@@ -1,8 +1,7 @@
-import type { Annotation } from "@mint/editor";
 import type { SendModelMessage } from "../ai/model.ts";
 import type { PrintJob } from "../print/protocol.ts";
 
-export type StoredAnnotations = Readonly<Record<string, Annotation>>;
+export type StoredAnnotations = Readonly<Record<string, unknown>>;
 
 /**
  * The platform interface: the only way the shell reaches the outside world

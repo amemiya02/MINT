@@ -118,6 +118,39 @@ function locate(range: AnnotationRange, text: string): AnnotationRange | null {
   return annotationRange(text, start, start + source.length);
 }
 
+function isRange(value: unknown): value is AnnotationRange {
+  if (!value || typeof value !== "object") return false;
+  const { from, source, before, after } = value as Record<string, unknown>;
+  return (
+    typeof from === "number" &&
+    Number.isSafeInteger(from) &&
+    from >= 0 &&
+    typeof source === "string" &&
+    typeof before === "string" &&
+    typeof after === "string"
+  );
+}
+
+function isAnnotation(value: unknown): value is Annotation {
+  if (!value || typeof value !== "object") return false;
+  const { id, note, kind, excerpt, resolved, range, implicitColumn } = value as Record<
+    string,
+    unknown
+  >;
+  return (
+    typeof id === "string" &&
+    typeof note === "string" &&
+    (kind === "text" || kind === "cell" || kind === "formula" || kind === "image") &&
+    typeof excerpt === "string" &&
+    typeof resolved === "boolean" &&
+    (range === null || isRange(range)) &&
+    (implicitColumn === undefined ||
+      (typeof implicitColumn === "number" &&
+        Number.isSafeInteger(implicitColumn) &&
+        implicitColumn >= 0))
+  );
+}
+
 /** One manuscript's annotations, shared by its editor panes. */
 export class DocumentAnnotations {
   private items: readonly Annotation[] = [];
@@ -152,9 +185,10 @@ export class DocumentAnnotations {
     this.set(this.items.map((item) => (item.id === id ? { ...item, resolved } : item)));
   }
 
-  restore(stored: readonly Annotation[], text: string) {
+  restore(stored: readonly unknown[], text: string) {
     const known = new Set(this.items.map((item) => item.id));
     const restored = stored
+      .filter(isAnnotation)
       .filter((item) => !known.has(item.id))
       .map((item) => ({ ...item, range: item.range && locate(item.range, text) }));
     if (restored.length) this.set([...this.items, ...restored]);

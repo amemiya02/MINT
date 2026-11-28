@@ -1,5 +1,5 @@
 import type { Annotation } from "@mint/editor";
-import type { Platform, StoredAnnotations } from "../platform/platform.ts";
+import type { Platform } from "../platform/platform.ts";
 import type { Tab, TabStore } from "../tabs/tab-store.ts";
 
 /** Connect each open manuscript, including its second pane, to private app data. */
@@ -9,7 +9,7 @@ export function createAnnotationStorage(
   onError: (path: string, error: unknown) => void,
 ) {
   const pending = new Map<string, Promise<void>>();
-  const unsaved = new Map<string, StoredAnnotations>();
+  const unsaved = new Map<string, Readonly<Record<string, Annotation>>>();
 
   function queue(path: string, run: () => Promise<void>) {
     const work = (pending.get(path) ?? Promise.resolve())

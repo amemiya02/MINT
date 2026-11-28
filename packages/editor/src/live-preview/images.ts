@@ -132,7 +132,7 @@ class ImageWidget extends WidgetType {
   }
 
   toDOM(view: EditorView): HTMLElement {
-    const wrapper = document.createElement(this.block ? "div" : "span");
+    const wrapper: HTMLElement = document.createElement(this.block ? "div" : "span");
     wrapper.className = this.block ? "cm-mint-image cm-mint-image-block" : "cm-mint-image";
     const img = document.createElement("img");
     img.alt = this.alt;
