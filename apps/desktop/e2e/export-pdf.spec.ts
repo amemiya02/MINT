@@ -1,4 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
+import { extractImages, extractTextItems, getDocumentProxy } from "unpdf";
 import {
   launch,
   printedDocuments,
@@ -121,7 +122,12 @@ test("is in the command palette, in Chinese too", async ({ page }) => {
   await expect(dialog).toHaveCount(0);
   const printed = await printedDocuments(page);
   expect(printed.map((p) => p.title)).toEqual(["报告"]);
-  expect(printed[0]?.html).toContain("<h1>报告</h1>");
+  expect(
+    await page.evaluate(
+      (html) => new DOMParser().parseFromString(html, "text/html").querySelector("h1")?.textContent,
+      printed[0]?.html ?? "",
+    ),
+  ).toBe("报告");
 });
 
 test("switches a dark HTML draft to a light PDF from the format chooser", async ({
@@ -162,4 +168,77 @@ test("switches a dark HTML draft to a light PDF from the format chooser", async 
   expect(pdf.subarray(0, 5).toString()).toBe("%PDF-");
   expect(await readFile(page, "/notes/review.md")).toBe(source);
   await expect(page.getByText("Unsaved changes")).toBeVisible();
+});
+
+test("adjusts the layout and prints the pages shown in the preview", async ({
+  page,
+  context,
+}, testInfo) => {
+  const source = [
+    "# Field notes",
+    "",
+    "![chart](chart.png)",
+    "",
+    "| Site | Result |",
+    "| --- | --- |",
+    ...Array.from({ length: 32 }, (_, n) => `| Station ${n + 1} | Verified |`),
+    "",
+    Array.from({ length: 450 }, (_, n) => `Observation-${n + 1}`).join(" "),
+  ].join("\n");
+  await launch(page, {
+    files: { "/notes/field.md": source },
+    binaryFiles: { "/notes/chart.png": pngBase64 },
+    openDialogResults: ["/notes/field.md"],
+    locale: "en-US",
+  });
+  await page.keyboard.press("ControlOrMeta+O");
+  await expect(page.locator(".cm-content")).toBeVisible();
+  await runMenuItem(page, "file.export");
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Format").selectOption("pdf");
+  const preview = dialog.frameLocator('iframe[title="Page preview"]');
+  const pages = preview.locator(".mint-sheet");
+  await expect.poll(() => pages.count()).toBeGreaterThan(1);
+  const original = await pages.count();
+  await dialog.getByLabel("Paper size").selectOption("A5");
+  await dialog.getByLabel("Margins (mm)").fill("22");
+  await dialog.getByLabel("Font size (pt)").fill("16");
+  await expect.poll(() => pages.count()).toBeGreaterThan(original);
+  await expect(pages.first().getByRole("img", { name: "chart" })).toBeVisible();
+  await expect(pages.last()).toContainText("Observation-450");
+  await expect(preview.getByRole("cell", { name: "Station 32", exact: true })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Print…" })).toBeEnabled();
+  const expected = await pages.allInnerTexts();
+  await dialog.getByRole("button", { name: "Print…" }).click();
+  const [job] = await printedDocuments(page);
+  const view = await context.newPage();
+  await view.setContent(job?.html ?? "");
+  const pdf = await view.pdf({ preferCSSPageSize: true, path: testInfo.outputPath("field.pdf") });
+  const file = await getDocumentProxy(new Uint8Array(pdf));
+  try {
+    const { items } = await extractTextItems(file);
+    expect(items).toHaveLength(expected.length);
+    // Compare every station and word with its preview page. PDF coordinates
+    // are points, measured from the lower-left corner.
+    const compact = (text: string) => text.replace(/\s/g, "");
+    for (const [i, words] of items.entries()) {
+      expect(compact(words.map((item) => item.str).join(""))).toBe(compact(expected[i] ?? ""));
+      const sheet = await file.getPage(i + 1);
+      const { width, height } = sheet.getViewport({ scale: 1 });
+      expect(Math.abs(width - (148 * 72) / 25.4)).toBeLessThan(1);
+      expect(Math.abs(height - (210 * 72) / 25.4)).toBeLessThan(1);
+      const inset = (22 * 72) / 25.4 - 2; // fractional-pixel rounding
+      for (const word of words.filter((word) => word.str.trim())) {
+        expect(word.x).toBeGreaterThanOrEqual(inset);
+        expect(word.x + word.width).toBeLessThanOrEqual(width - inset);
+        expect(word.y).toBeGreaterThanOrEqual(inset);
+        expect(word.y).toBeLessThanOrEqual(height - inset);
+      }
+    }
+    const [chart] = await extractImages(file, 1);
+    expect(chart?.width).toBe(1);
+    expect(chart?.bounds.width).toBeGreaterThan(0);
+  } finally {
+    await file.cleanup();
+  }
 });

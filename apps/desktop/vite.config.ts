@@ -25,6 +25,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: fileURLToPath(new URL("index.html", import.meta.url)),
+        preview: fileURLToPath(new URL("pdf-preview.html", import.meta.url)),
         print: fileURLToPath(new URL("print.html", import.meta.url)),
       },
     },

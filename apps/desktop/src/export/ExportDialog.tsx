@@ -1,9 +1,10 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { useT } from "../i18n/index.ts";
 import { baseName } from "../paths.ts";
 import type { Platform } from "../platform/platform.ts";
 import { NotionImport } from "../plugins/NotionImport.tsx";
 import { pluginName, useInstallations } from "../plugins/Plugins.tsx";
+import type { PageLayout, PreviewWindow } from "../print/preview.ts";
 import { useSettings } from "../settings/useSettings.ts";
 import { findBuiltinTheme } from "../theme/catalog.ts";
 import { ThemeOptions } from "../theme/ThemeOptions.tsx";
@@ -85,6 +86,56 @@ export function ExportDialog({
     if (!busy && !path && removed) close();
   }, [busy, path, removed, close]);
 
+  const [layout, setLayout] = useState<PageLayout>({
+    paper: "A4",
+    margin: 16,
+    font: Math.round(settings.fontSize * 0.75),
+  });
+  const pdfText = format === "pdf" ? getText() : null;
+  const appearance = choice.appearance;
+  const theme = choice.theme;
+  const request = useMemo(
+    () =>
+      pdfText === null || !path
+        ? null
+        : {
+            source: {
+              platform,
+              path,
+              text: pdfText,
+              settings,
+              themeFolder: folder,
+              title: stem(path),
+            },
+            choice: { appearance, theme, embedImages: true },
+          },
+    [pdfText, appearance, theme, platform, path, settings, folder],
+  );
+  const [source, setSource] = useState<{
+    request: typeof request;
+    html: string;
+    generation: number;
+  } | null>(null);
+  useEffect(() => {
+    if (!request) return;
+    let current = true;
+    setError(null);
+    documentHtml(request.source, request.choice)
+      .then((html) => {
+        if (current)
+          setSource((previous) => ({ request, html, generation: (previous?.generation ?? 0) + 1 }));
+      })
+      .catch((reason) => {
+        if (current) setError(String(reason));
+      });
+    return () => {
+      current = false;
+    };
+  }, [request]);
+  const layoutKey = [source?.generation, layout.paper, layout.margin, layout.font].join("/");
+  const [preview, setPreview] = useState<{ key: string; html: string; count: number } | null>(null);
+  const ready = source?.request === request && preview?.key === layoutKey;
+
   const exportFile = async () => {
     if (!path || importing) return;
     setBusy(true);
@@ -92,11 +143,8 @@ export function ExportDialog({
     try {
       const name = stem(path);
       if (format === "pdf") {
-        const html = await documentHtml(
-          { platform, path, text: getText(), settings, themeFolder: folder, title: name },
-          { ...choice, embedImages: true },
-        );
-        await platform.printDocument(html, { title: name });
+        if (!preview || !ready) throw new Error(t("export.pdf.preview"));
+        await platform.printDocument(preview.html, { title: name });
         close();
         return;
       }
@@ -139,6 +187,7 @@ export function ExportDialog({
         if (busy) e.preventDefault();
         else dialogProps.onCancel(e);
       }}
+      style={format === "pdf" ? { width: "min(46rem, calc(100% - 2rem))" } : undefined}
       className="m-auto w-[min(26rem,calc(100%-2rem))] rounded-lg border border-(--mint-border) bg-(--mint-bg) p-0 text-(--mint-fg) shadow-xl backdrop:bg-black/30"
     >
       <form
@@ -245,7 +294,69 @@ export function ExportDialog({
               />
             </div>
           )}
-          {format === "pdf" && <p className="text-(--mint-muted)">{t("export.pdf.hint")}</p>}
+          {format === "pdf" && (
+            <>
+              <div className="flex flex-wrap gap-3">
+                <label>
+                  {t("export.pdf.paper")}{" "}
+                  <select
+                    className={fieldClass}
+                    value={layout.paper}
+                    onChange={(event) =>
+                      setLayout({ ...layout, paper: event.target.value as PageLayout["paper"] })
+                    }
+                  >
+                    {["A4", "A5", "Letter"].map((size) => (
+                      <option key={size}>{size}</option>
+                    ))}
+                  </select>
+                </label>
+                {(["margin", "font"] as const).map((key) => (
+                  <label key={key}>
+                    {t(key === "margin" ? "export.pdf.margins" : "export.pdf.font")}{" "}
+                    <input
+                      type="number"
+                      className={`${fieldClass} w-16`}
+                      value={Number.isFinite(layout[key]) ? layout[key] : ""}
+                      min={key === "margin" ? 0 : 6}
+                      max={key === "margin" ? 50 : 48}
+                      onChange={(event) =>
+                        setLayout({ ...layout, [key]: event.target.valueAsNumber })
+                      }
+                    />
+                  </label>
+                ))}
+              </div>
+              {source &&
+                source.request === request &&
+                Number.isFinite(layout.margin) &&
+                layout.margin >= 0 &&
+                layout.margin <= 50 &&
+                layout.font >= 6 &&
+                layout.font <= 48 && (
+                  <iframe
+                    key={layoutKey}
+                    title={t("export.pdf.preview")}
+                    src="/pdf-preview.html"
+                    className="h-[36vh] w-full rounded-md border border-(--mint-border)"
+                    onLoad={async (event) => {
+                      const frame = event.currentTarget;
+                      try {
+                        const result = await (frame.contentWindow as PreviewWindow).paginate(
+                          source.html,
+                          layout,
+                        );
+                        if (frame.isConnected) setPreview({ ...result, key: layoutKey });
+                      } catch (reason) {
+                        if (frame.isConnected) setError(String(reason));
+                      }
+                    }}
+                  />
+                )}
+              {ready && <output>{t("export.pdf.pages", { count: String(preview.count) })}</output>}
+              <p className="text-(--mint-muted)">{t("export.pdf.hint")}</p>
+            </>
+          )}
           {error && !importing && (
             <p
               role="alert"
@@ -262,7 +373,7 @@ export function ExportDialog({
           {!importing && (
             <button
               type="submit"
-              disabled={busy}
+              disabled={busy || (format === "pdf" && !ready)}
               className={`${buttonClass} border-(--mint-accent) font-medium`}
             >
               {t(
