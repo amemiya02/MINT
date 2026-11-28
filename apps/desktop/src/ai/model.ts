@@ -203,6 +203,32 @@ function readChoice(value: { choices?: Choice[] } | null): Choice | undefined {
   return value.choices[0];
 }
 
+function readUsage(
+  value:
+    | {
+        prompt_tokens?: unknown;
+        completion_tokens?: unknown;
+        total_tokens?: unknown;
+      }
+    | null
+    | undefined,
+): WritingReply["usage"] {
+  const { prompt_tokens: input, completion_tokens: output, total_tokens: total } = value ?? {};
+  if (
+    typeof input === "number" &&
+    Number.isSafeInteger(input) &&
+    input >= 0 &&
+    typeof output === "number" &&
+    Number.isSafeInteger(output) &&
+    output >= 0 &&
+    typeof total === "number" &&
+    Number.isSafeInteger(total) &&
+    total === input + output
+  ) {
+    return { inputTokens: input, totalTokens: total };
+  }
+}
+
 export function createModelSender(transport: ModelTransport): SendModelMessage {
   return async (connection, messages, options) => {
     if (!messages.length) throw "invalidRequest";
@@ -211,6 +237,7 @@ export function createModelSender(transport: ModelTransport): SendModelMessage {
     let streamed = false;
     let text = "";
     let finishReason: string | null = null;
+    let usage: WritingReply["usage"];
     let sawEnd = false;
     let malformed = false;
     let limitReached = false;
@@ -239,6 +266,7 @@ export function createModelSender(transport: ModelTransport): SendModelMessage {
           return;
         }
         const choice = readChoice(event);
+        usage = readUsage(event?.usage) ?? usage;
         if (typeof choice?.finish_reason === "string") finishReason = choice.finish_reason;
         const delta = choice?.delta?.content;
         if (typeof delta === "string" && delta) {
@@ -292,7 +320,9 @@ export function createModelSender(transport: ModelTransport): SendModelMessage {
       if (!sawEnd && !finishReason) throw "interrupted";
     } else {
       try {
-        const choice = readChoice(JSON.parse(buffer));
+        const response = JSON.parse(buffer);
+        const choice = readChoice(response);
+        usage = readUsage(response?.usage);
         const content = choice?.message?.content;
         if (typeof content === "string") text = content;
         if (typeof choice?.finish_reason === "string") finishReason = choice.finish_reason;
@@ -301,7 +331,7 @@ export function createModelSender(transport: ModelTransport): SendModelMessage {
       }
     }
     if (!text.trim()) throw finishReason === "length" ? "limit" : "invalidReply";
-    return { text, streamed, finishReason };
+    return { text, streamed, finishReason, usage };
   };
 }
 

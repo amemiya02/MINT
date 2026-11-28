@@ -1,7 +1,13 @@
 import type { Annotation, MintEditor, SharedDocument } from "@mint/editor";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useMaterialRequests } from "../ai/MaterialRequest.tsx";
 import { isLocalModelOffline } from "../ai/model.ts";
 import { ProposedSelectionEdit } from "../ai/ProposedSelectionEdit.tsx";
+import {
+  useWritingCallLimit,
+  WritingCallPlan,
+  WritingReportedUsage,
+} from "../ai/WritingCallLimit.tsx";
 import {
   effectiveWritingRecipient,
   loadWritingRecipients,
@@ -9,6 +15,7 @@ import {
   writingConnectionChoice,
   writingRecipientLabel,
 } from "../ai/writing-recipients.ts";
+import type { WritingRequest } from "../ai/writing-sender.ts";
 import { useT } from "../i18n/index.ts";
 import type { Platform } from "../platform/platform.ts";
 import { useSettings } from "../settings/useSettings.ts";
@@ -57,6 +64,8 @@ export function AnnotationReview({
 }) {
   const t = useT();
   const { settings } = useSettings();
+  const callLimit = useWritingCallLimit();
+  const { send: sendWriting, usage } = useMaterialRequests();
   const [recipients, setRecipients] = useState<readonly WritingRecipient[]>([]);
   const [recipientId, setRecipientId] = useState("");
   const [loading, setLoading] = useState(true);
@@ -80,6 +89,18 @@ export function AnnotationReview({
   const tracked = useRef<ReturnType<MintEditor["trackRange"]>[]>([]);
   const origin = useRef<{ id: number; editor: MintEditor } | null>(null);
   const isDocument = kind === "document";
+  const { tabs, activeId } = useSyncExternalStore(store.subscribe, store.getState);
+  const tab =
+    tabs.find((item) => item.id === activeId && item.documentId === documentId) ??
+    tabs.find((item) => item.documentId === documentId);
+  const editor = tab && store.editor(tab.id);
+  const selectedText = useSyncExternalStore(
+    useCallback(
+      (refresh) => (isDocument && editor ? editor.subscribe(refresh) : () => {}),
+      [editor, isDocument],
+    ),
+    () => (isDocument ? editor?.getText().replace(/^\uFEFF/, "") : undefined),
+  );
 
   useEffect(() => {
     mounted.current = true;
@@ -123,7 +144,14 @@ export function AnnotationReview({
   }
 
   async function send() {
-    if (!recipient || loading || (!isDocument && !items.length) || running.current) return;
+    if (
+      !recipient ||
+      loading ||
+      callLimit.invalid ||
+      (!isDocument && !items.length) ||
+      running.current
+    )
+      return;
     const { tabs, activeId } = store.getState();
     const tab =
       tabs.find((item) => item.id === activeId && item.documentId === documentId) ??
@@ -131,6 +159,11 @@ export function AnnotationReview({
     const editor = tab && store.editor(tab.id);
     if (!tab || !editor) return;
 
+    const sendReview = (request: WritingRequest) =>
+      sendWriting(recipient.send, request, label(recipient), null, {
+        fixedRequests: [request],
+        callLimit: callLimit.limit,
+      });
     running.current = true;
     setBusy(true);
     setError(null);
@@ -145,7 +178,7 @@ export function AnnotationReview({
         }
         const whole = editor.trackRange({ from: 0, to: original.length });
         try {
-          const reply = await recipient.send({
+          const reply = await sendReview({
             instruction: documentReviewInstruction,
             selectedText,
           });
@@ -167,7 +200,7 @@ export function AnnotationReview({
       origin.current = { id: tab.id, editor };
       setResults(null);
       setBlocked({});
-      const reply = await recipient.send({
+      const reply = await sendReview({
         instruction: batchInstruction(action === "comment"),
         annotationBatch: targets.map(({ sent }) => sent),
       });
@@ -330,11 +363,33 @@ export function AnnotationReview({
           </p>
         )}
         {loadFailed && <p role="alert">{t("writing.connectionsFailed")}</p>}
+        {recipient && (isDocument || items.length > 0) && (
+          <WritingCallPlan
+            recipient={label(recipient)}
+            requests={[
+              isDocument
+                ? { selectedText }
+                : {
+                    taskContext: {
+                      materials: items.map(({ id, excerpt, note }) => ({
+                        name: id,
+                        text: excerpt + note,
+                      })),
+                    },
+                  },
+            ]}
+            limit={callLimit}
+            fixed
+            disabled={busy}
+          />
+        )}
         <div className="flex flex-wrap gap-2">
           <button
             type="submit"
             className={buttonClass}
-            disabled={!recipient || (!isDocument && !items.length) || loading || busy}
+            disabled={
+              !recipient || (!isDocument && !items.length) || callLimit.invalid || loading || busy
+            }
           >
             {recipient
               ? t("writing.sendAuthorized", {
@@ -349,6 +404,7 @@ export function AnnotationReview({
           </button>
         </div>
         {busy && <p role="status">{t("annotationReview.working")}</p>}
+        {!busy && <WritingReportedUsage usage={usage} />}
         {error && <p role="alert">{t(error)}</p>}
       </form>
       {isDocument && findingCount !== null && (

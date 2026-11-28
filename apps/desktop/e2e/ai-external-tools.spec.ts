@@ -119,6 +119,7 @@ test("an Agent proposal can send only the manuscript text the author reviews", a
     inputSchema: { type: "object", properties: { text: { type: "string" } } },
   };
   const calls: unknown[] = [];
+  const agentPrompts: string[] = [];
   await page.route(mcp, async (route) => {
     const { id, method, params } = route.request().postDataJSON();
     if (method === "notifications/initialized") return route.fulfill({ status: 202 });
@@ -133,6 +134,7 @@ test("an Agent proposal can send only the manuscript text the author reviews", a
   });
   await page.route("**/__test/external-tool-agent", (route) => {
     const { request } = route.request().postDataJSON();
+    agentPrompts.push(request.instruction);
     return route.fulfill({
       json: {
         text: request.instruction.includes("MCP tool outcome")
@@ -164,6 +166,11 @@ test("an Agent proposal can send only the manuscript text the author reviews", a
   await dialog.getByRole("button", { name: "Find tools" }).click();
   await dialog.getByRole("combobox", { name: "MCP tool", exact: true }).selectOption(tool.name);
   await dialog.getByRole("combobox", { name: "External effect" }).selectOption("send");
+  const plan = dialog.getByRole("group", { name: "Task call plan" });
+  await expect(plan).toContainText(path);
+  await expect(plan).toContainText(mcp);
+  await expect(plan).toContainText("1 planned writing call");
+  await plan.getByLabel("Task call limit").fill("1");
   await dialog.getByRole("button", { name: "Send selection" }).click();
   await dialog.getByRole("button", { name: "Allow and send" }).click();
   const approval = dialog.getByRole("group", { name: "External tool approval" });
@@ -172,8 +179,19 @@ test("an Agent proposal can send only the manuscript text the author reviews", a
   await expect(approval.getByText(/Private paragraph/)).toHaveCount(0);
   expect(calls).toEqual([]);
   await approval.getByRole("button", { name: "Allow this tool call" }).click();
+  const paused = dialog.getByRole("group", { name: "Task paused at call limit" });
+  await expect(paused).toContainText(`Next recipient: ${mcp}`);
+  expect(calls).toEqual([]);
+  expect(agentPrompts).toHaveLength(1);
+  await paused.getByRole("button", { name: "Allow one more call" }).click();
+  await expect(paused).toContainText(`Calls used: 2`);
+  await expect(paused).toContainText(path);
+  expect(calls).toEqual([{ name: tool.name, arguments: { text: passage } }]);
+  expect(agentPrompts).toHaveLength(1);
+  await paused.getByRole("button", { name: "Allow one more call" }).click();
   await expect(dialog.getByRole("textbox", { name: "AI reply" })).toHaveValue(
     "The reviewed excerpt was sent.",
   );
   expect(calls).toEqual([{ name: tool.name, arguments: { text: passage } }]);
+  expect(agentPrompts).toHaveLength(2);
 });

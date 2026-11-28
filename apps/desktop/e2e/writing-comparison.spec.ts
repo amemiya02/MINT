@@ -83,6 +83,10 @@ test("compare the same writing baseline, mix proposals, and continue with anothe
   const approval = sidebar.getByRole("group", { name: "Retry same baseline" });
   const secondLabel = `Second model · ${second}/chat/completions`;
   await approval.getByLabel("Retry connection").selectOption({ label: secondLabel });
+  const plan = approval.getByRole("group", { name: "Task call plan" });
+  await expect(plan).toContainText(secondLabel);
+  await expect(plan).toContainText("1 planned writing call");
+  await plan.getByLabel("Task call limit").fill("1");
   await expect(approval).toContainText(instruction);
   await expect(approval).toContainText("Pasted text");
   await expect(approval).toContainText("trail.md");
