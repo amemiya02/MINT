@@ -24,6 +24,13 @@ struct Completion {
     model: String,
     messages: Vec<Message>,
     stream: bool,
+    #[serde(skip_deserializing, skip_serializing_if = "Option::is_none")]
+    stream_options: Option<StreamOptions>,
+}
+
+#[derive(Serialize)]
+struct StreamOptions {
+    include_usage: bool,
 }
 
 #[derive(Deserialize)]
@@ -194,6 +201,7 @@ pub(crate) async fn send_connected_model_request(
         model,
         messages: body.messages,
         stream: body.stream,
+        stream_options: None,
     };
     send_until_stopped(window, request_id, endpoint, key, body, on_event).await
 }
@@ -242,10 +250,15 @@ async fn send_until_stopped(
 async fn send(
     url: Url,
     api_key: Option<String>,
-    completion: Completion,
+    mut completion: Completion,
     on_event: Channel<ModelEvent>,
 ) -> Result<(), ModelError> {
     validate_images(&completion.messages)?;
+    if completion.stream && url.host_str() == Some("api.openai.com") {
+        completion.stream_options = Some(StreamOptions {
+            include_usage: true,
+        });
+    }
     let mut client = Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(10))

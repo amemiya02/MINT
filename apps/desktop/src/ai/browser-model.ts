@@ -18,7 +18,11 @@ export async function sendBrowserModelRequest(
         "content-type": "application/json",
         ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(
+        body.stream && new URL(url).hostname === "api.openai.com"
+          ? { ...body, stream_options: { include_usage: true } }
+          : body,
+      ),
       credentials: "omit",
       redirect: "error",
       cache: "no-store",

@@ -3,6 +3,8 @@ import { useT } from "../i18n/index.ts";
 import { materialBytes } from "./MaterialCapacity.tsx";
 import type { WritingRequest } from "./writing-sender.ts";
 
+const utf8 = new TextEncoder();
+
 export function useWritingCallLimit() {
   const [value, setValue] = useState("");
   const limit = value === "" ? undefined : Number(value);
@@ -16,23 +18,50 @@ export function WritingCallPlan({
   limit,
   toolEndpoint,
   fixed,
+  folderFileCount,
+  disabled,
 }: {
   readonly recipient: string;
-  readonly requests: readonly Pick<WritingRequest, "selectedText" | "taskContext">[];
+  readonly requests: readonly Pick<
+    WritingRequest,
+    "selectedText" | "taskContext" | "folderDocuments"
+  >[];
   readonly limit: ReturnType<typeof useWritingCallLimit>;
   readonly toolEndpoint?: string;
   readonly fixed?: boolean;
+  readonly folderFileCount?: number;
+  readonly disabled?: boolean;
 }) {
   const t = useT();
-  const bytes = requests.reduce((total, request) => total + materialBytes(request), 0);
+  const bytes = requests.reduce(
+    (total, request) =>
+      total +
+      materialBytes(request) +
+      (request.folderDocuments?.reduce((sum, { text }) => sum + utf8.encode(text).length, 0) ?? 0),
+    0,
+  );
   return (
-    <fieldset className="space-y-1 rounded border border-(--mint-border) p-2 text-xs">
+    <fieldset
+      disabled={disabled}
+      className="space-y-1 rounded border border-(--mint-border) p-2 text-xs"
+    >
       <legend>{t("writing.calls.plan")}</legend>
       <p className="wrap-anywhere">{recipient}</p>
-      <p>{t("writing.calls.material", { bytes: bytes.toLocaleString() })}</p>
-      <p>{t(requests.length === 1 ? "writing.calls.one" : "writing.calls.planned", {
-        count: String(requests.length),
-      })}</p>
+      {folderFileCount !== undefined && (
+        <p>
+          {t(folderFileCount === 1 ? "writing.calls.folderOne" : "writing.calls.folderFiles", {
+            count: String(folderFileCount),
+          })}
+        </p>
+      )}
+      {(bytes > 0 || folderFileCount === undefined) && (
+        <p>{t("writing.calls.material", { bytes: bytes.toLocaleString() })}</p>
+      )}
+      <p>
+        {t(requests.length === 1 ? "writing.calls.one" : "writing.calls.planned", {
+          count: String(requests.length),
+        })}
+      </p>
       {toolEndpoint && (
         <p className="wrap-anywhere">{t("writing.calls.tool", { endpoint: toolEndpoint })}</p>
       )}
@@ -47,11 +76,13 @@ export function WritingCallPlan({
           step={1}
           className="w-24 rounded border border-(--mint-border) bg-(--mint-bg) p-1"
           value={limit.value}
+          placeholder={t("writing.calls.unlimited")}
           aria-invalid={limit.invalid || undefined}
           onChange={(event) => limit.setValue(event.target.value)}
         />
       </label>
       {limit.invalid && <p role="status">{t("writing.calls.invalid")}</p>}
+      {!fixed && <p>{t("writing.calls.scope")}</p>}
     </fieldset>
   );
 }
@@ -61,6 +92,39 @@ interface CallPause {
   readonly calls: number;
   readonly completed: string;
   decide(allow: boolean): void;
+}
+
+export interface WritingCallUsage {
+  readonly totalTokens: number;
+  readonly reportedCalls: number;
+  readonly repeatedInputTokens: number;
+  readonly repeatedCalls: number;
+}
+
+export function WritingReportedUsage({ usage }: { readonly usage?: WritingCallUsage | null }) {
+  const t = useT();
+  if (!usage) return null;
+  return (
+    <p className="text-xs">
+      {t(usage.reportedCalls === 1 ? "writing.calls.usageOne" : "writing.calls.usage", {
+        tokens: usage.totalTokens.toLocaleString(),
+        count: String(usage.reportedCalls),
+      })}
+    </p>
+  );
+}
+
+export function WritingRetryEstimate({ usage }: { readonly usage: WritingCallUsage | null }) {
+  const t = useT();
+  if (!usage?.repeatedCalls) return null;
+  return (
+    <p className="text-xs">
+      {t("writing.calls.retryEstimate", {
+        tokens: usage.repeatedInputTokens.toLocaleString(),
+        count: String(usage.repeatedCalls),
+      })}
+    </p>
+  );
 }
 
 export function useWritingCallBudget() {
@@ -99,13 +163,20 @@ export function useWritingCallBudget() {
   };
 }
 
-export function WritingCallPause({ pause }: { readonly pause: CallPause }) {
+export function WritingCallPause({
+  pause,
+  usage,
+}: {
+  readonly pause: CallPause;
+  readonly usage?: WritingCallUsage | null;
+}) {
   const t = useT();
   const button = "rounded border border-(--mint-border) px-2 py-1 hover:bg-(--mint-hover)";
   return (
     <fieldset className="space-y-2 rounded border border-(--mint-border) p-2 text-sm">
       <legend>{t("writing.calls.paused")}</legend>
       <p role="status">{t("writing.calls.used", { count: String(pause.calls) })}</p>
+      <WritingReportedUsage usage={usage} />
       <p className="wrap-anywhere">{t("writing.calls.next", { recipient: pause.recipient })}</p>
       {pause.completed && (
         <pre className="max-h-40 overflow-auto whitespace-pre-wrap wrap-anywhere">

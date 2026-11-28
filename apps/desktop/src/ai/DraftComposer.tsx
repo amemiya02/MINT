@@ -22,7 +22,13 @@ import {
   type SourcePassage,
 } from "./source-passages.ts";
 import { materialDropHandlers, TaskContextChecklist, useNamedMaterials } from "./TaskContext.tsx";
-import { useWritingCallLimit, WritingCallPause, WritingCallPlan } from "./WritingCallLimit.tsx";
+import {
+  useWritingCallLimit,
+  WritingCallPause,
+  WritingCallPlan,
+  WritingReportedUsage,
+  WritingRetryEstimate,
+} from "./WritingCallLimit.tsx";
 import { useWritingTask, WritingTaskMaterials } from "./WritingTasks.tsx";
 import {
   useWritingToolPicker,
@@ -117,7 +123,9 @@ export function DraftComposer({
   const mounted = useRef(true);
   const [collapsed, setCollapsed] = useState(false);
   const [attempt, setAttempt] = useState<DraftAttempt | null>(null);
-  const [partials, setPartials] = useState<readonly { id: string; text: string }[]>([]);
+  const [partials, setPartials] = useState<
+    readonly { id: string; text: string; finished?: boolean }[]
+  >([]);
   const [retryId, setRetryId] = useState("");
   const [instruction, setInstruction] = useState("");
   const [address, setAddress] = useState("");
@@ -294,6 +302,33 @@ export function DraftComposer({
     let readingSources = false;
     let status: AttemptStatus;
     let capacityRejected = false;
+    function saveResult(
+      text: string,
+      status: AttemptStatus,
+      direct: boolean,
+      ignoredChanges?: boolean,
+    ) {
+      recordWritingResult(platform.writingTasks, store, {
+        tabId,
+        id: task.id,
+        turn: {
+          instruction: task.title,
+          reply: text,
+          context: sentContext,
+          searchFolder: task.folder ?? undefined,
+          recipient: connection.label,
+          recipientId: connection.id,
+          direct,
+          ignoredChanges,
+          toolOutcome: toolApproval.result(),
+          sourcePassages: passages.length ? passages : undefined,
+          status,
+        },
+        onError: () => {
+          if (mounted.current) setSaveFailed(true);
+        },
+      });
+    }
     setError(null);
     setRetryId("");
     setAttempt({ ...entry, approved, partial, status: "working" });
@@ -356,26 +391,7 @@ export function DraftComposer({
         retryConnection.current = null;
         setKey("");
         const inserted = onDraft(reply.text);
-        recordWritingResult(platform.writingTasks, store, {
-          tabId,
-          id: task.id,
-          turn: {
-            instruction: task.title,
-            reply: reply.text,
-            context: sentContext,
-            searchFolder: task.folder ?? undefined,
-            recipient: connection.label,
-            recipientId: connection.id,
-            direct: inserted,
-            ignoredChanges: reply.ignoredChanges,
-            toolOutcome: toolApproval.result(),
-            sourcePassages: passages.length ? passages : undefined,
-            status,
-          },
-          onError: () => {
-            if (mounted.current) setSaveFailed(true);
-          },
-        });
+        saveResult(reply.text, status, inserted, reply.ignoredChanges);
         if (inserted) {
           setApplied({ text: reply.text, passages, context: sentContext, connection });
           setAttempt({ ...entry, approved, status, partial: "" });
@@ -408,7 +424,9 @@ export function DraftComposer({
     }
     if (!mounted.current) return;
     if (partial) {
-      const reply = { id: crypto.randomUUID(), text: partial };
+      const finished = status === "callLimit";
+      if (finished) saveResult(partial, status, false);
+      const reply = { id: crypto.randomUUID(), text: partial, finished };
       setPartials((previous) => [...previous, reply]);
     }
     setAttempt({ ...entry, approved, status, partial: "", capacityRejected });
@@ -440,8 +458,8 @@ export function DraftComposer({
           : pause
             ? { id: `${attempt.id}:call:${pause.calls}`, detail: pause.recipient, decisions: 1 }
             : attempt.status === "complete"
-            ? { id: attempt.id, decisions: Number(!!unapplied) }
-            : undefined,
+              ? { id: attempt.id, decisions: Number(!!unapplied) }
+              : undefined,
         stop: busy ? () => controller.current?.abort() : undefined,
         forget: () => {
           setAttempt(null);
@@ -489,6 +507,12 @@ export function DraftComposer({
   const alternate = alternatives.find(({ id }) => id === retryId);
   const retryHasImages = hasTaskImages(...(retry?.task.plan.contexts ?? []));
   const alternateVision = checkVision(alternate?.visionTarget);
+  function retryDraft(connection: DraftConnection) {
+    if (!retry) return;
+    const task =
+      retry.status === "callLimit" ? { ...retry.task, id: crypto.randomUUID() } : retry.task;
+    void runDraft(task, connection);
+  }
 
   if (applied)
     return (
@@ -538,6 +562,9 @@ export function DraftComposer({
           </section>
         )}
         <WritingToolOutcome outcome={toolApproval.outcome} />
+        {(attempt?.task.plan.contexts.some(Boolean) || (materialRequests.usage?.reportedCalls ?? 0) > 1) && (
+          <WritingReportedUsage usage={materialRequests.usage} />
+        )}
         {saveFailed && <p role="alert">{t("writing.tasks.saveFailed")}</p>}
       </>
     );
@@ -690,7 +717,7 @@ export function DraftComposer({
             : t("draft.generate")}
         </button>
       </fieldset>
-      {pause && <WritingCallPause pause={pause} />}
+      {pause && <WritingCallPause pause={pause} usage={materialRequests.usage} />}
       {toolApproval.pending && (
         <WritingToolNotice pending={toolApproval.pending} onDecision={toolApproval.decide} />
       )}
@@ -721,13 +748,10 @@ export function DraftComposer({
       {retry && (
         <div className="space-y-2">
           <p role="status">{t(`writing.task.${retry.status}`)}</p>
-          <button
-            type="button"
-            className={button}
-            onClick={() => void runDraft(retry.task, retry.connection)}
-          >
+          <button type="button" className={button} onClick={() => retryDraft(retry.connection)}>
             {t("writing.task.retry")}
           </button>
+          <WritingRetryEstimate usage={materialRequests.usage} />
           {alternatives.length > 0 && (
             <>
               <label>
@@ -756,7 +780,7 @@ export function DraftComposer({
                 type="button"
                 className={button}
                 disabled={!alternate || (retryHasImages && !alternateVision?.verified)}
-                onClick={() => alternate && void runDraft(retry.task, alternate)}
+                onClick={() => alternate && retryDraft(alternate)}
               >
                 {t("writing.task.retryOther")}
               </button>
@@ -764,20 +788,29 @@ export function DraftComposer({
           )}
         </div>
       )}
-      {(partials.length > 0 || attempt?.partial) && (
-        <section aria-label={t("writing.task.partial")} className="space-y-2">
-          {partials.map(({ id, text }) => (
-            <pre key={id} className="max-h-32 overflow-auto whitespace-pre-wrap wrap-anywhere">
-              {text}
-            </pre>
-          ))}
-          {attempt?.partial && (
-            <pre className="max-h-32 overflow-auto whitespace-pre-wrap wrap-anywhere">
-              {attempt.partial}
-            </pre>
-          )}
-        </section>
-      )}
+      {[true, false].map((finished) => {
+        const results = partials.filter((reply) => !!reply.finished === finished);
+        const progress = !finished && !pause ? attempt?.partial : undefined;
+        if (!results.length && !progress) return null;
+        return (
+          <section
+            key={String(finished)}
+            aria-label={t(finished ? "writing.calls.retained" : "writing.task.partial")}
+            className="space-y-2"
+          >
+            {results.map(({ id, text }) => (
+              <pre key={id} className="max-h-32 overflow-auto whitespace-pre-wrap wrap-anywhere">
+                {text}
+              </pre>
+            ))}
+            {progress && (
+              <pre className="max-h-32 overflow-auto whitespace-pre-wrap wrap-anywhere">
+                {progress}
+              </pre>
+            )}
+          </section>
+        );
+      })}
       {error && <p role="alert">{t(error)}</p>}
       {saveFailed && <p role="alert">{t("writing.tasks.saveFailed")}</p>}
       {unapplied && (

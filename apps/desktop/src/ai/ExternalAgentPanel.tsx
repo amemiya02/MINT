@@ -9,8 +9,8 @@ import {
   externalAgentSender,
 } from "./external-agent.ts";
 import { MaterialRequestNotice, useMaterialRequests } from "./MaterialRequest.tsx";
-import { useWritingCallLimit, WritingCallPause, WritingCallPlan } from "./WritingCallLimit.tsx";
 import { TaskContextChecklist, useNamedMaterials } from "./TaskContext.tsx";
+import { useWritingCallLimit, WritingCallPause, WritingCallPlan } from "./WritingCallLimit.tsx";
 import { useWritingTask } from "./WritingTasks.tsx";
 import {
   useWritingToolPicker,
@@ -213,7 +213,11 @@ function ExternalAgentPanel({
   } | null>(null);
   const mounted = useRef(true);
   const pause = materialRequests.paused;
-  const taskStatus = pause ? "paused" : pending || requested || toolPending ? "approval" : attempt?.status;
+  const taskStatus = pause
+    ? "paused"
+    : pending || requested || toolPending
+      ? "approval"
+      : attempt?.status;
   if (target) target.engaged.current = !!taskStatus && taskStatus !== "complete";
   const taskRecipient = pending ? agent?.path : attempt?.recipient;
   const taskRequest = pending?.request ?? lastRequest.current?.request;
@@ -256,11 +260,18 @@ function ExternalAgentPanel({
                 : toolPending
                   ? { id: toolPending.id, detail: toolPending.name, decisions: 1 }
                   : pause && attempt
-                    ? { id: `${attempt.id}:call:${pause.calls}`, detail: pause.recipient, decisions: 1 }
+                    ? {
+                        id: `${attempt.id}:call:${pause.calls}`,
+                        detail: pause.recipient,
+                        decisions: 1,
+                      }
                     : attempt?.status === "complete"
-                    ? { id: attempt.id }
-                    : undefined,
-            stop: taskStatus === "working" || taskStatus === "approval" || taskStatus === "paused" ? stop : undefined,
+                      ? { id: attempt.id }
+                      : undefined,
+            stop:
+              taskStatus === "working" || taskStatus === "approval" || taskStatus === "paused"
+                ? stop
+                : undefined,
             forget: () => {
               setAttempt(null);
               setReply("");
@@ -559,8 +570,14 @@ function ExternalAgentPanel({
             className="flex flex-col gap-2 border-t border-(--mint-border) pt-3"
             onSubmit={(event) => {
               event.preventDefault();
-              if (busy || picker.incomplete || named.loading || named.unconfirmed ||
-                  (showCallPlan && callLimit.invalid)) return;
+              if (
+                busy ||
+                picker.incomplete ||
+                named.loading ||
+                named.unconfirmed ||
+                (showCallPlan && callLimit.invalid)
+              )
+                return;
               const request = {
                 instruction: selection === undefined ? sampleInstruction : instruction.trim(),
                 selectedText: material,
@@ -578,7 +595,12 @@ function ExternalAgentPanel({
                 setError(null);
                 setReply("");
                 lastRequest.current = { agent, access, request, callLimit: limit };
-                setPending({ id: crypto.randomUUID(), request, tool: picker.plan, callLimit: limit });
+                setPending({
+                  id: crypto.randomUUID(),
+                  request,
+                  tool: picker.plan,
+                  callLimit: limit,
+                });
               }
             }}
           >
@@ -729,11 +751,12 @@ function ExternalAgentPanel({
           onDecision={materialRequests.decide}
         />
       )}
-      {target && (taskStatus === "approval" || taskStatus === "working" || taskStatus === "paused") && (
-        <button type="button" className={buttonClass} onClick={stop}>
-          {t("writing.task.stop")}
-        </button>
-      )}
+      {target &&
+        (taskStatus === "approval" || taskStatus === "working" || taskStatus === "paused") && (
+          <button type="button" className={buttonClass} onClick={stop}>
+            {t("writing.task.stop")}
+          </button>
+        )}
       {attempt && !busy && !pending && attempt.status !== "complete" && (
         <p role="status">{t(`writing.task.${attempt.status}`)}</p>
       )}
@@ -744,7 +767,12 @@ function ExternalAgentPanel({
           onClick={() => {
             if (agent.approved.includes(access))
               send(agent, retry.request, false, undefined, retry.callLimit);
-            else setPending({ id: crypto.randomUUID(), request: retry.request, callLimit: retry.callLimit });
+            else
+              setPending({
+                id: crypto.randomUUID(),
+                request: retry.request,
+                callLimit: retry.callLimit,
+              });
           }}
         >
           {t("writing.task.retry")}

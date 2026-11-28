@@ -3022,7 +3022,10 @@ test("native MCP calls modify only the explicitly authorized target", async () =
             });
         response.writeHead(200, { "Content-Type": "application/json" });
         response.end(
-          JSON.stringify({ choices: [{ message: { content: text }, finish_reason: "stop" }] }),
+          JSON.stringify({
+            choices: [{ message: { content: text }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 39, completion_tokens: 6, total_tokens: 45 },
+          }),
         );
         return;
       }
@@ -3158,7 +3161,8 @@ test("native MCP calls modify only the explicitly authorized target", async () =
               field => field.querySelector(':scope > legend')?.textContent === 'Task paused at call limit'
             );
             return pause?.innerText.includes('Calls used: ${count}') &&
-              pause.innerText.includes('Next recipient: ${recipient}');`,
+              pause.innerText.includes('Next recipient: ${recipient}') &&
+              pause.innerText.includes('45 tokens reported across 1 writing call');`,
           );
         await paused(1, `${base}/mcp`);
         assert.deepEqual(calls, []);

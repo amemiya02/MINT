@@ -39,8 +39,14 @@ import {
   TaskContextChecklist,
   useNamedMaterials,
 } from "./TaskContext.tsx";
+import {
+  useWritingCallLimit,
+  WritingCallPause,
+  WritingCallPlan,
+  WritingReportedUsage,
+  WritingRetryEstimate,
+} from "./WritingCallLimit.tsx";
 import { useWritingTask, WritingTaskMaterials } from "./WritingTasks.tsx";
-import { useWritingCallLimit, WritingCallPause, WritingCallPlan } from "./WritingCallLimit.tsx";
 import {
   useWritingToolPicker,
   WritingToolNotice,
@@ -623,8 +629,13 @@ function Composer({
     wholeDraftEdit: (canEditDocument && action !== "comment") || !!folderCopy,
   });
   const showCallPlan =
-    scope === "document" || scope === "folder" || sendDraft || named.entries.length > 0 ||
-    !!searchFolder || !!toolPicker.plan || (selectedText?.length ?? 0) >= 8_192;
+    scope === "document" ||
+    scope === "folder" ||
+    sendDraft ||
+    named.entries.length > 0 ||
+    !!searchFolder ||
+    !!toolPicker.plan ||
+    (selectedText?.length ?? 0) >= 8_192;
 
   useEffect(() => {
     if (!origin.folder) return;
@@ -1518,7 +1529,8 @@ function Composer({
       status === "complete" && task.action === "direct" && task.seen.size === 0;
     const progress = splitWritingProgress(text, editing && !fileEdit);
     const replacement = status === "complete" ? finalReplacement : progress.replacement;
-    const partial = status === "complete" ? "" : progress.partial;
+    const hasFinishedReply = status === "complete" || status === "callLimit";
+    const partial = hasFinishedReply ? "" : progress.partial;
     const edits =
       replacement === undefined
         ? undefined
@@ -1588,7 +1600,7 @@ function Composer({
               : undefined,
           context: sentContext,
           toolOutcome: toolApproval.result(),
-          reply: rewrite ? "" : status === "complete" ? (replacement ?? text) : (replacement ?? ""),
+          reply: rewrite ? "" : hasFinishedReply ? (replacement ?? text) : (replacement ?? ""),
           direct: task.action === "direct",
           ignoredChanges,
           folderChanges,
@@ -1688,8 +1700,8 @@ function Composer({
               : pause
                 ? { id: `${attempt.id}:call:${pause.calls}`, detail: pause.recipient, decisions: 1 }
                 : status === "complete"
-                ? { id: attempt.id, decisions: attempt.newDecisions }
-                : undefined,
+                  ? { id: attempt.id, decisions: attempt.newDecisions }
+                  : undefined,
             stop: writingAttemptBusy(status) ? () => controller.current?.abort() : undefined,
             reveal: () => {
               store.activate(tabId);
@@ -2414,6 +2426,12 @@ function Composer({
           </>
         )}
         {canRetry && <p role="status">{t(`writing.task.${attempt.status}`)}</p>}
+        {sidebar && !busy && task && (
+          (task.callLimit !== undefined || task.scope === "document" || task.scope === "folder" ||
+            task.alternativeTo || (materialRequests.usage?.reportedCalls ?? 0) > 1) && (
+            <WritingReportedUsage usage={materialRequests.usage} />
+          )
+        )}
       </div>
       {busy && (
         <button type="button" className={buttonClass} onClick={stop}>
@@ -2438,6 +2456,7 @@ function Composer({
           >
             {t("writing.task.retry")}
           </button>
+          <WritingRetryEstimate usage={materialRequests.usage} />
           <p className="basis-full text-xs text-(--mint-muted)">
             {[
               t(`writing.scope.${attempt.task.scope}`),
@@ -2537,7 +2556,9 @@ function Composer({
         >
           <fieldset
             disabled={busy}
-            className={pendingApproval || materialRequests.paused ? "hidden" : "flex min-w-0 flex-col gap-2"}
+            className={
+              pendingApproval || materialRequests.paused ? "hidden" : "flex min-w-0 flex-col gap-2"
+            }
           >
             <label className="grid gap-1">
               {t("agent.instruction")}
@@ -2702,6 +2723,7 @@ function Composer({
                 }))}
                 limit={callLimit}
                 toolEndpoint={toolPicker.plan?.endpoint}
+                folderFileCount={folderCopy ? (folderTargets?.size ?? 0) : undefined}
               />
             )}
             {turns.length > 0 && (
@@ -2745,7 +2767,7 @@ function Composer({
           </fieldset>
         </form>
       )}
-      {pause && <WritingCallPause pause={pause} />}
+      {pause && <WritingCallPause pause={pause} usage={materialRequests.usage} />}
       {toolApproval.pending && (
         <WritingToolNotice pending={toolApproval.pending} onDecision={toolApproval.decide} />
       )}

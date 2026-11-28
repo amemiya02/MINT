@@ -91,6 +91,12 @@ test("review folder changes independently from an unsaved draft in a regular fol
   for (const path of ["draft.md", "index.md", "old.md"]) {
     await targets.getByRole("checkbox", { name: path, exact: true }).check();
   }
+  const plan = assistant.getByRole("group", { name: "Task call plan" });
+  await expect(plan).toContainText("3 selected documents in the task copy");
+  await expect(plan).toContainText(alternate);
+  await expect(plan).toContainText("1 planned writing call");
+  await plan.getByLabel("Task call limit").fill("1");
+  const before = requests.length;
   await assistant.getByRole("textbox", { name: "Instruction" }).fill("Organize these documents.");
   await assistant.getByRole("textbox", { name: "Instruction" }).press("Enter");
 
@@ -103,6 +109,7 @@ test("review folder changes independently from an unsaved draft in a regular fol
   const apply = (group: ReturnType<typeof row>) =>
     group.getByRole("button", { name: "Apply proposed edit" });
   await expect(edit).toContainText("Revised. My note.");
+  expect(requests).toHaveLength(before + 1);
   await expect(create).toContainText("Notes");
   await expect(move).toContainText("Section");
   await expect(backlink).toContainText("Requires notes.md, sub/renamed.md");
