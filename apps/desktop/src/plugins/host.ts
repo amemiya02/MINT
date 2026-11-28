@@ -17,7 +17,20 @@ interface TemplatesManifest extends ManifestBase {
   templates: { name: string; text: string }[];
 }
 
-export type PluginManifest = StatisticsManifest | TemplatesManifest;
+interface SidebarManifest extends ManifestBase {
+  permissions: ["folder.read"];
+  sidebar: "tags";
+}
+
+export type PluginManifest = StatisticsManifest | TemplatesManifest | SidebarManifest;
+
+export const tagBrowser: SidebarManifest = {
+  apiVersion: 1,
+  id: "mint.tag-browser",
+  name: "Tag browser",
+  permissions: ["folder.read"],
+  sidebar: "tags",
+};
 
 export const writingTemplates: TemplatesManifest = {
   apiVersion: 1,
@@ -75,6 +88,14 @@ export function isManifest(value: unknown): value is PluginManifest {
     m.permissions.length !== 1
   )
     return false;
+  if ("sidebar" in m) {
+    return (
+      m.sidebar === "tags" &&
+      m.permissions[0] === "folder.read" &&
+      !("statistics" in m) &&
+      !("templates" in m)
+    );
+  }
   if (m.permissions[0] === "document.write") {
     return (
       !("statistics" in m) &&
@@ -159,4 +180,9 @@ export function insertTemplate(id: string, name: string, insert: (text: string) 
   const template = item.manifest.templates.find((t) => t.name === name);
   if (!template) return "denied";
   return insert(template.text) ? "ok" : "empty";
+}
+
+export function canReadFolder(id: string): boolean {
+  const item = installed(id);
+  return Boolean(item?.enabled && item.granted && "sidebar" in item.manifest);
 }

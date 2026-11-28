@@ -179,3 +179,18 @@ test("a document that cannot be watched says changes on disk will go unnoticed",
     "Changes other programs make to /notes/draft.md will not be detected: too many open files",
   );
 });
+
+test("the remaining view preserves line endings changed on disk while both views were open", async ({
+  page,
+}) => {
+  await openDraft(page, "first\nsecond");
+  await page.getByRole("button", { name: "Open draft.md in other pane" }).click();
+  await expect(page.getByRole("textbox")).toHaveCount(2);
+  await externalWrite(page, path, "\uFEFFfirst\r\nsecond");
+  await page.getByRole("button", { name: "Close draft.md", exact: true }).first().click();
+  await expect(page.getByRole("textbox")).toHaveCount(1);
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.type("!");
+  await page.keyboard.press("ControlOrMeta+s");
+  await expect.poll(() => readFile(page, path)).toBe("\uFEFFfirst\r\nsecond!");
+});

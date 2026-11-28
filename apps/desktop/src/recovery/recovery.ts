@@ -70,13 +70,13 @@ export function createRecovery({
   }
 
   function writeSnapshot(id: number) {
-    const tab = store.getState().tabs.find((t) => t.id === id);
+    const tab = store.getState().tabs.find((t) => t.documentId === id);
     if (!tab?.dirty) return;
     const snapshot: Snapshot = {
       version: 1,
       path: tab.path,
       // Before its editor mounts, a tab's text is the text it starts from.
-      text: store.editor(id)?.getText() ?? tab.text,
+      text: store.getText(tab.id) ?? tab.text,
       takenAt: Date.now(),
     };
     written.add(id);
@@ -93,7 +93,7 @@ export function createRecovery({
   function tabsChanged() {
     const { tabs } = store.getState();
     for (const id of written) {
-      if (tabs.find((t) => t.id === id)?.dirty) continue;
+      if (tabs.find((t) => t.documentId === id)?.dirty) continue;
       written.delete(id);
       enqueue(() => platform.deleteRecoverySnapshot(snapshotId(id)));
     }

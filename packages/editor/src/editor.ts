@@ -1,7 +1,13 @@
 import { defaultKeymap, history, historyKeymap, redo, undo } from "@codemirror/commands";
 import { syntaxTree } from "@codemirror/language";
 import { selectNextOccurrence } from "@codemirror/search";
-import { Compartment, EditorSelection, EditorState, type Extension } from "@codemirror/state";
+import {
+  Compartment,
+  EditorSelection,
+  EditorState,
+  type Extension,
+  Transaction,
+} from "@codemirror/state";
 import {
   crosshairCursor,
   drawSelection,
@@ -16,6 +22,7 @@ import {
   fromFileOffset,
   parseFileText,
   replaceFileText,
+  sharedFileEffects,
   toFileOffset,
 } from "./file-text.ts";
 import {
@@ -46,6 +53,7 @@ import { markupContinuation } from "./markup-continuation.ts";
 import { type OutlineHeading, outline, sameOutline } from "./outline.ts";
 import { editorPreferences } from "./preferences.ts";
 import { pasteText, richPaste } from "./rich-paste.ts";
+import type { SharedDocument } from "./shared-document.ts";
 import { type TableCommands, tableCommands } from "./table/commands.ts";
 import {
   focusTableCell,
@@ -112,6 +120,7 @@ const defaultSettings: EditorSettings = {
 export interface EditorOptions {
   /** Element the editor mounts into. */
   readonly parent: HTMLElement;
+  readonly document?: SharedDocument;
   /** Full file text, exactly as decoded from disk (a leading U+FEFF BOM and any line endings are kept). */
   readonly text: string;
   readonly dialect?: Dialect;
@@ -157,7 +166,7 @@ export interface EditorCommands extends FindCommands, FormattingCommands, TableC
 export type EditorCommand = keyof EditorCommands;
 
 export type EditorEvent =
-  | { readonly type: "change" }
+  | { readonly type: "change"; readonly remote?: boolean; readonly fromHistory?: boolean }
   | { readonly type: "selection" }
   | { readonly type: "mode" }
   /** The headings returned by {@link MintEditor.getOutline} changed. */
@@ -241,7 +250,7 @@ function dialectExtensions(dialect: Dialect): Extension {
 
 export function createEditor(options: EditorOptions): MintEditor {
   const listeners = new Set<(event: EditorEvent) => void>();
-  const parsed = parseFileText(options.text);
+  const parsed = parseFileText(options.document?.currentText() ?? options.text);
   const host = options.host ?? {};
   const preview = new Compartment();
   const syntax = new Compartment();
@@ -257,6 +266,7 @@ export function createEditor(options: EditorOptions): MintEditor {
 
   const view = new EditorView({
     parent: options.parent,
+    dispatchTransactions: options.document?.dispatch.bind(options.document),
     state: EditorState.create({
       doc: parsed.doc,
       extensions: [
@@ -264,6 +274,7 @@ export function createEditor(options: EditorOptions): MintEditor {
         options.phrases ? EditorState.phrases.of(options.phrases) : [],
         preferences.extension,
         history(),
+        options.document?.initialHistory() ?? [],
         // Several cursors: typed text goes to all of them. Alt-drag selects a rectangle.
         EditorState.allowMultipleSelections.of(true),
         drawSelection(),
@@ -299,7 +310,17 @@ export function createEditor(options: EditorOptions): MintEditor {
         EditorView.lineWrapping,
         EditorView.domEventObservers({ scroll: () => emit({ type: "scroll" }) }),
         EditorView.updateListener.of((update) => {
-          if (update.docChanged) emit({ type: "change" });
+          if (update.docChanged || update.transactions.some((t) => sharedFileEffects(t).length > 0))
+            emit(
+              update.transactions.some((tr) => tr.annotation(Transaction.remote))
+                ? { type: "change", remote: true }
+                : {
+                    type: "change",
+                    fromHistory: update.transactions.some(
+                      (tr) => tr.isUserEvent("undo") || tr.isUserEvent("redo"),
+                    ),
+                  },
+            );
           if (update.selectionSet) emit({ type: "selection" });
           if (update.docChanged || syntaxTree(update.state) !== syntaxTree(update.startState)) {
             const next = outline(update.state, false);
@@ -313,6 +334,7 @@ export function createEditor(options: EditorOptions): MintEditor {
     }),
   });
 
+  options.document?.attach(view);
   lastOutline = outline(view.state, false);
   if (settings.typewriterMode) view.dispatch({ effects: centerCursor(view.state) });
 
@@ -435,6 +457,7 @@ export function createEditor(options: EditorOptions): MintEditor {
       if (!view.dom.contains(view.root.activeElement)) view.focus();
     },
     destroy: () => {
+      options.document?.detach(view);
       listeners.clear();
       view.destroy();
     },

@@ -1,4 +1,4 @@
-# MINT writing plugins
+# MINT plugins
 
 In Settings → Plugins, choose a JSON file containing a MINT version 1 manifest. Review the requested action and choose **Allow access** or **Deny access**. A denied installation can be authorized later. Enabled statistics plugins contribute a named button below the document. The view reads the active draft through the host, including unsaved edits.
 
@@ -35,3 +35,19 @@ To contribute your own template commands, import a JSON manifest with the write 
 ```
 
 When a command runs, the host looks up the installed template and its current permission. The editor applies the template to the active selection and saves through the usual document workflow.
+
+## Tag sidebar
+
+A folder plugin contributes a sidebar entry. The bundled **Tag browser** uses the following view. A third-party package can declare it with its own identifier and name.
+
+```json
+{
+  "apiVersion": 1,
+  "id": "example.tags",
+  "name": "Browse tags",
+  "permissions": ["folder.read"],
+  "sidebar": "tags"
+}
+```
+
+The host reads Markdown documents in the current folder when the authorized view opens. It uses the top-level YAML front matter field `tags`, accepting a string or a sequence such as `tags: [research, travel]`. Select a tag and click a document's relative path to open the original file.

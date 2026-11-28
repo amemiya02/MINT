@@ -16,12 +16,16 @@ import type { FolderTree, TreeRow } from "./file-tree.ts";
 
 export type SidebarView = "files" | "outline";
 
+export type SidebarTool = SidebarView | "search" | `plugin:${string}`;
+
 export function NavigationRail({
   active,
   onToggle,
+  plugins,
 }: {
-  readonly active: SidebarView | "search" | null;
-  readonly onToggle: (tool: SidebarView | "search") => void;
+  readonly active: SidebarTool | null;
+  readonly plugins: readonly { id: string; label: string }[];
+  readonly onToggle: (tool: SidebarTool) => void;
 }) {
   const t = useT();
   const tools = [
@@ -51,6 +55,17 @@ export function NavigationRail({
           onClick={() => onToggle(view)}
         >
           {icon}
+        </IconButton>
+      ))}
+      {plugins.map(({ id, label }) => (
+        <IconButton
+          key={id}
+          label={label}
+          pressed={active === `plugin:${id}`}
+          onClick={() => onToggle(`plugin:${id}`)}
+        >
+          <path d="M2 2h6l6 6-6 6-6-6z" />
+          <circle cx="5.5" cy="5.5" r="1" />
         </IconButton>
       ))}
     </nav>

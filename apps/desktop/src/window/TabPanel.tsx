@@ -49,10 +49,13 @@ export function TabPanel({
     },
     [store, id, onEditorChange],
   );
-  const onChange = useCallback(() => {
-    store.markChanged(id);
-    onEdited(id);
-  }, [store, id, onEdited]);
+  const onChange = useCallback(
+    (fromHistory: boolean) => {
+      store.markChanged(id, fromHistory);
+      onEdited(tab.documentId);
+    },
+    [store, id, onEdited, tab.documentId],
+  );
   const currentPath = useRef(path);
   currentPath.current = path;
   const dialect = useDialect();
@@ -105,6 +108,7 @@ export function TabPanel({
         <div className="min-h-0 min-w-0 flex-1">
           <EditorPane
             text={tab.text}
+            document={tab.document}
             active={active}
             onReady={onReady}
             onChange={onChange}

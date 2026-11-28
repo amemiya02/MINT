@@ -9,6 +9,7 @@ import {
   isManifest,
   type PluginManifest,
   readStatistics,
+  tagBrowser,
   uninstall,
   writingStatistics,
   writingTemplates,
@@ -30,9 +31,15 @@ export function useInstallations() {
 }
 
 const button = "rounded border border-(--mint-border) px-2 py-1 text-sm hover:bg-(--mint-hover)";
-function name(m: PluginManifest, t: Translate) {
+export function pluginName(m: PluginManifest, t: Translate) {
   if (m.id === writingTemplates.id) return t("plugin.templates");
+  if (m.id === tagBrowser.id) return t("plugin.tags");
   return m.id === writingStatistics.id ? t("plugin.statistics") : m.name;
+}
+
+function permission(manifest: PluginManifest, t: Translate) {
+  if ("templates" in manifest) return t("plugin.write");
+  return t("sidebar" in manifest ? "plugin.folderRead" : "plugin.read");
 }
 
 export function PluginSettings() {
@@ -49,15 +56,19 @@ export function PluginSettings() {
       setFailed(true);
     }
   }
-  const available = [writingStatistics, writingTemplates].filter(
+  const available = [writingStatistics, writingTemplates, tagBrowser].filter(
     (m) => !installed.some((i) => i.manifest.id === m.id),
   );
   return (
     <section aria-label={t("plugin.title")} className="flex flex-col gap-2">
       <h3 className="font-medium">{t("plugin.title")}</h3>
       {available.map((m) => (
-        <div key={m.id} className="flex items-center justify-between">
-          {name(m, t)}{" "}
+        <fieldset
+          aria-label={pluginName(m, t)}
+          key={m.id}
+          className="flex items-center justify-between"
+        >
+          {pluginName(m, t)}{" "}
           <button
             type="button"
             className={button}
@@ -66,7 +77,7 @@ export function PluginSettings() {
           >
             {t("plugin.install")}
           </button>
-        </div>
+        </fieldset>
       ))}
       <label className="flex flex-col gap-1 text-sm">
         {t("plugin.file")}
@@ -99,8 +110,8 @@ export function PluginSettings() {
       {invalidFile && <p role="alert">{t("plugin.invalid")}</p>}
       {pending && (
         <div className="rounded border border-(--mint-border) p-2">
-          <strong>{name(pending, t)}</strong>
-          <p>{t("templates" in pending ? "plugin.write" : "plugin.read")}</p>
+          <strong>{pluginName(pending, t)}</strong>
+          <p>{permission(pending, t)}</p>
           <div className="flex gap-2">
             {([true, false] as const).map((grant) => (
               <button
@@ -121,9 +132,13 @@ export function PluginSettings() {
         </div>
       )}
       {installed.map((i) => (
-        <div key={i.manifest.id} className="flex flex-col gap-1">
-          <span>{name(i.manifest, t)}</span>
-          <small>{t("templates" in i.manifest ? "plugin.write" : "plugin.read")}</small>
+        <fieldset
+          aria-label={pluginName(i.manifest, t)}
+          key={i.manifest.id}
+          className="flex flex-col gap-1"
+        >
+          <span>{pluginName(i.manifest, t)}</span>
+          <small>{permission(i.manifest, t)}</small>
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
@@ -147,7 +162,7 @@ export function PluginSettings() {
               {t("plugin.uninstall")}
             </button>
           </div>
-        </div>
+        </fieldset>
       ))}
       {failed && <p role="alert">{t("plugin.failed")}</p>}
     </section>
@@ -181,7 +196,7 @@ function PluginEntry({ manifest, readDocument }: DocumentViewProps) {
   return (
     <>
       <button type="button" className={button} onClick={() => setOpened(true)}>
-        {name(manifest, t)}
+        {pluginName(manifest, t)}
       </button>
       {opened && (
         <PluginView
@@ -205,10 +220,10 @@ function PluginView({
   return (
     <dialog
       {...props}
-      aria-label={name(manifest, t)}
+      aria-label={pluginName(manifest, t)}
       className="m-auto rounded border border-(--mint-border) bg-(--mint-bg) p-5 text-(--mint-fg) shadow-xl backdrop:bg-black/30"
     >
-      <h2 className="mb-2 font-medium">{name(manifest, t)}</h2>
+      <h2 className="mb-2 font-medium">{pluginName(manifest, t)}</h2>
       {result.status === "denied" ? (
         <p role="alert">{t("plugin.denied")}</p>
       ) : result.status === "empty" ? (
