@@ -1,4 +1,5 @@
 import {
+  materialRequestInstruction,
   replacementInstruction,
   type WritingReply,
   type WritingRequest,
@@ -36,12 +37,10 @@ export function externalAgentSender(
   access: AgentAccess,
 ): WritingSender {
   // The native boundary rechecks access and executable identity for every operation.
-  return ({ responseFormat, ...request }) =>
-    platform.send(
-      agent,
-      access,
-      responseFormat === "replacement"
-        ? { ...request, instruction: `${request.instruction}\n\n${replacementInstruction}` }
-        : request,
-    );
+  return ({ responseFormat, ...request }) => {
+    const instruction = [request.instruction];
+    if (responseFormat === "replacement") instruction.push(replacementInstruction);
+    if (request.taskContext) instruction.push(materialRequestInstruction);
+    return platform.send(agent, access, { ...request, instruction: instruction.join("\n\n") });
+  };
 }

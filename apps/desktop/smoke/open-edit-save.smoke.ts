@@ -1586,10 +1586,21 @@ test("automatic proofreading sends only the active passage and undo restores the
 
 test("a native model reply stays editable and untitled until the author chooses a Save As path", async () => {
   const folder = await mkdtemp(join(homedir(), "mint-ai-draft-"));
+  const sources = join(folder, "sources");
+  const source = join(sources, "field-log.md");
+  const excerpt = "The north ridge reopened on Tuesday.";
+  const unapproved = "Private crew contact details.";
+  await mkdir(sources);
+  await writeFile(source, `${unapproved}\n${excerpt}\n`);
   const path = join(folder, "field-notes.md");
   const instruction = "Draft an introduction for the field notes.";
   const generated = "Field notes from the ridge.";
-  const requests: unknown[] = [];
+  const requests: {
+    path: string | undefined;
+    method: string | undefined;
+    authorization: string | undefined;
+    body: { model: string; stream: boolean; messages: { role: string; content: string }[] };
+  }[] = [];
   const endpoint = createServer(async (request, response) => {
     let input = "";
     for await (const chunk of request) input += chunk;
@@ -1600,9 +1611,17 @@ test("a native model reply stays editable and untitled until the author chooses 
       body: JSON.parse(input),
     });
     response.writeHead(200, { "Content-Type": "application/json" });
-    response.end(
-      JSON.stringify({ choices: [{ message: { content: generated }, finish_reason: "stop" }] }),
-    );
+    const content =
+      requests.length === 1
+        ? JSON.stringify({
+            requestMaterial: {
+              name: "Trail log",
+              purpose: "Confirm when the ridge reopened.",
+              query: "north ridge reopened",
+            },
+          })
+        : generated;
+    response.end(JSON.stringify({ choices: [{ message: { content }, finish_reason: "stop" }] }));
   });
 
   const draftMatches = (text: string) =>
@@ -1621,7 +1640,7 @@ test("a native model reply stays editable and untitled until the author chooses 
     });
     const address = endpoint.address();
     assert.ok(address && typeof address !== "string");
-    await restart([document]);
+    await restart([sources, document]);
     await until("the original manuscript to open", () =>
       command<boolean>("POST", `/session/${session}/execute/sync`, {
         script: "return !!document.querySelector('.cm-content')",
@@ -1640,27 +1659,56 @@ test("a native model reply stays editable and untitled until the author chooses 
       await clickPath(`//form//label[normalize-space(.)='${label}']/input`);
       await keyActions(typing(value));
     }
+    await addPastedWritingMaterial("Field notes are for the visitor bulletin.");
+    await clickPath(
+      "//form//label[normalize-space(.)='Allow searching the current working folder']/input",
+    );
     await clickPath("//form//button[not(@disabled) and normalize-space(.)='Generate draft']");
+    await waitForView(
+      "the model's purpose and the actual native folder excerpt",
+      `const text = document.querySelector('fieldset[aria-label="Additional material requested"]')?.innerText;
+        return text?.includes('Confirm when the ridge reopened.') &&
+          text.includes('The north ridge reopened on Tuesday.') &&
+          !text.includes('Private crew contact details.');`,
+    );
+    assert.equal(requests.length, 1, "the excerpt waits for authorization");
+    await clickPath(
+      "//form//label[.//input[@type='radio' and @aria-label='field-log.md · line 2']]",
+    );
+    await clickPath("//form//button[not(@disabled) and normalize-space(.)='Allow once']");
     await until("the generated Markdown in the untitled editor", () =>
       draftMatches(generated),
     ).catch(explain);
-    assert.deepEqual(requests, [
-      {
-        path: "/v1/chat/completions",
-        method: "POST",
-        authorization: "Bearer draft-fixture-secret",
-        body: {
-          model: "native-draft-fixture",
-          messages: [
-            {
-              role: "user",
-              content: `Write a Markdown draft following this instruction. Return only the draft text, without a surrounding code fence.\n\n${instruction}`,
-            },
-          ],
-          stream: false,
-        },
-      },
-    ]);
+    assert.equal(requests.length, 2);
+    const initialContext = {
+      materials: [{ name: "Pasted text", text: "Field notes are for the visitor bulletin." }],
+      folderSearch: true,
+    };
+    for (const [index, request] of requests.entries()) {
+      assert.equal(request.path, "/v1/chat/completions");
+      assert.equal(request.method, "POST");
+      assert.equal(request.authorization, "Bearer draft-fixture-secret");
+      assert.equal(request.body.model, "native-draft-fixture");
+      assert.equal(request.body.stream, false);
+      assert.deepEqual(JSON.parse(request.body.messages.at(-1)?.content ?? ""), {
+        instruction: `Write a Markdown draft following this instruction. Return only the draft text, without a surrounding code fence.\n\n${instruction}`,
+        taskContext:
+          index === 0
+            ? initialContext
+            : {
+                ...initialContext,
+                materialDecisions: [
+                  {
+                    name: "Trail log",
+                    purpose: "Confirm when the ridge reopened.",
+                    outcome: "allowed",
+                    material: { name: "field-log.md · line 2", text: excerpt },
+                  },
+                ],
+              },
+      });
+    }
+    assert.equal(await readFile(source, "utf8"), `${unapproved}\n${excerpt}\n`);
 
     async function saveWith(action: "Cancel" | "Save") {
       await Promise.all([
@@ -1674,7 +1722,7 @@ test("a native model reply stays editable and untitled until the author chooses 
     await until("the draft to remain after the save is cancelled", () =>
       draftMatches(generated),
     ).catch(explain);
-    assert.deepEqual(await readdir(folder), []);
+    assert.deepEqual(await readdir(folder), ["sources"]);
     await clickPath("//*[@role='tabpanel' and not(@hidden)]//*[@contenteditable='true']");
     await keyActions([...typing(keys.end), ...typing(" Author's addition.")]);
     const edited = `${generated} Author's addition.`;
@@ -1687,6 +1735,13 @@ test("a native model reply stays editable and untitled until the author chooses 
     await rm(folder, { recursive: true, force: true });
   }
 });
+
+async function addPastedWritingMaterial(text: string) {
+  await clickPath("//form//summary[normalize-space(.)='Add files or paste text']");
+  await clickPath("//form//label[normalize-space(.)='Pasted material']/textarea");
+  await keyActions(typing(text));
+  await clickPath("//form//button[normalize-space(.)='Add pasted text']");
+}
 
 const credentialPolicy = process.env.MINT_SMOKE_CREDENTIAL_POLICY;
 test("model keys survive a restart only when remembered and disconnect removes the OS credential", {
@@ -2177,6 +2232,7 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   ).catch(explain);
   await clickPath("//label[normalize-space(.)='Drafting instruction']/input");
   await keyActions(typing("Draft one paragraph about the ridge."));
+  await addPastedWritingMaterial("A named detail for the Agent.");
   await clickPath("//button[not(@disabled) and normalize-space(.)='Generate draft']");
   await until("the completed Agent reply in the draft editor", () =>
     command<boolean>("POST", `/session/${session}/execute/sync`, {
@@ -2186,9 +2242,14 @@ console.log(JSON.stringify({ type: "turn.completed" }));
     }).then((ready) => ready || null),
   ).catch(explain);
   const draftCall = JSON.parse((await readFile(calls, "utf8")).trim().split("\n").at(-1) ?? "");
-  assert.deepEqual(draftCall.prompt, {
-    instruction:
-      "Write a Markdown draft following this instruction. Return only the draft text, without a surrounding code fence.\n\nDraft one paragraph about the ridge.",
+  const { instruction: agentInstruction, ...agentContext } = draftCall.prompt;
+  assert.match(
+    agentInstruction,
+    /^Write a Markdown draft[\s\S]+Draft one paragraph about the ridge\./,
+  );
+  assert.match(agentInstruction, /requestMaterial/);
+  assert.deepEqual(agentContext, {
+    taskContext: { materials: [{ name: "Pasted text", text: "A named detail for the Agent." }] },
   });
   assert.deepEqual(draftCall.entries, []);
   assert.ok(!draftCall.args.includes("--sandbox"));

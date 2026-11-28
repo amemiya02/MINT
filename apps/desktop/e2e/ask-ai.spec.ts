@@ -21,6 +21,7 @@ test("Ask AI comments inline and continues from the original selection", async (
   const first = "Does this read clearly?";
   const reply = "<replacement>A comment asking for a clearer subject.</replacement>";
   const followUp = "What should the subject be?";
+  const requestMaterial = { name: "Team roster", purpose: "Confirm the team's name." };
   const received: unknown[] = [];
   await page.route("**/__test/ask-ai", async (route) => {
     received.push(route.request().postDataJSON());
@@ -31,7 +32,9 @@ test("Ask AI comments inline and continues from the original selection", async (
             ? "Sample reply."
             : received.length === 2
               ? reply
-              : "Name the team.",
+              : received.length === 3
+                ? JSON.stringify({ requestMaterial })
+                : "Name the team.",
       },
     });
   });
@@ -75,6 +78,18 @@ test("Ask AI comments inline and continues from the original selection", async (
   await sidebar.getByLabel("Scope").selectOption({ label: "Instruction only" });
   await sidebar.getByRole("textbox", { name: "Instruction" }).fill(followUp);
   await sidebar.getByRole("button", { name: "Send", exact: true }).click();
+  const approval = { name: "Additional material requested" };
+  await expect(
+    sidebar.getByRole("group", approval).getByText(requestMaterial.purpose),
+  ).toBeVisible();
+  await sidebar.getByRole("button", { name: "Close" }).click();
+  await page.getByRole("button", { name: "Resume conversation" }).click();
+  const inlineApproval = inline.getByRole("group", approval);
+  await expect(inlineApproval).toBeVisible({ timeout: 5000 });
+  expect(received).toHaveLength(3);
+  await inlineApproval.getByRole("button", { name: "Skip" }).click();
+  await expect(inline.getByRole("textbox", { name: "AI reply" })).toHaveValue("Name the team.");
+  await inline.getByRole("button", { name: "Continue in sidebar" }).click();
   await expect(sidebar.getByText("Name the team.")).toBeVisible();
 
   await editor.getByText("Private paragraph.", { exact: true }).click();
@@ -94,6 +109,15 @@ test("Ask AI comments inline and continues from the original selection", async (
       path: executable,
       access: "readOnly",
       request: { instruction: followUp, history: [{ instruction: first, reply }] },
+    },
+    {
+      path: executable,
+      access: "readOnly",
+      request: {
+        instruction: expect.stringContaining(followUp),
+        history: [{ instruction: first, reply }],
+        taskContext: { materialDecisions: [{ ...requestMaterial, outcome: "skipped" }] },
+      },
     },
   ]);
 });
