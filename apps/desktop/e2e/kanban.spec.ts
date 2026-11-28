@@ -42,7 +42,14 @@ test("moving a card preserves the rest of its source and survives reopening the 
   expect(await readFile(page, path)).toBe(source.replace("'Draft'", "'Done'"));
   await entry.click();
   await entry.click();
-  await expect(done.getByRole("button", { name: "trips/draft.md" })).toBeVisible();
+  const moved = done
+    .getByRole("article")
+    .filter({ has: page.getByRole("button", { name: "trips/draft.md" }) });
+  await expect(moved).toBeVisible();
+  const next = board.getByRole("region", { name: "In progress", exact: true });
+  await moved.dragTo(next);
+  await expect(next.getByRole("button", { name: "trips/draft.md" })).toBeVisible();
+  expect(await readFile(page, path)).toBe(source.replace("'Draft'", "'In progress'"));
 });
 
 test("after an external change a failed move shows the status actually on disk", async ({

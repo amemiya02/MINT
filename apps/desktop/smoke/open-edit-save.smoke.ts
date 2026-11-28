@@ -488,13 +488,14 @@ test("reopen a bookmark after a native restart and remove it without touching th
   await click("Bookmarks", "aria-label");
   await waitForBookmark(false);
 });
+
 test("moving a Kanban card changes only its status on disk after the writer grants access", async () => {
   assert.ok(application);
   const folder = await mkdtemp(join(dir, "kanban-"));
   const path = join(folder, "card.md");
   const draft = "\uFEFF---\r\nstatus: 'Draft'  # keep\r\n---\r\n\r\nNotes.  \r\n";
   await writeFile(path, draft);
-  await exec(application, [folder], { timeout: 15000 });
+  await restart([folder]);
   async function clickPath(xpath: string) {
     const id = await until(xpath, async () => {
       const el = await command<Record<string, string>>("POST", `/session/${session}/element`, {
@@ -515,8 +516,9 @@ test("moving a Kanban card changes only its status on disk after the writer gran
   await clickPath("//fieldset[@aria-label='Kanban board']//button[normalize-space(.)='Install']");
   await shows("Change the status property");
   await click("Deny access");
-  const grant = "//fieldset[@aria-label='Kanban board']//small[contains(.,'";
-  await clickPath(`${grant}Read Markdown')]/following-sibling::button`);
+  const grant = (action: string) =>
+    `//fieldset[@aria-label='Kanban board']//small[contains(.,'${action}')]/following-sibling::button`;
+  await clickPath(grant("Read Markdown"));
   await click("Close");
   await clickPath("//nav//button[@aria-label='Kanban board']");
   const select = "//aside//select[@aria-label='Move card.md']";
@@ -529,11 +531,18 @@ test("moving a Kanban card changes only its status on disk after the writer gran
   }).catch(explain);
   assert.equal(await readFile(path, "utf8"), draft);
   await nativeShortcut("ctrl+comma");
-  await clickPath(`${grant}Change the status')]/following-sibling::button`);
+  await clickPath(grant("Change the status"));
   await click("Close");
   await clickPath(`${select}/option[@value='Done']`);
   await until(
     "the status update to reach disk",
     async () => (await readFile(path, "utf8")) === draft.replace("'Draft'", "'Done'") || null,
   ).catch(explain);
+  await restart([folder]);
+  await click("Kanban board", "aria-label");
+  await clickPath("//aside//section[@aria-label='Done']//button[normalize-space(.)='card.md']");
+  assert.deepEqual(await readdir(folder), ["card.md"]);
+  await nativeShortcut("ctrl+comma");
+  await clickPath("//fieldset[@aria-label='Kanban board']//button[normalize-space(.)='Uninstall']");
+  await click("Close");
 });
