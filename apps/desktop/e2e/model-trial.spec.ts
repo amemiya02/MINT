@@ -38,7 +38,8 @@ test("try a model with sample text, correct the key and verify the returned capa
   await provider.selectOption({ label: "Custom compatible service" });
   await settings.getByLabel("API address").fill(apiBase);
   await settings.getByLabel("Model name").fill("fixture-model");
-  const key = settings.getByLabel("API key (this trial only)");
+  await settings.getByLabel("Connection name").fill("Tested model");
+  const key = settings.getByLabel("API key");
   await key.fill("wrong-fixture-key");
   const sample = await settings.getByLabel("Sample prompt").inputValue();
   expect(sample).toContain("The research team met again to discuss the results.");
@@ -55,6 +56,14 @@ test("try a model with sample text, correct the key and verify the returned capa
   await expect(settings.getByText("Proposed edit: Verified")).toBeVisible();
   await expect(settings.getByText("Multi-file editing: Unavailable")).toBeVisible();
   await expect(key).toHaveValue("");
+  const remember = settings.getByRole("button", { name: "Remember connection" });
+  const useForLaunch = settings.getByRole("button", { name: "Use for this launch" });
+  await expect(remember).toBeDisabled();
+  await expect(useForLaunch).toBeDisabled();
+  await expect(settings.getByText("Re-enter the API key to save this connection.")).toBeVisible();
+  await key.fill("fixture-key");
+  await expect(remember).toBeEnabled();
+  await expect(useForLaunch).toBeEnabled();
   expect(requests).toEqual(
     ["wrong-fixture-key", "fixture-key"].map((credential) => ({
       method: "POST",
