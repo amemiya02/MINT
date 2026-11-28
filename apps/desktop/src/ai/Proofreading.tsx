@@ -101,6 +101,11 @@ export function Proofreading({
         // Undoing a correction is also a decision to leave that wording as it was.
         reviewed = event.fromHistory ? editor.getProofreadingPassage() : null;
         schedule();
+      } else if (event.type === "selection" && event.restored) {
+        clearTimeout(timer);
+        revision++;
+        reviewed = editor.getProofreadingPassage();
+        setCorrection(null);
       } else if (event.type === "selection" || event.type === "compositionEnd") schedule();
     });
     schedule();

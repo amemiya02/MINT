@@ -39,7 +39,43 @@ pub struct WritingRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     selected_text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    task_context: Option<TaskContext>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     history: Option<Vec<WritingTurn>>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TaskContext {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    current_draft: Option<NamedMaterial>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    materials: Option<Vec<NamedMaterial>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    folder_search: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    material_decisions: Option<Vec<MaterialDecision>>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct NamedMaterial {
+    name: String,
+    text: String,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", tag = "outcome", deny_unknown_fields)]
+enum MaterialDecision {
+    Allowed {
+        name: String,
+        purpose: String,
+        material: NamedMaterial,
+    },
+    Skipped {
+        name: String,
+        purpose: String,
+    },
 }
 
 #[derive(Deserialize, Serialize)]
@@ -264,6 +300,7 @@ pub async fn send_external_agent(
     revision: String,
     access: AgentAccess,
     request: WritingRequest,
+    task_id: Option<String>,
 ) -> Result<WritingReply, String> {
     blocking(move || {
         let current = restore(inspect(&path)?, registry(&app)?);
@@ -271,7 +308,15 @@ pub async fn send_external_agent(
         if !current.approved.contains(&access) {
             return Err(ACCESS_REQUIRED.to_owned());
         }
-        let reply = run_codex(&current.path, access, &request, cli_paths(&app))?;
+        let scratch = crate::writing_tasks::agent_scratch(&app, task_id.as_deref())
+            .map_err(|_| FAILED.to_owned())?;
+        let reply = run_codex(
+            &current.path,
+            access,
+            &request,
+            scratch.path(),
+            cli_paths(&app),
+        )?;
         // Forgetting or replacing a connection during a request must not restore its access.
         let _ = update_registry(&app, |records| {
             if let Some(index) = records.iter().position(|stored| {
@@ -300,6 +345,7 @@ fn run_codex(
     path: &Path,
     access: AgentAccess,
     request: &WritingRequest,
+    scratch: &Path,
     paths: Vec<PathBuf>,
 ) -> Result<WritingReply, String> {
     let failed = || FAILED.to_owned();
@@ -307,7 +353,6 @@ fn run_codex(
     if request.instruction.trim().is_empty() || input.len() > MAX_INPUT {
         return Err(failed());
     }
-    let scratch = tempfile::tempdir().map_err(|_| failed())?;
     // Anonymous files let the CLI read the prompt and write JSONL without pipe
     // backpressure or retaining named copies of either on disk.
     let stdin = temporary_input(&input).map_err(|_| failed())?;
@@ -340,7 +385,7 @@ fn run_codex(
     }
     let mut child = command
         .arg("-")
-        .current_dir(scratch.path())
+        .current_dir(scratch)
         .stdin(Stdio::from(stdin))
         .stdout(Stdio::from(stdout.try_clone().map_err(|_| failed())?))
         .stderr(Stdio::null())

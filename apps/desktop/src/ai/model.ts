@@ -1,4 +1,9 @@
-import { replacementInstruction, type WritingReply, type WritingSender } from "./writing-sender.ts";
+import {
+  materialRequestInstruction,
+  replacementInstruction,
+  type WritingReply,
+  type WritingSender,
+} from "./writing-sender.ts";
 
 export interface ModelConnection {
   readonly address: string;
@@ -49,10 +54,11 @@ export function modelWritingSender(
   connection: ModelTarget,
   options?: ModelOptions,
 ): WritingSender<ModelReply> {
-  return ({ instruction, selectedText, history, responseFormat }) => {
+  return ({ instruction, selectedText, taskContext, history, responseFormat }) => {
     const messages: ModelMessage[] = [];
     if (responseFormat === "replacement")
       messages.push({ role: "system", content: replacementInstruction });
+    if (taskContext) messages.push({ role: "system", content: materialRequestInstruction });
     for (const turn of history ?? []) {
       messages.push(
         { role: "user", content: turn.instruction },
@@ -62,7 +68,9 @@ export function modelWritingSender(
     messages.push({
       role: "user",
       content:
-        selectedText === undefined ? instruction : JSON.stringify({ instruction, selectedText }),
+        selectedText === undefined && taskContext === undefined
+          ? instruction
+          : JSON.stringify({ instruction, selectedText, taskContext }),
     });
     return send(connection, messages, options);
   };

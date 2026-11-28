@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react";
 import { type MessageKey, useT } from "../i18n/index.ts";
 import { useModalDialog } from "../window/useModalDialog.ts";
 import { ConnectionSection } from "./ConnectionSection.tsx";
@@ -47,8 +47,12 @@ export function ExternalAgentSettings({ platform }: { readonly platform: Externa
 
 export function ExternalAgentDialog({
   onClose,
+  renderReply,
   ...props
-}: Props & { readonly onClose: () => void }) {
+}: Props & {
+  readonly onClose: () => void;
+  readonly renderReply: (reply: string, close: () => void) => ReactNode;
+}) {
   const t = useT();
   const title = useId();
   const dialog = useModalDialog(onClose);
@@ -64,12 +68,16 @@ export function ExternalAgentDialog({
           {t("settings.close")}
         </button>
       </div>
-      <ExternalAgentPanel {...props} />
+      <ExternalAgentPanel {...props} renderReply={(reply) => renderReply(reply, dialog.close)} />
     </dialog>
   );
 }
 
-function ExternalAgentPanel({ platform, selection }: Props) {
+function ExternalAgentPanel({
+  platform,
+  selection,
+  renderReply,
+}: Props & { readonly renderReply?: (reply: string) => ReactNode }) {
   const t = useT();
   const [path, setPath] = useState("");
   const [agent, setAgent] = useState<ExternalAgent | null>(null);
@@ -338,11 +346,12 @@ function ExternalAgentPanel({ platform, selection }: Props) {
           </div>
         </fieldset>
       )}
-      {(busy || status || reply) && (
+      {(busy || status || (reply && !renderReply)) && (
         <div role="status" className="whitespace-pre-wrap break-words">
           {busy ? t("agent.working") : status ? t(status) : reply}
         </div>
       )}
+      {!busy && !status && reply && renderReply?.(reply)}
       {error && <p role="alert">{t(error)}</p>}
     </div>
   );

@@ -136,6 +136,8 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     ...(options.directories ?? []),
   ]);
   const appData = new Map(Object.entries(options.appData ?? {}));
+  const taskRoot = "ai/tasks/";
+  const taskRecord = (id: string) => `${taskRoot}${id}/review.json`;
   const trash: string[] = [];
   const dialogResults = [...(options.openDialogResults ?? [])];
   const saveDialogResults = [...(options.saveDialogResults ?? [])];
@@ -259,6 +261,13 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     const restoring: [string, string][] = [];
     const detached = crypto.randomUUID();
     for (const [key, value] of [...appData]) {
+      if (key.startsWith(taskRoot) && key.endsWith("/review.json")) {
+        const task = JSON.parse(value);
+        if (task.path !== null && within(task.path, from) && isFile(task.path)) {
+          appData.set(key, JSON.stringify({ ...task, path: to + task.path.slice(from.length) }));
+        }
+        continue;
+      }
       const match = /^(history:|snapshot:\d+:|annotations:)([\s\S]+)$/.exec(key);
       const path = match?.[2];
       if (!match || !path) continue;
@@ -347,6 +356,34 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       };
     },
     externalAgent: memoryExternalAgent(options.externalAgent),
+    writingTasks: {
+      async list(path) {
+        return [...appData.entries()].flatMap(([key, json]) => {
+          if (!key.startsWith(taskRoot) || !key.endsWith("/review.json")) return [];
+          const task = JSON.parse(json);
+          return task.path === path ? [task] : [];
+        });
+      },
+      async create(task) {
+        const key = taskRecord(task.id);
+        if (appData.has(key)) throw new Error("Writing task already exists");
+        appData.set(key, JSON.stringify(task));
+      },
+      async update(task, expectedUpdatedAt) {
+        const key = taskRecord(task.id);
+        const previous = appData.get(key);
+        if (previous === undefined) throw new Error("Writing task no longer exists");
+        const stored = JSON.parse(previous);
+        if (stored.updatedAt !== expectedUpdatedAt || task.updatedAt <= expectedUpdatedAt) {
+          throw new Error("Writing task changed");
+        }
+        appData.set(key, JSON.stringify({ ...task, path: stored.path ?? task.path }));
+      },
+      async remove(id) {
+        const prefix = `${taskRoot}${id}/`;
+        for (const key of appData.keys()) if (key.startsWith(prefix)) appData.delete(key);
+      },
+    },
     locale: options.locale ?? navigator.language,
     files,
     binaryFiles,

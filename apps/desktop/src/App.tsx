@@ -11,6 +11,9 @@ import {
 import { DraftComposer } from "./ai/DraftComposer.tsx";
 import { ExternalAgentDialog } from "./ai/ExternalAgentPanel.tsx";
 import { inlineCompletionSender } from "./ai/inline-completion.ts";
+import { ReplyExcerpt } from "./ai/ReplyExcerpt.tsx";
+import { captureWritingSelection, type WritingSelection } from "./ai/writing-selection.ts";
+import { checkpointOpenWritingTasks, writingTaskWrites } from "./ai/writing-tasks.ts";
 import { AnnotationDialog, AnnotationPanel } from "./annotations/Annotations.tsx";
 import { createAnnotationStorage } from "./annotations/annotation-storage.ts";
 import { createAutosave } from "./autosave/autosave.ts";
@@ -143,9 +146,15 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   const [writingRequest, setWritingRequest] = useState<{ tabId: number; sequence: number } | null>(
     null,
   );
-  const [agentSelection, setAgentSelection] = useState<{ tabId: number; text: string } | null>(
-    null,
-  );
+  const [writingTasksRequest, setWritingTasksRequest] = useState<{
+    tabId: number;
+    sequence: number;
+  } | null>(null);
+  const [agentSelection, setAgentSelection] = useState<{
+    tabId: number;
+    origin: WritingSelection;
+  } | null>(null);
+  useEffect(() => () => agentSelection?.origin.range.release(), [agentSelection]);
   const [historyPath, setHistoryPath] = useState<string | null>(null);
   const [annotationsOpen, setAnnotationsOpen] = useState(false);
   const [annotationError, setAnnotationError] = useState<{ path: string; reason: string } | null>(
@@ -446,23 +455,26 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
         sequence: (previous?.sequence ?? 0) + 1,
       }));
     },
+    "edit.writingTasks": () => {
+      if (activeId === null) return;
+      setWritingTasksRequest((previous) => ({
+        tabId: activeId,
+        sequence: (previous?.sequence ?? 0) + 1,
+      }));
+    },
     "edit.addAnnotation": addAnnotation,
     "view.annotations": () => {
       if (active) setAnnotationsOpen((open) => !open);
     },
     "edit.askExternalAgent": () => {
       const editor = activeId === null ? undefined : store.editor(activeId);
-      const range = editor?.getSelection();
-      if (activeId === null || !editor || !range || range.anchor === range.head) {
+      const origin = editor && captureWritingSelection(editor);
+      if (activeId === null || !origin) {
         setShellError(t("agent.needSelection"));
         return;
       }
-      const { anchor, head } = range;
       setShellError(null);
-      setAgentSelection({
-        tabId: activeId,
-        text: editor.getText().slice(Math.min(anchor, head), Math.max(anchor, head)),
-      });
+      setAgentSelection({ tabId: activeId, origin });
     },
     "edit.pastePlainText": () => {
       const editor = activeId === null ? undefined : store.editor(activeId);
@@ -537,9 +549,14 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   useEffect(
     () =>
       platform.onCloseRequested(async () => {
+        await checkpointOpenWritingTasks(platform.writingTasks);
         if (!(await store.closeAll())) return false;
         // Closed tabs need no recovery: let their snapshots be removed before the window goes.
-        await Promise.all([recovery.settled(), annotationStorage.settled()]);
+        await Promise.all([
+          recovery.settled(),
+          annotationStorage.settled(),
+          writingTaskWrites(platform.writingTasks),
+        ]);
         return true;
       }),
     [platform, store, recovery, annotationStorage],
@@ -713,9 +730,14 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
                   visible={selected[tab.pane] === tab.id}
                   toolbarPosition={toolbarPositions[tab.pane]}
                   platform={platform}
+                  folder={folder}
                   askWriting={writingRequest?.tabId === tab.id ? writingRequest.sequence : null}
+                  writingTasksRequest={
+                    writingTasksRequest?.tabId === tab.id ? writingTasksRequest.sequence : null
+                  }
                   settingsOpen={settingsOpen}
                   onAskWriting={() => run.current("edit.askAI")}
+                  onWritingTasks={() => run.current("edit.writingTasks")}
                   onOpenSettings={() => run.current("app.settings")}
                   onModeChange={modeChanged}
                   onEditorChange={editorsChanged}
@@ -725,6 +747,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
                     draftTabs.has(tab.id) ? (
                       <DraftComposer
                         platform={platform}
+                        folder={folder}
                         settingsOpen={settingsOpen}
                         canApplyDraft={() => emptyDraftEditor(tab.id) !== null}
                         onDraft={(text) => {
@@ -884,10 +907,19 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
       {agentSelection && (
         <ExternalAgentDialog
           platform={platform.externalAgent}
-          selection={agentSelection.text}
+          selection={agentSelection.origin.text}
+          renderReply={(reply, close) => (
+            <ReplyExcerpt
+              reply={reply}
+              origin={agentSelection.origin}
+              originId={agentSelection.tabId}
+              onUsed={close}
+            />
+          )}
           onClose={() => {
             setAgentSelection(null);
-            if (activeId === agentSelection.tabId) store.editor(activeId)?.focus();
+            const current = store.getState().activeId;
+            if (current !== null) store.editor(current)?.focus();
           }}
         />
       )}

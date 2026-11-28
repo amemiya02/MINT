@@ -70,6 +70,13 @@ const sendTauriModelMessage = createModelSender(async (request, receive) => {
 export function createTauriPlatform(): Platform {
   return {
     locale: navigator.language,
+    writingTasks: {
+      list: (path) => invoke("list_writing_tasks", { path }),
+      create: (task) => invoke("create_writing_task", { task }),
+      update: (task, expectedUpdatedAt) =>
+        invoke("update_writing_task", { task, expectedUpdatedAt }),
+      remove: (id) => invoke("delete_writing_task", { id }),
+    },
     externalAgent: {
       discover: () => invoke("discover_external_agents"),
       saved: () => invoke("saved_external_agents"),
@@ -77,8 +84,8 @@ export function createTauriPlatform(): Platform {
       approve: ({ path, revision }, access) =>
         invoke("approve_external_agent", { path, revision, access }),
       forget: (path) => invoke("forget_external_agent", { path }),
-      send: ({ path, revision }, access, request) =>
-        invoke("send_external_agent", { path, revision, access, request }),
+      send: ({ path, revision }, access, request, taskId) =>
+        invoke("send_external_agent", { path, revision, access, request, taskId }),
     },
     sendModelMessage: sendTauriModelMessage,
     listModelConnections: () => invoke("list_model_connections"),

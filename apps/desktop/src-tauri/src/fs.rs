@@ -31,7 +31,11 @@ pub fn read_text(path: &Path) -> io::Result<String> {
 /// An existing file's permissions are carried over, and a symbolic link is
 /// written through (its target is replaced, the link is kept).
 pub fn write_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
-    let target = resolve_link(path)?;
+    write_atomic_at(&resolve_link(path)?, contents)
+}
+
+/// Replace the directory entry itself, without following a symbolic link.
+pub(crate) fn write_atomic_at(target: &Path, contents: &[u8]) -> io::Result<()> {
     let dir = match target.parent() {
         Some(parent) if !parent.as_os_str().is_empty() => parent,
         _ => Path::new("."),
@@ -42,11 +46,13 @@ pub fn write_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
         .suffix(".tmp")
         .tempfile_in(dir)?;
     temp.write_all(contents)?;
-    if let Ok(metadata) = fs::metadata(&target) {
-        temp.as_file().set_permissions(metadata.permissions())?;
+    if let Ok(metadata) = fs::symlink_metadata(target) {
+        if metadata.is_file() {
+            temp.as_file().set_permissions(metadata.permissions())?;
+        }
     }
     temp.as_file().sync_all()?;
-    temp.persist(&target).map_err(|e| e.error)?;
+    temp.persist(target).map_err(|e| e.error)?;
     sync_dir(dir);
     Ok(())
 }

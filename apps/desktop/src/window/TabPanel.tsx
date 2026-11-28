@@ -28,9 +28,12 @@ export function TabPanel({
   visible,
   toolbarPosition,
   platform,
+  folder,
   askWriting,
+  writingTasksRequest,
   settingsOpen,
   onAskWriting,
+  onWritingTasks,
   onOpenSettings,
   onModeChange,
   onEditorChange,
@@ -46,9 +49,12 @@ export function TabPanel({
   readonly visible: boolean;
   readonly toolbarPosition: ToolbarPosition;
   readonly platform: Platform;
+  readonly folder: string | null;
   readonly askWriting: number | null;
+  readonly writingTasksRequest: number | null;
   readonly settingsOpen: boolean;
   readonly onAskWriting: () => void;
+  readonly onWritingTasks: () => void;
   readonly onOpenSettings: () => void;
   readonly onModeChange: () => void;
   /** The tab's editor was created or destroyed. */
@@ -59,6 +65,7 @@ export function TabPanel({
 }) {
   const store = useTabStore();
   const { id, path } = tab;
+  const activate = useCallback(() => store.activate(id), [store, id]);
   const [preview, setPreview] = useState<DocumentLink | null>(null);
   const panel = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -129,7 +136,7 @@ export function TabPanel({
       aria-labelledby={`tab-${id}`}
       hidden={!visible}
       style={{ gridColumn: tab.pane === "primary" ? 1 : 2, gridRow: 1 }}
-      onFocusCapture={() => {
+      onFocus={() => {
         if (!active) store.activate(id);
       }}
       className="flex min-w-0 min-h-0 h-full flex-col"
@@ -167,11 +174,17 @@ export function TabPanel({
         <WritingAssistant
           editor={editor}
           name={tabName(t, tab)}
+          tabId={id}
+          path={path}
           active={active}
           platform={platform}
+          folder={folder}
           askRequest={askWriting}
+          tasksRequest={writingTasksRequest}
           settingsOpen={settingsOpen}
           onAsk={onAskWriting}
+          onTasks={onWritingTasks}
+          onActivate={activate}
           onSettings={onOpenSettings}
           externalChange={!!tab.external}
           refreshDisk={() => store.refreshDisk(id)}

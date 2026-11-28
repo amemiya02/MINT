@@ -6,7 +6,7 @@ import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer, type ServerResponse } from "node:http";
 import { homedir, tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { after, before, test } from "node:test";
 import { promisify } from "node:util";
 import JSZip from "jszip";
@@ -1118,9 +1118,14 @@ test("only granted Zotero reads reach the local service and the chosen item is s
   }
 });
 
-test("a model receives only the sample or the chosen selection through the native connection", async () => {
+test("a native model receives only the sample or live selection and edits through normal save", async () => {
   const draft = join(dir, "ask-ai-model.md");
   const manuscript = "\uFEFFPrivate notes.  \r\n\r\nSelected sentence.";
+  const liveSelection = "Selected sentence. Author addition.";
+  const edited = manuscript.replace("Selected sentence.", "Short sentence.");
+  const liveManuscript = manuscript.replace("Selected sentence.", liveSelection);
+  const autosave =
+    "//input[@type='checkbox' and @id=//label[normalize-space(.)='Save automatically']/@for]";
   await writeFile(draft, manuscript);
   await restart([draft]);
   const requests: { url?: string; method?: string; authorization?: string; body: unknown }[] = [];
@@ -1179,7 +1184,7 @@ test("a model receives only the sample or the chosen selection through the nativ
     await command("POST", `/session/${session}/element/${found[elementKey]}/value`, { text });
   }
 
-  async function askSelection(instruction: string) {
+  async function askSelection(instruction: string, authorization?: string) {
     await click("Ask AI");
     await waitForView(
       "the saved model to appear in the send row",
@@ -1194,7 +1199,24 @@ test("a model receives only the sample or the chosen selection through the nativ
       args: [],
     });
     await clickPath("//section[@aria-label='Ask AI']//input");
-    await keyActions([...typing(instruction), ...typing(keys.enter)]);
+    await keyActions(typing(instruction));
+    if (authorization) {
+      await waitForView(
+        "the direct edit authorization on the send button",
+        `return [...document.querySelectorAll('section[aria-label="Ask AI"] button[type=submit]')]
+          .some((button) => !button.disabled && button.textContent.trim() === ${JSON.stringify(authorization)});`,
+      );
+    }
+    await keyActions(typing(keys.enter));
+  }
+
+  async function setAutosave(enabled: boolean) {
+    const checked = await command<boolean>("POST", `/session/${session}/execute/sync`, {
+      script: `return [...document.querySelectorAll('dialog[open] label')]
+        .find((label) => label.textContent.trim() === 'Save automatically')?.control.checked;`,
+      args: [],
+    });
+    if (checked !== enabled) await clickPath(autosave);
   }
 
   try {
@@ -1266,25 +1288,46 @@ test("a model receives only the sample or the chosen selection through the nativ
     await fill("API key", secret);
     await click("Use for this launch");
     await shows("Selection fixture");
+    await setAutosave(false);
     await click("Close");
 
     await waitForView(
       "the draft to regain focus",
       "return document.activeElement?.matches('.cm-content');",
     );
-    await keyActions([...chord(keys.control, keys.end), ...chord(keys.shift, keys.home)]);
-    const instruction = "Shorten this sentence, apply directly";
-    await askSelection(instruction);
+    await click("Open ask-ai-model.md in other pane", "aria-label");
     await waitForView(
-      "the authorized replacement in the active editor",
-      `return document.activeElement?.matches(".cm-content") &&
-        document.activeElement.textContent.includes("Short sentence.");`,
+      "two views of the manuscript with the reference pane focused",
+      "return document.querySelectorAll('.cm-content').length === 2 && document.querySelectorAll('.cm-content')[1] === document.activeElement;",
     );
+    await keyActions([
+      ...chord(keys.control, keys.end),
+      ...typing(" Author addition."),
+      ...chord(keys.shift, keys.home),
+    ]);
+    const instruction = "Shorten this sentence, apply directly";
+    const authorization = `Apply directly · Current selection · Selection fixture · http://127.0.0.1:${address.port}/fixture/v1/chat/completions`;
+    await askSelection(instruction, authorization);
+    await waitForView(
+      "the authorized replacement in both panes with an active writing cursor",
+      `const panes = [...document.querySelectorAll('.cm-content')];
+        return panes.length === 2 && panes[1] === document.activeElement &&
+          window.getSelection()?.isCollapsed &&
+          panes.every((pane) => pane.textContent.includes('Short sentence.'));`,
+    );
+    assert.deepEqual(await readFile(draft), Buffer.from(manuscript));
+    await click("View changes");
+    await waitForView(
+      "the applied change's before and after text",
+      `const review = document.querySelector('aside[aria-label="Writing Assistant"]');
+        return review?.innerText.includes(${JSON.stringify(liveSelection)}) &&
+          review.innerText.includes('Short sentence.');`,
+    );
+    await clickPath("//aside[@aria-label='Writing Assistant']//button[normalize-space(.)='Close']");
+    await nativeShortcut("ctrl+s");
     await until(
-      "the edited bytes to be autosaved",
-      async () =>
-        (await readFile(draft, "utf8")) ===
-          manuscript.replace("Selected sentence.", "Short sentence.") || null,
+      "the edited bytes to be saved manually",
+      async () => (await readFile(draft)).equals(Buffer.from(edited)) || null,
     ).catch(explain);
     assert.equal(requests.length, 2);
     const sent = requests[1];
@@ -1306,15 +1349,37 @@ test("a model receives only the sample or the chosen selection through the nativ
     assert.ok(selectedMessage);
     assert.deepEqual(JSON.parse(selectedMessage.content), {
       instruction,
-      selectedText: "Selected sentence.",
+      selectedText: liveSelection,
     });
     await keyActions(chord(keys.control, "z"));
+    await nativeShortcut("ctrl+s");
     await until(
-      "one undo to restore the original bytes",
-      async () => (await readFile(draft, "utf8")) === manuscript || null,
+      "one undo to restore the precise unsaved baseline",
+      async () => (await readFile(draft)).equals(Buffer.from(liveManuscript)) || null,
     ).catch(explain);
 
+    await click("Close reference pane", "aria-label");
+    await openSettings();
+    await setAutosave(true);
+    await click("Close");
+    await waitForView(
+      "the remaining view to regain focus",
+      "return document.querySelectorAll('.cm-content').length === 1 && document.activeElement?.matches('.cm-content');",
+    );
+    await keyActions([...chord(keys.control, keys.end), ...chord(keys.shift, keys.home)]);
+    await askSelection(instruction, authorization);
+    await until(
+      "the direct edit to autosave the exact native file",
+      async () => (await readFile(draft)).equals(Buffer.from(edited)) || null,
+    ).catch(explain);
+    assert.deepEqual(requests[2], sent);
+    await keyActions(chord(keys.control, "z"));
+    await until(
+      "one undo to autosave the selected baseline",
+      async () => (await readFile(draft)).equals(Buffer.from(liveManuscript)) || null,
+    ).catch(explain);
     await clickPath("//section[@aria-label='Ask AI']//button[normalize-space(.)='Close']");
+
     const reviewSource = "**Opening line.**\r\n\r\nKeep this.  \n\nClosing line.";
     await writeFile(draft, `\uFEFF${reviewSource}`);
     await waitForView(
@@ -1327,9 +1392,9 @@ test("a model receives only the sample or the chosen selection through the nativ
       "the native preview request",
       async () => pendingPreview ?? null,
     );
-    assert.equal(requests.length, 3);
-    assert.equal(requests[2]?.authorization, `Bearer ${secret}`);
-    assert.deepEqual(requests[2]?.body, {
+    assert.equal(requests.length, 4);
+    assert.equal(requests[3]?.authorization, `Bearer ${secret}`);
+    assert.deepEqual(requests[3]?.body, {
       model: "native-fixture",
       stream: false,
       messages: [
@@ -1386,6 +1451,159 @@ test("a model receives only the sample or the chosen selection through the nativ
   } finally {
     endpoint.closeAllConnections();
     await new Promise<void>((resolve) => endpoint.close(() => resolve()));
+  }
+});
+
+test("a saved writing review resumes after a native restart without contacting its model", async () => {
+  const draft = join(dir, "resume-writing-review.md");
+  const renamedDraft = join(dir, "renamed-writing-review.md");
+  const original = "First draft.\n\nSecond draft.\n\nThird draft.\n\nLast draft.";
+  const replacement = "First edit.\n\nSecond edit.\n\nThird edit.\n\nLast edit.";
+  const instruction = "Review all four passages.";
+  const excerpt = "The Tuesday field notes support the first passage.";
+  const requests: { messages: { content: string }[] }[] = [];
+  let connectionId: string | undefined;
+  await writeFile(draft, original);
+  const endpoint = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(chunk);
+    requests.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+    response.writeHead(200, { "Content-Type": "application/json" }).end(
+      JSON.stringify({
+        choices: [
+          {
+            message: { content: `<replacement>${replacement}</replacement>` },
+            finish_reason: "stop",
+          },
+        ],
+      }),
+    );
+  });
+  await new Promise<void>((resolve, reject) => {
+    endpoint.once("error", reject);
+    endpoint.listen(0, "127.0.0.1", resolve);
+  });
+
+  try {
+    const address = endpoint.address();
+    assert.ok(address && typeof address !== "string");
+    await restart([draft]);
+    connectionId = (
+      await invokeNative<{ id: string }>("save_model_connection", {
+        connection: {
+          name: "Review recovery fixture",
+          address: `http://127.0.0.1:${address.port}/v1`,
+          model: "native-review-recovery",
+          apiKey: "",
+          lifetime: "persistent",
+        },
+      })
+    ).id;
+    await waitForView(
+      "the review manuscript to open",
+      "return document.activeElement?.matches('.cm-content');",
+    );
+    await keyActions(chord(keys.control, "a"));
+    await click("Ask AI");
+    await waitForView(
+      "the recovery model to be selected",
+      `
+      const option = [...document.querySelectorAll('section[aria-label="Ask AI"] select option')]
+        .find(item => item.label.startsWith('Review recovery fixture'));
+      if (!option) return false;
+      option.parentElement.value = option.value;
+      option.parentElement.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    `,
+    );
+    await addPastedWritingMaterial(excerpt);
+    await clickPath(
+      "//section[@aria-label='Ask AI']//label[normalize-space(.)='Instruction']/input",
+    );
+    await keyActions([...typing(instruction), ...typing(keys.enter)]);
+    await clickPath(
+      "//fieldset[@aria-label='Proposed edit 1 of 4']//button[normalize-space(.)='Apply proposed edit']",
+    );
+    await clickPath(
+      "//fieldset[@aria-label='Proposed edit 2 of 4']//button[normalize-space(.)='Dismiss proposed edit']",
+    );
+    assert.deepEqual(JSON.parse(requests[0]?.messages.at(-1)?.content ?? ""), {
+      instruction,
+      selectedText: original,
+      taskContext: { materials: [{ name: "Pasted text", text: excerpt }] },
+    });
+    await waitForView(
+      "the manuscript caret to regain focus",
+      `
+      const editor = document.querySelector('.cm-content');
+      editor?.focus();
+      return editor === document.activeElement;
+    `,
+    );
+    await keyActions(chord(keys.control, keys.end));
+    await clickPath("//section[@aria-label='Ask AI']//button[normalize-space(.)='Close']");
+    await nativeShortcut("ctrl+s");
+    const accepted = original.replace("First draft.", "First edit.");
+    await until(
+      "the accepted text to reach disk",
+      async () => (await readFile(draft, "utf8")) === accepted || null,
+    ).catch(explain);
+    const history = await until("the accepted document history to be recorded", async () => {
+      const versions = await invokeNative<number[]>("list_versions", { path: draft });
+      return versions.length ? versions : null;
+    }).catch(explain);
+    const [review] = await invokeNative<unknown[]>("list_writing_tasks", { path: draft });
+    assert.ok(review);
+    await assert.rejects(
+      invokeNative("update_writing_task", { task: review, expectedUpdatedAt: 0 }),
+      /writing task changed/,
+    );
+    await invokeNative("rename_path", { from: draft, to: renamedDraft });
+    await stopSession();
+    const changed = accepted.replace("Third draft.", "External third.");
+    await writeFile(renamedDraft, changed);
+    await restart([renamedDraft]);
+    await click("Writing tasks");
+    await click(instruction);
+    await waitForView(
+      "the saved decisions and only the changed proposal marked for comparison",
+      `
+      const pane = document.querySelector('aside[aria-label="Writing Assistant"]');
+      const field = index => pane?.querySelector('fieldset[aria-label="Proposed edit ' + index + ' of 4"]');
+      const button = (index, label) => [...field(index)?.querySelectorAll('button') ?? []].some(el => el.textContent.trim() === label);
+      return field(1)?.innerText.includes('Applied to the selected text.') &&
+        field(2)?.innerText.includes('Proposed edit dismissed.') &&
+        field(3)?.innerText.includes('External third.') && button(3, 'Apply to compared text') &&
+        button(4, 'Apply proposed edit');
+    `,
+    );
+    await clickPath(
+      "//aside[@aria-label='Writing Assistant']//summary[normalize-space(.)='Pasted text']",
+    );
+    await shows(excerpt);
+    assert.equal(requests.length, 1);
+    await clickPath("//aside[@aria-label='Writing Assistant']//button[normalize-space(.)='Close']");
+    await waitForView(
+      "the saved reading position",
+      `
+      const node = window.getSelection()?.focusNode;
+      const line = (node instanceof Element ? node : node?.parentElement)?.closest('.cm-line');
+      return line?.textContent === 'Last draft.';
+    `,
+    );
+    assert.equal(await readFile(renamedDraft, "utf8"), changed);
+    assert.deepEqual(
+      await invokeNative<number[]>("list_versions", { path: renamedDraft }),
+      history,
+    );
+  } finally {
+    try {
+      if (connectionId && session)
+        await invokeNative("disconnect_model_connection", { id: connectionId });
+    } finally {
+      endpoint.closeAllConnections();
+      await new Promise<void>((resolve) => endpoint.close(() => resolve()));
+    }
   }
 });
 
@@ -1596,10 +1814,21 @@ test("automatic proofreading sends only the active passage and undo restores the
 
 test("a native model reply stays editable and untitled until the author chooses a Save As path", async () => {
   const folder = await mkdtemp(join(homedir(), "mint-ai-draft-"));
+  const sources = join(folder, "sources");
+  const source = join(sources, "field-log.md");
+  const excerpt = "The north ridge reopened on Tuesday.";
+  const unapproved = "Private crew contact details.";
+  await mkdir(sources);
+  await writeFile(source, `${unapproved}\n${excerpt}\n`);
   const path = join(folder, "field-notes.md");
   const instruction = "Draft an introduction for the field notes.";
   const generated = "Field notes from the ridge.";
-  const requests: unknown[] = [];
+  const requests: {
+    path: string | undefined;
+    method: string | undefined;
+    authorization: string | undefined;
+    body: { model: string; stream: boolean; messages: { role: string; content: string }[] };
+  }[] = [];
   const endpoint = createServer(async (request, response) => {
     let input = "";
     for await (const chunk of request) input += chunk;
@@ -1610,9 +1839,17 @@ test("a native model reply stays editable and untitled until the author chooses 
       body: JSON.parse(input),
     });
     response.writeHead(200, { "Content-Type": "application/json" });
-    response.end(
-      JSON.stringify({ choices: [{ message: { content: generated }, finish_reason: "stop" }] }),
-    );
+    const content =
+      requests.length === 1
+        ? JSON.stringify({
+            requestMaterial: {
+              name: "Trail log",
+              purpose: "Confirm when the ridge reopened.",
+              query: "north ridge reopened",
+            },
+          })
+        : generated;
+    response.end(JSON.stringify({ choices: [{ message: { content }, finish_reason: "stop" }] }));
   });
 
   const draftMatches = (text: string) =>
@@ -1631,7 +1868,7 @@ test("a native model reply stays editable and untitled until the author chooses 
     });
     const address = endpoint.address();
     assert.ok(address && typeof address !== "string");
-    await restart([document]);
+    await restart([sources, document]);
     await until("the original manuscript to open", () =>
       command<boolean>("POST", `/session/${session}/execute/sync`, {
         script: "return !!document.querySelector('.cm-content')",
@@ -1650,27 +1887,56 @@ test("a native model reply stays editable and untitled until the author chooses 
       await clickPath(`//form//label[normalize-space(.)='${label}']/input`);
       await keyActions(typing(value));
     }
+    await addPastedWritingMaterial("Field notes are for the visitor bulletin.");
+    await clickPath(
+      "//form//label[normalize-space(.)='Allow searching the current working folder']/input",
+    );
     await clickPath("//form//button[not(@disabled) and normalize-space(.)='Generate draft']");
+    await waitForView(
+      "the model's purpose and the actual native folder excerpt",
+      `const text = document.querySelector('fieldset[aria-label="Additional material requested"]')?.innerText;
+        return text?.includes('Confirm when the ridge reopened.') &&
+          text.includes('The north ridge reopened on Tuesday.') &&
+          !text.includes('Private crew contact details.');`,
+    );
+    assert.equal(requests.length, 1, "the excerpt waits for authorization");
+    await clickPath(
+      "//form//label[.//input[@type='radio' and @aria-label='field-log.md · line 2']]",
+    );
+    await clickPath("//form//button[not(@disabled) and normalize-space(.)='Allow once']");
     await until("the generated Markdown in the untitled editor", () =>
       draftMatches(generated),
     ).catch(explain);
-    assert.deepEqual(requests, [
-      {
-        path: "/v1/chat/completions",
-        method: "POST",
-        authorization: "Bearer draft-fixture-secret",
-        body: {
-          model: "native-draft-fixture",
-          messages: [
-            {
-              role: "user",
-              content: `Write a Markdown draft following this instruction. Return only the draft text, without a surrounding code fence.\n\n${instruction}`,
-            },
-          ],
-          stream: false,
-        },
-      },
-    ]);
+    assert.equal(requests.length, 2);
+    const initialContext = {
+      materials: [{ name: "Pasted text", text: "Field notes are for the visitor bulletin." }],
+      folderSearch: true,
+    };
+    for (const [index, request] of requests.entries()) {
+      assert.equal(request.path, "/v1/chat/completions");
+      assert.equal(request.method, "POST");
+      assert.equal(request.authorization, "Bearer draft-fixture-secret");
+      assert.equal(request.body.model, "native-draft-fixture");
+      assert.equal(request.body.stream, false);
+      assert.deepEqual(JSON.parse(request.body.messages.at(-1)?.content ?? ""), {
+        instruction: `Write a Markdown draft following this instruction. Return only the draft text, without a surrounding code fence.\n\n${instruction}`,
+        taskContext:
+          index === 0
+            ? initialContext
+            : {
+                ...initialContext,
+                materialDecisions: [
+                  {
+                    name: "Trail log",
+                    purpose: "Confirm when the ridge reopened.",
+                    outcome: "allowed",
+                    material: { name: "field-log.md · line 2", text: excerpt },
+                  },
+                ],
+              },
+      });
+    }
+    assert.equal(await readFile(source, "utf8"), `${unapproved}\n${excerpt}\n`);
 
     async function saveWith(action: "Cancel" | "Save") {
       await Promise.all([
@@ -1684,7 +1950,7 @@ test("a native model reply stays editable and untitled until the author chooses 
     await until("the draft to remain after the save is cancelled", () =>
       draftMatches(generated),
     ).catch(explain);
-    assert.deepEqual(await readdir(folder), []);
+    assert.deepEqual(await readdir(folder), ["sources"]);
     await clickPath("//*[@role='tabpanel' and not(@hidden)]//*[@contenteditable='true']");
     await keyActions([...typing(keys.end), ...typing(" Author's addition.")]);
     const edited = `${generated} Author's addition.`;
@@ -1697,6 +1963,13 @@ test("a native model reply stays editable and untitled until the author chooses 
     await rm(folder, { recursive: true, force: true });
   }
 });
+
+async function addPastedWritingMaterial(text: string) {
+  await clickPath("//form//summary[normalize-space(.)='Add files or paste text']");
+  await clickPath("//form//label[normalize-space(.)='Pasted material']/textarea");
+  await keyActions(typing(text));
+  await clickPath("//form//button[normalize-space(.)='Add pasted text']");
+}
 
 const credentialPolicy = process.env.MINT_SMOKE_CREDENTIAL_POLICY;
 test("model keys survive a restart only when remembered and disconnect removes the OS credential", {
@@ -1991,11 +2264,12 @@ test("external Agent consent gates a real CLI process and keeps the manuscript o
 const fs = require("node:fs");
 const args = process.argv.slice(2);
 const readOnly = args.includes("--sandbox") && args[args.indexOf("--sandbox") + 1] === "read-only";
-const prompt = fs.readFileSync(0, "utf8");
+const prompt = JSON.parse(fs.readFileSync(0, "utf8"));
 const readable = fs.readFileSync(${JSON.stringify(draft)}, "utf8");
 fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify({
-  args, prompt: JSON.parse(prompt), cwd: process.cwd(), entries: fs.readdirSync(process.cwd()), readable,
+  args, prompt, cwd: process.cwd(), entries: fs.readdirSync(process.cwd()), readable,
 }) + "\\n");
+if (prompt.instruction === "Is the selected line clear?") fs.writeFileSync("review-copy.md", prompt.selectedText);
 if (!readOnly) fs.writeFileSync(${JSON.stringify(writeTarget)}, "configured access ran");
 console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "Fixture Agent reply." } }));
 console.log(JSON.stringify({ type: "turn.completed" }));
@@ -2065,7 +2339,7 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   await keyActions([...typing("Is the selected line clear?"), ...typing(keys.enter)]);
   await waitForView(
     "the inline reply from the CLI",
-    `return document.querySelector('section[aria-label="Ask AI"]')?.innerText.includes('Fixture Agent reply.') &&
+    `return document.querySelector('section[aria-label="Ask AI"] textarea')?.value === 'Fixture Agent reply.' &&
       !document.querySelector('aside[aria-label="Writing Assistant"]');`,
   );
   await click("Continue in sidebar");
@@ -2080,8 +2354,8 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   await keyActions([...typing("What would help?"), ...typing(keys.enter)]);
   await waitForView(
     "both CLI replies in the sidebar",
-    `return [...document.querySelectorAll('aside[aria-label="Writing Assistant"] article')]
-      .filter((article) => article.innerText.includes('Fixture Agent reply.')).length === 2;`,
+    `return [...document.querySelectorAll('aside[aria-label="Writing Assistant"] textarea')]
+      .filter((reply) => reply.value === 'Fixture Agent reply.').length === 2;`,
   );
   await click("Go to original selection");
   await waitForView(
@@ -2104,10 +2378,52 @@ console.log(JSON.stringify({ type: "turn.completed" }));
     ],
   );
   assert.ok(selectedCalls.every((entry) => entry.entries.length === 0));
+  const taskDir = dirname(selectedCalls[0].cwd);
+  assert.ok(process.env.XDG_DATA_HOME);
+  assert.equal(
+    dirname(taskDir),
+    join(process.env.XDG_DATA_HOME, "io.github.amemiya02.mint", "ai", "tasks"),
+  );
+  assert.equal(dirname(selectedCalls[1].cwd), taskDir);
+  assert.match(await readFile(join(taskDir, "review.json"), "utf8"), /Is the selected line clear/);
+  for (const { cwd } of selectedCalls) await assert.rejects(readdir(cwd), { code: "ENOENT" });
+  // Exercise deletion with the kind of scratch directory left by an interrupted native run.
+  const abandonedCopy = join(taskDir, ".agent-interrupted");
+  await mkdir(abandonedCopy);
+  await writeFile(join(abandonedCopy, "draft-copy.md"), initial);
+  await symlink(draft, join(abandonedCopy, "manuscript-link.md"));
   assert.ok(
     selectedCalls.every((entry) => entry.args[entry.args.indexOf("--sandbox") + 1] === "read-only"),
   );
   assert.equal(await readFile(draft, "utf8"), initial);
+
+  await command("POST", `/session/${session}/execute/sync`, {
+    script: `const reply = document.querySelector('aside[aria-label="Writing Assistant"] textarea');
+      reply.focus();
+      reply.setSelectionRange("Fixture ".length, "Fixture Agent".length);`,
+    args: [],
+  });
+  await clickPath(
+    "//aside[@aria-label='Writing Assistant']//button[not(@disabled) and normalize-space(.)='Replace original selection in draft.md']",
+  );
+  await waitForView(
+    "the selected part of the CLI reply in the editor",
+    `return document.activeElement?.matches(".cm-content") &&
+      document.activeElement.lastElementChild?.textContent === "Agent";`,
+  );
+  await nativeShortcut("ctrl+s");
+  await until(
+    "the selected reply excerpt on disk",
+    async () =>
+      (await readFile(draft, "utf8")) === initial.replace("On-disk sentence.", "Agent") || null,
+  ).catch(explain);
+  await keyActions(chord(keys.control, "z"));
+  await nativeShortcut("ctrl+s");
+  await until(
+    "one undo to restore the manuscript bytes",
+    async () => (await readFile(draft, "utf8")) === initial || null,
+  ).catch(explain);
+
   await clickPath("//aside[@aria-label='Writing Assistant']//button[normalize-space(.)='Close']");
   await openSettings();
   await clickSettingsButton("External Agents");
@@ -2139,9 +2455,30 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   assert.equal(await readFile(writeTarget, "utf8"), "configured access ran");
   assert.equal(await readFile(draft, "utf8"), initial);
 
-  // Reopening Settings after an actual app restart retains the connection and the granted scope.
+  // Reopening the task after a native restart makes no CLI call. Deleting it clears its copies.
   await clickSettingsButton("Close");
+  const history = await invokeNative<number[]>("list_versions", { path: draft });
+  assert.ok(history.length);
   await restart([draft]);
+  await click("Writing tasks");
+  await click("Is the selected line clear?");
+  await waitForView(
+    "both saved CLI replies without another launch",
+    `return [...document.querySelectorAll('aside[aria-label="Writing Assistant"] textarea')]
+      .filter((reply) => reply.value === 'Fixture Agent reply.').length === 2;`,
+  );
+  assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, 4);
+  await clickPath(
+    "//aside[@aria-label='Writing Assistant']//button[normalize-space(.)='Writing tasks']",
+  );
+  await clickPath("//button[@aria-label='Delete Is the selected line clear?']");
+  await click("Delete task");
+  await shows("No saved writing tasks for this document.");
+  await assert.rejects(readdir(taskDir), { code: "ENOENT" });
+  assert.equal(await readFile(draft, "utf8"), initial);
+  assert.deepEqual(await invokeNative<number[]>("list_versions", { path: draft }), history);
+  await clickPath("//dialog[@aria-label='Writing tasks']//button[normalize-space(.)='Close']");
+  // The Agent connection and the granted scope are still available.
   await openSettings();
   await clickSettingsButton("External Agents");
   await shows(executable);
@@ -2165,6 +2502,7 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   ).catch(explain);
   await clickPath("//label[normalize-space(.)='Drafting instruction']/input");
   await keyActions(typing("Draft one paragraph about the ridge."));
+  await addPastedWritingMaterial("A named detail for the Agent.");
   await clickPath("//button[not(@disabled) and normalize-space(.)='Generate draft']");
   await until("the completed Agent reply in the draft editor", () =>
     command<boolean>("POST", `/session/${session}/execute/sync`, {
@@ -2174,9 +2512,14 @@ console.log(JSON.stringify({ type: "turn.completed" }));
     }).then((ready) => ready || null),
   ).catch(explain);
   const draftCall = JSON.parse((await readFile(calls, "utf8")).trim().split("\n").at(-1) ?? "");
-  assert.deepEqual(draftCall.prompt, {
-    instruction:
-      "Write a Markdown draft following this instruction. Return only the draft text, without a surrounding code fence.\n\nDraft one paragraph about the ridge.",
+  const { instruction: agentInstruction, ...agentContext } = draftCall.prompt;
+  assert.match(
+    agentInstruction,
+    /^Write a Markdown draft[\s\S]+Draft one paragraph about the ridge\./,
+  );
+  assert.match(agentInstruction, /requestMaterial/);
+  assert.deepEqual(agentContext, {
+    taskContext: { materials: [{ name: "Pasted text", text: "A named detail for the Agent." }] },
   });
   assert.deepEqual(draftCall.entries, []);
   assert.ok(!draftCall.args.includes("--sandbox"));

@@ -1,5 +1,6 @@
 import type { ExternalAgentPlatform } from "../ai/external-agent.ts";
 import type { NewModelConnection, SavedModelConnection, SendModelMessage } from "../ai/model.ts";
+import type { WritingTasksPlatform } from "../ai/writing-tasks.ts";
 import type { PrintJob } from "../print/protocol.ts";
 
 export type StoredAnnotations = Readonly<Record<string, unknown>>;
@@ -13,6 +14,7 @@ export type StoredAnnotations = Readonly<Record<string, unknown>>;
  */
 export interface Platform {
   readonly externalAgent: ExternalAgentPlatform;
+  readonly writingTasks: WritingTasksPlatform;
   readonly sendModelMessage: SendModelMessage;
   listModelConnections(): Promise<readonly SavedModelConnection[]>;
   saveModelConnection(connection: NewModelConnection): Promise<SavedModelConnection>;
