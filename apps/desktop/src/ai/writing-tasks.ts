@@ -2,7 +2,7 @@ import diffSequence from "@jest/diff-sequences";
 import { compareLines, rawLines } from "../tabs/line-diff.ts";
 import type { TaskContext, WritingTurn } from "./writing-sender.ts";
 
-export type EditStatus = "preview" | "applied" | "discarded" | "reverted";
+export type EditStatus = "preview" | "applied" | "discarded" | "reverted" | "kept";
 
 export interface ReviewRange {
   readonly from: number;

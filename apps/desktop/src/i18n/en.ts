@@ -29,10 +29,13 @@ export const en = {
   "writing.edit.summary": "{applied} edits applied · {pending} to review",
   "writing.edit.noneApplied": "No direct edits remain applied.",
   "writing.edit.undoDirect": "Undo direct edits",
+  "writing.edit.revertAll": "Revert all task edits",
   "writing.edit.revert": "Revert this edit",
   "writing.edit.revertCompared": "Revert to selected text",
   "writing.edit.revertConflict": "The draft has changed since this edit. Compare before reverting.",
   "writing.edit.reverted": "Edit reverted.",
+  "writing.edit.keepCurrent": "Keep current text",
+  "writing.edit.kept": "Kept the current text.",
   "writing.edit.discarded": "Proposed edit dismissed.",
   "writing.edit.conflict":
     "The draft changed after you selected this text. The proposed edit was kept for comparison.",

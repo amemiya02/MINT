@@ -1588,10 +1588,23 @@ test("a saved writing review resumes after a native restart without contacting i
       await invokeNative<number[]>("list_versions", { path: renamedDraft }),
       history,
     );
+    const overlapping = changed.replace("First edit.", "Author's first edit.");
+    await writeFile(renamedDraft, overlapping);
+    await waitForView(
+      "the later author edit to load from disk",
+      `return document.querySelector('.cm-content')?.textContent.includes("Author's first edit.");`,
+    );
+    await click("Open renamed-writing-review.md in other pane", "aria-label");
     await click("Writing tasks");
     await click(instruction);
     const first = "//fieldset[@aria-label='Proposed edit 1 of 4']";
-    await clickPath(`${first}//button[normalize-space(.)='Revert this edit']`);
+    await clickPath(`${first}//button[normalize-space(.)='Revert to selected text']`);
+    await waitForView(
+      "both native panes to show the chosen reversion and preserve the external edit",
+      `const panes = [...document.querySelectorAll('.cm-content')];
+      return panes.length === 2 && panes.every(pane =>
+        pane.textContent.includes('First draft.') && pane.textContent.includes('External third.'));`,
+    );
     await clickPath("//aside[@aria-label='Writing Assistant']//button[normalize-space(.)='Close']");
     await nativeShortcut("ctrl+s");
     await until(
