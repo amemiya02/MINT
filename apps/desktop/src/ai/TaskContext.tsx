@@ -1,10 +1,16 @@
 import { type ClipboardEvent, type DragEvent, useRef, useState } from "react";
 import { useT } from "../i18n/index.ts";
 import type { Platform } from "../platform/platform.ts";
-import type { NamedMaterial } from "./writing-sender.ts";
-
-const materialLimit = 64 * 1024;
-const encoder = new TextEncoder();
+import { materialLabel } from "./material-display.ts";
+import {
+  type MaterialSource,
+  materialTextLimit,
+  rangedSource,
+  usableMaterialText,
+} from "./material-source.ts";
+import { MaterialRangeEditor } from "./MaterialRangeEditor.tsx";
+import { type VisionCheck, VisionControl } from "./ModelVision.tsx";
+import { hasTaskImages, type NamedMaterial } from "./writing-sender.ts";
 const previewClass =
   "max-h-28 overflow-auto whitespace-pre-wrap wrap-anywhere rounded bg-(--mint-hover) p-2";
 const buttonClass =
@@ -15,57 +21,81 @@ export interface MaterialEntry {
   readonly material: NamedMaterial;
 }
 
-function checkedMaterial(name: string, text: string): NamedMaterial {
-  // Only accept UTF-8 text with ordinary whitespace, and refuse oversize input without truncating.
-  if (encoder.encode(text).length > materialLimit || !text.trim() || /[^\P{Cc}\t\n\r]/u.test(text))
-    throw new Error("invalidMaterial");
-  return { name, text };
+interface RangeEntry {
+  readonly id: number;
+  readonly source: MaterialSource;
+  readonly selected?: NamedMaterial;
+  readonly editing: boolean;
 }
 
 export function useNamedMaterials() {
   const [entries, setEntries] = useState<readonly MaterialEntry[]>([]);
+  const [ranges, setRanges] = useState<readonly RangeEntry[]>([]);
   const nextId = useRef(0);
   const [loading, setLoading] = useState(0);
   const [error, setError] = useState(false);
-  function add(materials: readonly NamedMaterial[]) {
-    const added = materials.map((material) => ({ id: nextId.current++, material }));
-    setEntries((previous) => [...previous, ...added]);
-  }
+  const confirmed = [
+    ...entries,
+    ...ranges.flatMap(({ id, editing, selected }) => !editing && selected ? [{ id, material: selected }] : []),
+  ].sort((first, second) => Number(first.id) - Number(second.id));
+  const materials = confirmed.map(({ material }) => material);
+  const pending = ranges.filter(({ editing }) => editing);
 
   return {
-    entries,
-    materials: entries.map(({ material }) => material),
+    entries: confirmed,
+    materials,
+    pending,
+    hasRanges: ranges.length > 0,
+    hasImages: hasTaskImages({ materials }),
     loading: loading > 0,
+    unconfirmed: pending.length > 0,
     error,
+    isRange(id: MaterialEntry["id"]) {
+      return ranges.some((range) => range.id === id);
+    },
+    edit(id: MaterialEntry["id"]) {
+      setRanges((previous) => previous.map((range) => range.id === id ? { ...range, editing: true } : range));
+    },
+    accept(id: number, material: NamedMaterial) {
+      setRanges((previous) => previous.map((range) => range.id === id ? { ...range, editing: false, selected: material } : range));
+    },
     remove(id: MaterialEntry["id"]) {
       setEntries((previous) => previous.filter((entry) => entry.id !== id));
+      setRanges((previous) => previous.filter((entry) => entry.id !== id));
     },
     paste(name: string, text: string) {
-      try {
-        add([checkedMaterial(name, text)]);
-        setError(false);
-        return true;
-      } catch {
-        setError(true);
-        return false;
+      const valid = usableMaterialText(text);
+      if (valid) {
+        const entry = { id: nextId.current++, material: { name, text } };
+        setEntries((previous) => [...previous, entry]);
       }
+      setError(!valid);
+      return valid;
     },
     async read(pick: () => Promise<readonly File[]>) {
       setLoading((count) => count + 1);
       setError(false);
       try {
-        const files = await pick();
-        const added = await Promise.allSettled(
-          files.map(async (file) => {
-            if (file.size > materialLimit) throw new Error("invalidMaterial");
-            const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
-              await file.arrayBuffer(),
-            );
-            return checkedMaterial(file.name, text);
+        const files = (await pick()).map((file) => ({ id: nextId.current++, file }));
+        const parsed = await Promise.allSettled(
+          files.map(async ({ id, file }): Promise<MaterialEntry | RangeEntry> => {
+            const source = rangedSource(file);
+            if (source && file.size <= 32 * 1024 * 1024) return { id, source, editing: true };
+            if (file.size > materialTextLimit || source) throw new Error("invalidMaterial");
+            const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(await file.arrayBuffer());
+            if (!usableMaterialText(text)) throw new Error("invalidMaterial");
+            return { id, material: { name: file.name, text } };
           }),
         );
-        add(added.flatMap((result) => (result.status === "fulfilled" ? [result.value] : [])));
-        if (added.some((result) => result.status === "rejected")) setError(true);
+        const added: MaterialEntry[] = [];
+        const sources: RangeEntry[] = [];
+        for (const result of parsed) {
+          if (result.status === "rejected") setError(true);
+          else if ("source" in result.value) sources.push(result.value);
+          else added.push(result.value);
+        }
+        if (added.length) setEntries((previous) => [...previous, ...added]);
+        if (sources.length) setRanges((previous) => [...previous, ...sources]);
       } catch {
         setError(true);
       } finally {
@@ -75,10 +105,20 @@ export function useNamedMaterials() {
   };
 }
 
+export function MaterialPreview({ material }: { readonly material: NamedMaterial }) {
+  const t = useT();
+  return material.image ? (
+    <img className="max-h-36 max-w-full object-contain" src={material.image} alt={materialLabel(material, t)} />
+  ) : (
+    <pre className={previewClass}>{material.text}</pre>
+  );
+}
+
 export function TaskContextChecklist({
   platform,
   named,
   recipient,
+  vision,
   selection,
   draft,
   emptyDraft,
@@ -90,6 +130,7 @@ export function TaskContextChecklist({
   readonly platform: Platform;
   readonly named: ReturnType<typeof useNamedMaterials>;
   readonly recipient?: string;
+  readonly vision?: VisionCheck;
   readonly selection?: string;
   readonly draft?: NamedMaterial;
   readonly emptyDraft?: boolean;
@@ -146,20 +187,27 @@ export function TaskContextChecklist({
       </dl>
       {named.entries.length > 0 && (
         <ul className="space-y-1">
-          {named.entries.map(({ id, material: { name, text } }) => (
+          {named.entries.map(({ id, material }) => (
             <li key={id} className="flex items-start justify-between gap-2">
               <details className="min-w-0 flex-1">
-                <summary className="cursor-pointer wrap-anywhere">{name}</summary>
-                <pre className={previewClass}>{text}</pre>
+                <summary className="cursor-pointer wrap-anywhere">{materialLabel(material, t)}</summary>
+                <MaterialPreview material={material} />
               </details>
-              <button type="button" className={buttonClass} onClick={() => named.remove(id)}>
-                {t("materials.remove", { name })}
-              </button>
+              <div className="flex flex-wrap gap-1">
+                {named.isRange(id) && (
+                  <button type="button" className={buttonClass} onClick={() => named.edit(id)}>
+                    {t("materials.edit", { name: material.name })}
+                  </button>
+                )}
+                <button type="button" className={buttonClass} onClick={() => named.remove(id)}>
+                  {t("materials.remove", { name: material.name })}
+                </button>
+              </div>
             </li>
           ))}
         </ul>
       )}
-      <MaterialPicker platform={platform} named={named} />
+      <MaterialPicker platform={platform} named={named} vision={vision} />
       {folder && (
         <div className="wrap-anywhere">
           <label className="flex items-start gap-2">
@@ -201,9 +249,11 @@ export function materialDropHandlers(named: ReturnType<typeof useNamedMaterials>
 export function MaterialPicker({
   platform,
   named,
+  vision,
 }: {
   readonly platform: Platform;
   readonly named: ReturnType<typeof useNamedMaterials>;
+  readonly vision?: VisionCheck;
 }) {
   const t = useT();
   const [pasted, setPasted] = useState("");
@@ -217,7 +267,7 @@ export function MaterialPicker({
           className={buttonClass}
           onClick={() =>
             void named.read(async () => {
-              const file = await platform.pickFile(".md,.markdown,.txt,.csv,.tsv,.json,text/*");
+              const file = await platform.pickFile(".md,.markdown,.txt,.csv,.tsv,.json,text/*,.pdf,application/pdf,.png,.jpg,.jpeg,.webp,.gif,.bmp,.avif");
               return file ? [file] : [];
             })
           }
@@ -244,6 +294,20 @@ export function MaterialPicker({
           {t("materials.addPasted")}
         </button>
       </details>
+      {named.hasRanges && vision && <VisionControl check={vision} />}
+      {named.hasImages && vision?.verified !== true && (
+        <p role="alert">{t("materials.visionRequired")}</p>
+      )}
+      {named.pending.map(({ id, source, selected }) => (
+        <MaterialRangeEditor
+          key={id}
+          source={source}
+          previous={selected}
+          vision={vision?.verified === true}
+          onAccept={(material) => named.accept(id, material)}
+          onRemove={() => named.remove(id)}
+        />
+      ))}
       {named.loading && <p role="status">{t("materials.reading")}</p>}
       {named.error && <p role="alert">{t("materials.invalid")}</p>}
     </>

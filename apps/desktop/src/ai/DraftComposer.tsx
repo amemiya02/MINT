@@ -6,6 +6,7 @@ import { ExternalAgentAccessNotice } from "./ExternalAgentPanel.tsx";
 import { type ExternalAgent, externalAgentSender } from "./external-agent.ts";
 import { MaterialRequestNotice, useMaterialRequests } from "./MaterialRequest.tsx";
 import { modelEndpoint, modelWritingSender, type SavedModelConnection } from "./model.ts";
+import { useModelVision, VisionControl, type VisionTarget } from "./ModelVision.tsx";
 import { recordWritingResult } from "./record-writing-result.ts";
 import { TaskContextChecklist, useNamedMaterials } from "./TaskContext.tsx";
 import { useWritingTask, WritingTaskMaterials } from "./WritingTasks.tsx";
@@ -15,7 +16,7 @@ import {
   replyStatus,
   writingMaterialNames,
 } from "./writing-attempt.ts";
-import type { NamedMaterial, WritingRequest, WritingSender } from "./writing-sender.ts";
+import { hasTaskImages, type NamedMaterial, type WritingRequest, type WritingSender } from "./writing-sender.ts";
 
 const field =
   "w-full rounded-md border border-(--mint-border) bg-(--mint-bg) px-2 py-1 focus-visible:outline-2 focus-visible:outline-(--mint-accent)";
@@ -26,6 +27,7 @@ interface DraftConnection {
   readonly id: string;
   readonly label: string;
   readonly send: WritingSender;
+  readonly visionTarget?: VisionTarget;
 }
 
 interface DraftTask {
@@ -162,9 +164,23 @@ export function DraftComposer({
     };
   }, [platform, settingsOpen]);
 
+  const checkVision = useModelVision(platform.sendModelMessage);
+  const inlineTarget: VisionTarget = useMemo(
+    () => ({ id: crypto.randomUUID(), connection: { address, model }, apiKey: key }),
+    [address, model, key],
+  );
+  const vision = checkVision(
+    remembered
+      ? { id: `model:${remembered.id}`, connection: { id: remembered.id } }
+      : custom && endpoint && model.trim()
+        ? inlineTarget
+        : undefined,
+  );
   const canSend =
     !!instruction.trim() &&
     !named.loading &&
+    !named.unconfirmed &&
+    (!named.hasImages || vision?.verified === true) &&
     (!!agent || (!!endpoint && (!!remembered || (custom && !!model.trim()))));
 
   const connections: DraftConnection[] = [
@@ -175,6 +191,7 @@ export function DraftComposer({
         endpoint: modelEndpoint(item.address),
       }),
       send: modelWritingSender(platform.sendModelMessage, item),
+      visionTarget: { id: `model:${item.id}`, connection: { id: item.id } },
     })),
     ...agents.map((item) => ({
       id: `agent:${item.path}`,
@@ -194,7 +211,8 @@ export function DraftComposer({
       ? {
           id: "",
           label: recipient,
-          send: modelWritingSender(platform.sendModelMessage, { address, model }, { apiKey: key }),
+          send: modelWritingSender(platform.sendModelMessage, inlineTarget.connection, { apiKey: key }),
+          visionTarget: inlineTarget,
         }
       : connections.find(({ id }) => id === choice);
     if (!connection) return;
@@ -220,6 +238,10 @@ export function DraftComposer({
 
   async function runDraft(task: DraftTask, connection: DraftConnection) {
     if (controller.current) return;
+    if (hasTaskImages(task.request.taskContext) && !checkVision(connection.visionTarget)?.verified) {
+      setError("materials.visionRequired");
+      return;
+    }
     const running = new AbortController();
     const { signal } = running;
     controller.current = running;
@@ -385,6 +407,8 @@ export function DraftComposer({
       : null;
   const alternatives = retry ? connections.filter(({ id }) => id !== retry.connection.id) : [];
   const alternate = alternatives.find(({ id }) => id === retryId);
+  const retryHasImages = hasTaskImages(retry?.task.request.taskContext);
+  const alternateVision = checkVision(alternate?.visionTarget);
 
   if (appliedReply)
     return (
@@ -539,6 +563,7 @@ export function DraftComposer({
           named={named}
           emptyDraft
           recipient={recipient}
+          vision={vision}
           folder={folder}
           searchEnabled={!!searchFolder}
           onSearchChange={(checked) => setAllowedFolder(checked ? folder : null)}
@@ -560,6 +585,7 @@ export function DraftComposer({
           key={materialRequests.pending.id}
           pending={materialRequests.pending}
           platform={platform}
+          vision={checkVision(retryConnection.current?.visionTarget)}
           onDecision={materialRequests.decide}
         />
       ) : (
@@ -604,10 +630,14 @@ export function DraftComposer({
                   ))}
                 </select>
               </label>
+              {retryHasImages && alternateVision && <VisionControl check={alternateVision} />}
+              {retryHasImages && alternate && !alternateVision && (
+                <p role="alert">{t("materials.visionRequired")}</p>
+              )}
               <button
                 type="button"
                 className={button}
-                disabled={!alternate}
+                disabled={!alternate || (retryHasImages && !alternateVision?.verified)}
                 onClick={() => alternate && void runDraft(retry.task, alternate)}
               >
                 {t("writing.task.retryOther")}

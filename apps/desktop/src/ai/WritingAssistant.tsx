@@ -16,11 +16,13 @@ import type { Platform } from "../platform/platform.ts";
 import { useTabStore } from "../tabs/context.ts";
 import { useModalDialog } from "../window/useModalDialog.ts";
 import { FocusedWritingReview, type ReviewEntry } from "./FocusedWritingReview.tsx";
+import { materialLabel } from "./material-display.ts";
 import { MaterialRequestNotice, useMaterialRequests } from "./MaterialRequest.tsx";
+import { useModelVision, VisionControl } from "./ModelVision.tsx";
 import { ProposedSelectionEdit } from "./ProposedSelectionEdit.tsx";
 import { ReplyExcerpt } from "./ReplyExcerpt.tsx";
 import { type SelectionEdit, selectionEdits } from "./selection-edits.ts";
-import { TaskContextChecklist, useNamedMaterials } from "./TaskContext.tsx";
+import { MaterialPreview, TaskContextChecklist, useNamedMaterials } from "./TaskContext.tsx";
 import { useWritingTask, WritingTaskMaterials } from "./WritingTasks.tsx";
 import {
   type AttemptStatus,
@@ -31,6 +33,8 @@ import {
 import { loadWritingRecipients, type WritingRecipient } from "./writing-recipients.ts";
 import { captureWritingSelection, type WritingSelection } from "./writing-selection.ts";
 import {
+  contextMaterials,
+  hasTaskImages,
   type NamedMaterial,
   replacementFromReply,
   splitWritingProgress,
@@ -444,7 +448,7 @@ function Composer({
   const controller = useRef<AbortController | null>(null);
   const busy = attempt?.status === "working" || attempt?.status === "approval";
   const store = useTabStore();
-  const [error, setError] = useState<"sendFailed" | "agentChanged" | "missingSelection" | null>(
+  const [error, setError] = useState<"sendFailed" | "agentChanged" | "missingSelection" | "visionRequired" | null>(
     null,
   );
   const input = useRef<HTMLInputElement>(null);
@@ -466,6 +470,10 @@ function Composer({
   const reading = useRef<ReturnType<MintEditor["captureReadingPosition"]> | null>(null);
   const [draft, setDraft] = useState(() => origin.editor.getText());
   const recipient = recipients.find((candidate) => candidate.id === recipientId);
+  const checkVision = useModelVision(platform.sendModelMessage);
+  const visionFor = (candidate?: WritingRecipient) =>
+    checkVision(candidate?.kind === "model" ? { id: candidate.id, connection: { id: candidate.modelId } } : undefined);
+  const vision = visionFor(recipient);
   const labelFor = (candidate: WritingRecipient) =>
     candidate.kind === "agent"
       ? t("writing.recipient.agent", { path: candidate.path })
@@ -1031,6 +1039,8 @@ function Composer({
       busy ||
       loading ||
       named.loading ||
+      named.unconfirmed ||
+      (named.hasImages && !vision?.verified) ||
       (scope === "folder" && !searchFolder) ||
       checkingDisk.current
     )
@@ -1087,6 +1097,10 @@ function Composer({
 
   async function runTask(task: Task, connection: WritingRecipient, onSavedRequest?: () => void) {
     if (controller.current || checkingDisk.current) return false;
+    if (hasTaskImages(task.request.taskContext) && !visionFor(connection)?.verified) {
+      setError("visionRequired");
+      return false;
+    }
     const running = new AbortController();
     const { signal } = running;
     controller.current = running;
@@ -1365,6 +1379,9 @@ function Composer({
   const canRetry = attempt && !busy && attempt.status !== "complete";
   const sameConnection = canRetry && recipients.find(({ id }) => id === attempt.recipientId);
   const otherConnection = canRetry && recipients.find(({ id }) => id === retryId);
+  const retryHasImages = !!canRetry && hasTaskImages(attempt?.task.request.taskContext);
+  const sameVision = visionFor(sameConnection || undefined);
+  const otherVision = visionFor(otherConnection || undefined);
   if (!placement) return null;
   const sidebar = placement === "sidebar";
   const latest = turns.at(-1);
@@ -1538,13 +1555,7 @@ function Composer({
 
   function renderSentContext(context: TaskContext | undefined, searchFolder?: string) {
     if (!context) return null;
-    const materials = [
-      ...(context.currentDraft ? [context.currentDraft] : []),
-      ...(context.materials ?? []),
-      ...(context.materialDecisions ?? []).flatMap((decision) =>
-        decision.outcome === "allowed" ? [decision.material] : [],
-      ),
-    ];
+    const materials = contextMaterials(context);
     return (
       <fieldset className="space-y-1 rounded border border-(--mint-border) p-2 text-xs">
         <legend className="px-1">{t("writing.tasks.sentContext")}</legend>
@@ -1553,11 +1564,11 @@ function Composer({
             {t("writing.tasks.searchedFolder", { folder: searchFolder ?? "" })}
           </p>
         )}
-        {materials.map(({ name, text }, index) => (
+        {materials.map((material, index) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: A turn keeps its original material order, including duplicates.
-          <details key={`${index}:${name}`} className="wrap-anywhere">
-            <summary>{name}</summary>
-            <pre className="max-h-24 overflow-auto whitespace-pre-wrap">{text}</pre>
+          <details key={`${index}:${material.name}`} className="wrap-anywhere">
+            <summary>{materialLabel(material, t)}</summary>
+            <MaterialPreview material={material} />
           </details>
         ))}
         {context.materialDecisions?.map((decision) =>
@@ -1782,10 +1793,11 @@ function Composer({
       )}
       {canRetry && (
         <div className="flex flex-wrap items-end gap-2">
+          {retryHasImages && sameVision && !sameVision.verified && <VisionControl check={sameVision} />}
           <button
             type="button"
             className={buttonClass}
-            disabled={!sameConnection || busy}
+            disabled={!sameConnection || busy || (retryHasImages && !sameVision?.verified)}
             onClick={() => sameConnection && void runTask(attempt.task, sameConnection)}
           >
             {t("writing.task.retry")}
@@ -1818,10 +1830,14 @@ function Composer({
                     ))}
                 </select>
               </label>
+              {retryHasImages && otherVision && <VisionControl check={otherVision} />}
+              {retryHasImages && otherConnection && !otherVision && (
+                <p role="alert">{t("materials.visionRequired")}</p>
+              )}
               <button
                 type="button"
                 className={buttonClass}
-                disabled={!otherConnection || busy}
+                disabled={!otherConnection || busy || (retryHasImages && !otherVision?.verified)}
                 onClick={() => otherConnection && void runTask(attempt.task, otherConnection)}
               >
                 {t("writing.task.retryOther")}
@@ -1831,7 +1847,11 @@ function Composer({
         </div>
       )}
       {error && (
-        <p role="alert">{t(error === "agentChanged" ? "agent.reviewAgain" : `writing.${error}`)}</p>
+        <p role="alert">{t(
+            error === "agentChanged" ? "agent.reviewAgain"
+              : error === "visionRequired" ? "materials.visionRequired"
+                : `writing.${error}`,
+          )}</p>
       )}
       {saveFailed && <p role="alert">{t("writing.tasks.saveFailed")}</p>}
       {!sidebar && turns.length > 0 ? (
@@ -1941,6 +1961,7 @@ function Composer({
               platform={platform}
               named={named}
               recipient={recipient && labelFor(recipient)}
+              vision={vision}
               selection={selectedText}
               draft={currentDraft}
               includeDraft={scope === "selection" ? setIncludeDraft : undefined}
@@ -1967,6 +1988,8 @@ function Composer({
                   loading ||
                   !instruction.trim() ||
                   named.loading ||
+      named.unconfirmed ||
+      (named.hasImages && !vision?.verified) ||
                   (scope === "folder" && !searchFolder)
                 }
               >
@@ -1990,6 +2013,7 @@ function Composer({
           key={materialRequests.pending.id}
           pending={materialRequests.pending}
           platform={platform}
+          vision={visionFor(recipients.find(({ id }) => id === attempt?.recipientId))}
           onDecision={(decision) => {
             materialRequests.decide(decision);
             if (active && attempt?.task.action === "direct") origin.editor.focus();

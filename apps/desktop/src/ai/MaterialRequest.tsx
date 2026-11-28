@@ -2,9 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { useT } from "../i18n/index.ts";
 import { documentExtensions, relativePath } from "../paths.ts";
 import type { Platform } from "../platform/platform.ts";
+import { materialLabel } from "./material-display.ts";
+import type { VisionCheck } from "./ModelVision.tsx";
 import {
   type MaterialEntry,
   MaterialPicker,
+  MaterialPreview,
   materialDropHandlers,
   useNamedMaterials,
 } from "./TaskContext.tsx";
@@ -133,16 +136,18 @@ export function useMaterialRequests() {
 export function MaterialRequestNotice({
   pending,
   platform,
+  vision,
   onDecision,
 }: {
   readonly pending: PendingMaterial;
   readonly platform: Platform;
+  readonly vision?: VisionCheck;
   readonly onDecision: (decision: MaterialDecision) => void;
 }) {
   const t = useT();
   const named = useNamedMaterials();
   const [matches, setMatches] = useState<readonly MaterialEntry[]>([]);
-  const [selected, setSelected] = useState<MaterialEntry | null>(null);
+  const [selected, setSelected] = useState<MaterialEntry["id"] | null>(null);
   const [status, setStatus] = useState<"searching" | "done" | "failed">("searching");
   const { name, purpose, query, folder, recipient } = pending;
 
@@ -201,7 +206,7 @@ export function MaterialRequestNotice({
   }, [platform, folder, query, t]);
 
   const candidates = [...matches, ...named.entries];
-  const approved = selected && candidates.includes(selected) ? selected.material : null;
+  const approved = candidates.find(({ id }) => id === selected)?.material;
   return (
     <fieldset
       aria-label={t("materials.requested")}
@@ -229,25 +234,25 @@ export function MaterialRequestNotice({
               <label className="flex items-start gap-2 rounded bg-(--mint-hover) p-1">
                 <input
                   type="radio"
-                  aria-label={entry.material.name}
-                  checked={selected === entry}
-                  onChange={() => setSelected(entry)}
+                  aria-label={materialLabel(entry.material, t)}
+                  checked={selected === entry.id}
+                  onChange={() => setSelected(entry.id)}
                 />
                 <span className="min-w-0 wrap-anywhere">
-                  <span className="font-medium">{entry.material.name}</span>
-                  <span className="block whitespace-pre-wrap">{entry.material.text}</span>
+                  <span className="font-medium">{materialLabel(entry.material, t)}</span>
+                  <MaterialPreview material={entry.material} />
                 </span>
               </label>
             </li>
           ))}
         </ul>
       )}
-      <MaterialPicker platform={platform} named={named} />
+      <MaterialPicker platform={platform} named={named} vision={vision} />
       <div className="flex gap-2">
         <button
           type="button"
           className="rounded border border-(--mint-border) px-2 py-1 hover:bg-(--mint-hover) disabled:opacity-50"
-          disabled={!approved || named.loading}
+          disabled={!approved || named.loading || named.unconfirmed || (!!approved.image && !vision?.verified)}
           onClick={() => {
             if (approved) onDecision({ name, purpose, outcome: "allowed", material: approved });
           }}

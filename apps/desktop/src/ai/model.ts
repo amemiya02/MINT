@@ -1,6 +1,11 @@
 import {
+  type MaterialDecision,
+  materialImageLimit,
   materialRequestInstruction,
+  type NamedMaterial,
   replacementInstruction,
+  type TaskContext,
+  taskImageLimit,
   type WritingOptions,
   type WritingReply,
   type WritingSender,
@@ -25,9 +30,13 @@ export interface NewModelConnection extends ModelConnection {
   readonly lifetime: SavedModelConnection["lifetime"];
 }
 
+export type ModelMessagePart =
+  | { readonly type: "text"; readonly text: string }
+  | { readonly type: "image_url"; readonly image_url: { readonly url: string } };
+
 export interface ModelMessage {
   readonly role: "system" | "user" | "assistant";
-  readonly content: string;
+  readonly content: string | readonly ModelMessagePart[];
 }
 
 interface ModelOptions extends WritingOptions {
@@ -40,7 +49,7 @@ interface ModelReply extends WritingReply {
   readonly finishReason: string | null;
 }
 
-type ModelTarget = ModelConnection | Pick<SavedModelConnection, "id">;
+export type ModelTarget = ModelConnection | Pick<SavedModelConnection, "id">;
 
 export type SendModelMessage = (
   connection: ModelTarget,
@@ -48,7 +57,37 @@ export type SendModelMessage = (
   options?: ModelOptions,
 ) => Promise<ModelReply>;
 
-/** Reuse the model transport for the same text tasks that external Agents accept. */
+function modelTaskContext(context: TaskContext | undefined, images: ModelMessagePart[]) {
+  if (!context) return;
+  let imageBytes = 0;
+  function materialPart(material: NamedMaterial) {
+    const { image, ...textMaterial } = material;
+    if (image === undefined) return textMaterial;
+    imageBytes += image.length;
+    if (
+      material.format !== "image" ||
+      !material.range ||
+      image.length > materialImageLimit ||
+      imageBytes > taskImageLimit ||
+      !image.startsWith("data:image/png;base64,")
+    ) throw "invalidRequest";
+    images.push({ type: "image_url", image_url: { url: image } });
+    const { name, range, format } = material;
+    return { name, range, format };
+  }
+  return {
+    ...context,
+    currentDraft: context.currentDraft && materialPart(context.currentDraft),
+    materials: context.materials?.map(materialPart),
+    materialDecisions: context.materialDecisions?.map((decision: MaterialDecision) =>
+      decision.outcome === "allowed"
+        ? { ...decision, material: materialPart(decision.material) }
+        : decision,
+    ),
+  };
+}
+
+/** Bind the model transport for use from the editor and from first-time setup. */
 export function modelWritingSender(
   send: SendModelMessage,
   connection: ModelTarget,
@@ -68,12 +107,21 @@ export function modelWritingSender(
         { role: "assistant", content: turn.reply },
       );
     }
+    const images: ModelMessagePart[] = [];
+    const context = modelTaskContext(taskContext, images);
+    const text =
+      selectedText === undefined && annotationBatch === undefined && context === undefined
+        ? instruction
+        : JSON.stringify({ instruction, selectedText, annotationBatch, taskContext: context });
+    if (images.length) {
+      messages.push({
+        role: "system",
+        content: "Image parts follow the order of Image pixels materials in task context (format image). Each image contains only the named selected range.",
+      });
+    }
     messages.push({
       role: "user",
-      content:
-        selectedText === undefined && annotationBatch === undefined && taskContext === undefined
-          ? instruction
-          : JSON.stringify({ instruction, selectedText, annotationBatch, taskContext }),
+      content: images.length ? [{ type: "text", text }, ...images] : text,
     });
     return send(connection, messages, { ...options, ...writingOptions });
   };
