@@ -34,7 +34,12 @@ export function KanbanBoard(props: FolderViewProps) {
   const dragged = useRef<FolderDocument | null>(null);
   const canWrite = canMoveCard(manifest.id);
   const statuses = [
-    ...new Set(["To do", "In progress", "Done", ...(documents ?? []).map(statusOf)]),
+    ...new Set([
+      t("kanban.todo"),
+      t("kanban.inProgress"),
+      t("kanban.done"),
+      ...(documents ?? []).map(statusOf),
+    ]),
   ];
   async function move(card: FolderDocument, status: string) {
     if (!folder || !status || statusOf(card) === status || moving || !canMoveCard(manifest.id))
