@@ -57,6 +57,7 @@ Open an existing `.md` file, or choose **File → Open Folder** to keep a set of
 | Open a document | `⌘O` | `Ctrl+O` |
 | Find a file in the open folder | `⌘P` | `Ctrl+P` |
 | Open the command palette | `⌘⇧P` | `Ctrl+Shift+P` |
+| Preview a local document link | Option-click or `⌘⌥Enter` | Alt-click or `Ctrl+Alt+Enter` |
 | Toggle Source Mode | `⌘/` | `Ctrl+/` |
 
 ## Features

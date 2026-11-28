@@ -16,6 +16,17 @@ export type ImageHost = Required<Pick<HostAdapter, "resolveImageUrl" | "saveImag
 /** Where pasted and dropped images go: the `assetFolder` and `assetFolderPath` settings. */
 export type AssetFolderPolicy = Pick<Settings, "assetFolder" | "assetFolderPath">;
 
+/** Resolve a local image through the platform's grants for the document containing it. */
+export function documentImageUrl(
+  platform: Platform,
+  document: string | null,
+  path: string,
+): string | null {
+  const local = fileUrlPath(path) ?? path;
+  if (document === null) return isAbsolutePath(local) ? platform.assetUrl(local) : null;
+  return platform.assetUrl(resolveFrom(document, local));
+}
+
 /**
  * The asset folder of a document: where pasted and dropped images are saved.
  * - `document`: the document's own folder;
@@ -68,12 +79,7 @@ export function createImageHost(
   onSaveFailed: (failure: ImageSaveFailure) => void,
 ): ImageHost {
   return {
-    resolveImageUrl(path) {
-      const local = fileUrlPath(path) ?? path;
-      const document = documentPath();
-      if (document === null) return isAbsolutePath(local) ? platform.assetUrl(local) : null;
-      return platform.assetUrl(resolveFrom(document, local));
-    },
+    resolveImageUrl: (path) => documentImageUrl(platform, documentPath(), path),
     async saveImage(file) {
       const document = documentPath();
       if (document === null) {

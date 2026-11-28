@@ -42,3 +42,47 @@ body {
   padding: 2rem 1.5rem 40vh;
   caret-color: var(--mint-caret);
 }
+
+.mint-link-preview {
+  font-family: var(--mint-font-editor);
+  font-size: var(--mint-font-size);
+  line-height: var(--mint-line-height);
+  overflow-wrap: anywhere;
+}
+
+.mint-link-preview :is(h1, h2, h3, h4, h5, h6) {
+  font-family: var(--mint-font-heading);
+  font-weight: var(--mint-heading-weight);
+  color: var(--mint-heading-fg);
+}
+
+.mint-link-preview h1 {
+  font-size: var(--mint-heading-1-size);
+}
+.mint-link-preview h2 {
+  font-size: var(--mint-heading-2-size);
+}
+.mint-link-preview h3 {
+  font-size: var(--mint-heading-3-size);
+}
+.mint-link-preview > * + * {
+  margin-top: 0.75em;
+}
+.mint-link-preview :is(ul, ol) {
+  padding-inline-start: 1.5em;
+}
+.mint-link-preview ul {
+  list-style: disc;
+}
+.mint-link-preview ol {
+  list-style: decimal;
+}
+.mint-link-preview :is(td, th) {
+  padding: 0.25em 0.5em;
+  border: 1px solid var(--mint-border);
+}
+.mint-link-preview pre {
+  overflow: auto;
+  background: var(--mint-code-bg);
+  padding: 0.5em;
+}

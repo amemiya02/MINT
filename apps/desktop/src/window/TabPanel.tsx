@@ -1,4 +1,4 @@
-import type { LinkTarget, WordCount } from "@mint/editor";
+import type { DocumentLink, LinkTarget, WordCount } from "@mint/editor";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createImageHost, type ImageSaveFailure } from "../assets/image-host.ts";
 import { EditorPane } from "../EditorPane.tsx";
@@ -11,6 +11,8 @@ import { useTabStore } from "../tabs/context.ts";
 import { ExternalChangeNotice } from "../tabs/ExternalChangeNotice.tsx";
 import type { Tab, TabStore } from "../tabs/tab-store.ts";
 import { FormattingToolbar, type ToolbarPosition } from "./FormattingToolbar.tsx";
+
+import { LinkPreview } from "./LinkPreview.tsx";
 
 /** Every open tab keeps its editor mounted, so undo history and selection survive switching. */
 export function TabPanel({
@@ -37,6 +39,7 @@ export function TabPanel({
 }) {
   const store = useTabStore();
   const { id, path } = tab;
+  const [preview, setPreview] = useState<DocumentLink | null>(null);
   const panel = useRef<HTMLDivElement>(null);
   useEffect(() => {
     // Tabbing into a pane's toolbar activates the pane with focus already in the right place.
@@ -97,6 +100,18 @@ export function TabPanel({
       }}
       className="flex min-w-0 min-h-0 h-full flex-col"
     >
+      {preview && active && (
+        <LinkPreview
+          key={JSON.stringify(preview)}
+          source={tab}
+          link={preview}
+          platform={platform}
+          onClose={() => {
+            setPreview(null);
+            store.editor(id)?.focus();
+          }}
+        />
+      )}
       <ExternalChangeNotice tab={tab} />
       {imageFailure && (
         <ImageSaveNotice failure={imageFailure} onDismiss={() => setImageFailure(null)} />
@@ -114,6 +129,10 @@ export function TabPanel({
             onChange={onChange}
             onModeChange={onModeChange}
             onOpenLink={onOpenLink}
+            onPreviewLink={(link) => {
+              store.activate(id);
+              setPreview(link);
+            }}
             writeClipboardText={platform.writeClipboardText}
             imageHost={imageHost}
             onWordCount={onWordCount}
