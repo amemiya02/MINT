@@ -80,8 +80,37 @@ const exec = promisify(execFile);
 
 /** WebDriver's keyboard targets the webview. Native menu accelerators belong to its GTK window. */
 async function nativeShortcut(chord: string) {
-  await exec("xdotool", ["search", "--onlyvisible", "--name", "MINT$", "windowfocus", "--sync"]);
-  await exec("xdotool", ["key", chord]);
+  // A previous session can still own a GTK window while an unsaved draft closes.
+  const { stdout } = await exec("pgrep", ["-n", "-x", "mint"]);
+  await exec(
+    "xdotool",
+    [
+      "search",
+      "--all",
+      "--onlyvisible",
+      "--pid",
+      stdout.trim(),
+      "--name",
+      "MINT$",
+      "windowfocus",
+      "--sync",
+    ],
+    { timeout: 5000 },
+  );
+  await exec("xdotool", ["key", chord], { timeout: 5000 });
+}
+
+async function openSettings() {
+  // The webview can display the document before GTK has installed its native menu.
+  await until("the native Settings menu command to open Settings", async () => {
+    const open = await command<boolean>("POST", `/session/${session}/execute/sync`, {
+      script: "return document.querySelector('dialog[open] h2')?.textContent === 'Settings'",
+      args: [],
+    });
+    if (open) return true;
+    await nativeShortcut("ctrl+comma");
+    return null;
+  }).catch(explain);
 }
 
 /** Fail with what the window shows, which says which step went missing. */
@@ -273,7 +302,7 @@ test("moving a Kanban card changes only its status on disk after the writer gran
       args: [],
     }).then((ready) => ready || null),
   ).catch(explain);
-  await nativeShortcut("ctrl+comma");
+  await openSettings();
   await clickPath("//fieldset[@aria-label='Kanban board']//button[normalize-space(.)='Install']");
   await shows("Change the status property");
   await click("Deny access");
@@ -291,10 +320,12 @@ test("moving a Kanban card changes only its status on disk after the writer gran
     return el[elementKey] ?? null;
   }).catch(explain);
   assert.equal(await readFile(path, "utf8"), draft);
-  await nativeShortcut("ctrl+comma");
+  await openSettings();
   await clickPath(grant("Change the status"));
   await click("Close");
-  await clickPath(`${select}/option[@value='Done']`);
+  // WebKitGTK renders the options in a native popup. Drive the enabled select itself.
+  await clickPath(`${select}[not(@disabled)]`);
+  await exec("xdotool", ["key", "Home", "Down", "Down", "Return"], { timeout: 5000 });
   await until(
     "the status update to reach disk",
     async () => (await readFile(path, "utf8")) === draft.replace("'Draft'", "'Done'") || null,
@@ -303,7 +334,7 @@ test("moving a Kanban card changes only its status on disk after the writer gran
   await click("Kanban board", "aria-label");
   await clickPath("//aside//section[@aria-label='Done']//button[normalize-space(.)='card.md']");
   assert.deepEqual(await readdir(folder), ["card.md"]);
-  await nativeShortcut("ctrl+comma");
+  await openSettings();
   await clickPath("//fieldset[@aria-label='Kanban board']//button[normalize-space(.)='Uninstall']");
   await click("Close");
 });
@@ -356,7 +387,7 @@ test("preview, disambiguate, move and undo wikilinks in a native folder", async 
     }).then((ready) => ready || null),
   ).catch(explain);
   const toggleSetting = async (enabled: boolean) => {
-    await nativeShortcut("ctrl+comma");
+    await openSettings();
     await shows(`Recognize wikilinks in ${folder}`);
     const settingsPath = await command<string>("POST", `/session/${session}/execute/sync`, {
       script: "return document.querySelector('dialog[open] span[title$=\"settings.json\"]')?.title",
@@ -504,22 +535,28 @@ test("the native statistics view refuses a denied read and allows an explicit gr
     return ready ? true : null;
   }).catch(explain);
   await keyActions(typing("a native draft"));
-  await nativeShortcut("ctrl+comma");
-  await click("Install");
+  await openSettings();
+  await clickPath(
+    "//fieldset[@aria-label='Writing statistics']//button[normalize-space(.)='Install']",
+  );
   await shows("Read the current document");
   await click("Deny access");
   await click("Close");
   await click("Writing statistics");
   await shows("Permission to read the current document was denied.");
   await click("Close");
-  await nativeShortcut("ctrl+comma");
-  await click("Allow access");
+  await openSettings();
+  await clickPath(
+    "//fieldset[@aria-label='Writing statistics']//button[normalize-space(.)='Allow access']",
+  );
   await click("Close");
   await click("Writing statistics");
   await shows("Words: 3");
   await click("Close");
-  await nativeShortcut("ctrl+comma");
-  await click("Uninstall");
+  await openSettings();
+  await clickPath(
+    "//fieldset[@aria-label='Writing statistics']//button[normalize-space(.)='Uninstall']",
+  );
   await click("Close");
 });
 
@@ -560,7 +597,7 @@ test("declining a plugin update keeps its native read grant and withholds its wr
     }).then((ready) => ready || null),
   ).catch(explain);
   await keyActions(typing("plugin update draft"));
-  await nativeShortcut("ctrl+comma");
+  await openSettings();
   await upload(original);
   await click("Allow access");
   await upload(expanded);
@@ -574,7 +611,7 @@ test("declining a plugin update keeps its native read grant and withholds its wr
   await keyActions(typing("Smoke marker"));
   await shows("No matching commands");
   await keyActions(typing("\uE00C"));
-  await nativeShortcut("ctrl+comma");
+  await openSettings();
   await upload(expanded);
   await click("Allow and update");
   await click("Close");
@@ -589,8 +626,10 @@ test("declining a plugin update keeps its native read grant and withholds its wr
       args: [],
     }).then((written) => written || null),
   ).catch(explain);
-  await nativeShortcut("ctrl+comma");
-  await click("Uninstall");
+  await openSettings();
+  await clickPath(
+    "//fieldset[@aria-label='Smoke toolkit']//button[normalize-space(.)='Uninstall']",
+  );
   await click("Close");
 });
 
@@ -683,7 +722,7 @@ test("the installed relationship graph respects folder access and preserves the 
     `return !!document.querySelector('[role=treeitem][aria-label="target.md"]')`,
   );
   const plugin = "//fieldset[@aria-label='Relationship graph']";
-  await nativeShortcut("ctrl+comma");
+  await openSettings();
   await clickPath(`${plugin}//button[normalize-space(.)='Install']`);
   await shows("Read Markdown documents in the current folder");
   await click("Deny access");
@@ -694,7 +733,7 @@ test("the installed relationship graph respects folder access and preserves the 
     `const graph = document.querySelector('aside[aria-label="Relationship graph"]');
     return graph?.querySelector('[role=alert]')?.textContent.includes('denied') && !graph.querySelector('button');`,
   );
-  await nativeShortcut("ctrl+comma");
+  await openSettings();
   await clickPath(`${plugin}//button[normalize-space(.)='Allow access']`);
   await click("Close");
   const edges = "//aside[@aria-label='Relationship graph']//ul[@aria-label='References']";
@@ -712,7 +751,7 @@ test("the installed relationship graph respects folder access and preserves the 
     "the original citation",
     `return document.getSelection()?.toString() === '${citation}'`,
   );
-  await nativeShortcut("ctrl+comma");
+  await openSettings();
   await clickPath(`${plugin}//button[normalize-space(.)='Disable']`);
   await click("Close");
   await waitForView(
@@ -722,7 +761,7 @@ test("the installed relationship graph respects folder access and preserves the 
   assert.deepEqual(await readFile(source), sourceBytes);
   assert.deepEqual(await readFile(target), targetBytes);
   assert.deepEqual((await readdir(folder)).sort(), ["source.md", "target.md"]);
-  await nativeShortcut("ctrl+comma");
+  await openSettings();
   await clickPath(`${plugin}//button[normalize-space(.)='Uninstall']`);
   await click("Close");
 });
@@ -741,7 +780,7 @@ test("the native slide presentation returns to the draft and preserves its bytes
       args: [],
     }).then((ready) => ready || null),
   ).catch(explain);
-  await nativeShortcut("ctrl+comma");
+  await openSettings();
   const plugin = "//fieldset[@aria-label='Slide presentation']";
   await clickPath(`${plugin}//button[normalize-space(.)='Install']`);
   await click("Allow access");
@@ -760,7 +799,7 @@ test("the native slide presentation returns to the draft and preserves its bytes
     }).then((ready) => ready || null),
   ).catch(explain);
   assert.deepEqual(await readFile(path), source);
-  await nativeShortcut("ctrl+comma");
+  await openSettings();
   await clickPath(`${plugin}//button[normalize-space(.)='Uninstall']`);
   await click("Close");
 });
@@ -803,7 +842,7 @@ test("only granted Zotero reads reach the local service and the chosen item is s
       ).catch(explain);
       await command("POST", `/session/${session}/element/${el}/click`, {});
     };
-    await nativeShortcut("ctrl+comma");
+    await openSettings();
     await settingsButton("Install");
     await shows("Connect to the local Zotero library");
     await click("Deny access");
@@ -812,7 +851,7 @@ test("only granted Zotero reads reach the local service and the chosen item is s
     await shows("Zotero access was denied");
     assert.equal(requests, 0);
     await click("Close");
-    await nativeShortcut("ctrl+comma");
+    await openSettings();
     await settingsButton("Allow access");
     await settingsButton("Allow access");
     await click("Close");
