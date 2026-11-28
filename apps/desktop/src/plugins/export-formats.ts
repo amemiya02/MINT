@@ -15,6 +15,11 @@ interface FormatCodec {
 }
 
 export const exportFormats = {
+  latex: {
+    label: "LaTeX",
+    extension: "tex",
+    encode: async (source) => (await import("./latex.ts")).encodeLatex(source),
+  },
   epub: {
     label: "EPUB",
     extension: "epub",

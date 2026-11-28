@@ -128,3 +128,7 @@ Packages can contribute this view with `"sidebar": "kanban"` and `"permissions":
 Install **Slide presentation** in Settings → Plugins and allow it to read the current document. In your draft, separate slides with a Markdown horizontal rule, such as `---` on a line with blank lines around it. Choose **Present slides**. Use the left and right arrow keys or the on-screen controls to page through the draft. Press Escape to return to the editor.
 
 A local package can provide the same presentation action with `"presentation": "slides"` and the `document.read` permission.
+
+## LaTeX export
+
+Install **LaTeX export** in Settings → Plugins and grant access to the current document. Choose **File → Import / Export… → LaTeX** to save the current draft as a standalone UTF-8 `.tex` document. Headings become section commands, lists become LaTeX lists, and inline and display equations preserve their TeX notation. Packages can register this format with `"exportFormat": "latex"` and the `document.read` permission.
