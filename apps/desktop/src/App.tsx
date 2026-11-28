@@ -674,6 +674,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
                     draftTabs.has(tab.id) ? (
                       <DraftComposer
                         platform={platform}
+                        settingsOpen={settingsOpen}
                         onDraft={(text) => {
                           const current = store.getState().tabs.find(({ id }) => id === tab.id);
                           const editor = store.editor(tab.id);

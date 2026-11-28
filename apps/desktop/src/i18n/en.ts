@@ -436,6 +436,7 @@ export const en = {
   "welcome.recent": "Recent",
   "draft.instruction": "Drafting instruction",
   "draft.connection": "Writing connection",
+  "draft.connectionUnavailable": "The selected connection is unavailable. Choose a connection.",
   "draft.scope": "Direct edit · Untitled draft",
   "draft.key": "API key (optional, for this draft)",
   "draft.generate": "Generate draft",

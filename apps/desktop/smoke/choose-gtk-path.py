@@ -88,9 +88,9 @@ def file_cell(name):
     return None
 
 
-wait_for("waiting for confirmation button", accept)
+initial_button = wait_for("waiting for chooser action", accept)
 if button_name == "Cancel":
-    click_node(wait_for("waiting for Cancel", accept))
+    click_node(initial_button)
     wait_for("waiting for cancellation to close the chooser", lambda: chooser() is None)
     sys.exit(0)
 

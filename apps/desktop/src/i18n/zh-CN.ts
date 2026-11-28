@@ -417,6 +417,7 @@ export const zhCN: Messages = {
   "welcome.recent": "最近打开",
   "draft.instruction": "起草指令",
   "draft.connection": "写作连接",
+  "draft.connectionUnavailable": "所选连接已不可用。请选择一个连接。",
   "draft.scope": "直接改 · 未命名稿",
   "draft.key": "API 密钥（可选，仅用于本次起草）",
   "draft.generate": "生成初稿",

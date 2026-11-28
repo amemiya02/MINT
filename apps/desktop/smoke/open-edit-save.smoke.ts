@@ -1172,7 +1172,7 @@ test("a native model reply stays editable and untitled until the author chooses 
     command<boolean>("POST", `/session/${session}/execute/sync`, {
       script: `const [text] = arguments;
         const tab = document.querySelector('[role=tab][aria-selected=true]');
-        const editor = document.querySelector('.cm-content:focus');
+        const editor = document.getElementById(tab?.getAttribute('aria-controls'))?.querySelector('.cm-content');
         return tab?.textContent === 'Untitled' && editor?.textContent === text;`,
       args: [text],
     }).then((ready) => ready || null);
@@ -1199,7 +1199,7 @@ test("a native model reply stays editable and untitled until the author chooses 
       ["Model name", "native-draft-fixture"],
       ["API key (optional, for this draft)", "draft-fixture-secret"],
       ["Drafting instruction", instruction],
-    ]) {
+    ] as const) {
       await clickPath(`//form//label[normalize-space(.)='${label}']/input`);
       await keyActions(typing(value));
     }
@@ -1238,6 +1238,7 @@ test("a native model reply stays editable and untitled until the author chooses 
       draftMatches(generated),
     ).catch(explain);
     assert.deepEqual(await readdir(folder), []);
+    await clickPath("//*[@role='tabpanel' and not(@hidden)]//*[@contenteditable='true']");
     await keyActions([...typing(keys.end), ...typing(" Author's addition.")]);
     const edited = `${generated} Author's addition.`;
     await until("the author's addition in the draft", () => draftMatches(edited)).catch(explain);
@@ -1624,9 +1625,9 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   await until("the approved Agent to appear as a draft recipient", () =>
     command<boolean>("POST", `/session/${session}/execute/sync`, {
       script: `const select = document.querySelector('main form select');
-        if (!select || !Array.from(select.options).some(option => option.value === arguments[0]))
-          return false;
-        select.value = arguments[0];
+        const option = Array.from(select?.options ?? []).find(option => option.label === arguments[0]);
+        if (!option) return false;
+        select.value = option.value;
         select.dispatchEvent(new Event('change', { bubbles: true }));
         return true;`,
       args: [path],

@@ -31,7 +31,7 @@ test("draft from the welcome screen, keep editing after cancelling Save, then ch
   expect(body.model).toBe("fixture-model");
   expect(body.messages).toEqual([{ role: "user", content: expect.stringContaining(instruction) }]);
 
-  const editor = page.getByRole("tabpanel").getByRole("textbox");
+  const editor = page.getByRole("tabpanel").getByRole("textbox", { name: "", exact: true });
   await expect(page.getByRole("tab", { name: "Untitled" })).toBeVisible();
   await expect(editor).toHaveText(generated);
   await expect(editor).toBeFocused();
@@ -94,4 +94,39 @@ test("a blank draft can be written by hand while an approved Agent generates tex
   await expect(composer.getByRole("alert")).toContainText("Your edits were kept.");
   await expect(editor).toHaveText("The author started writing.");
   await expect(editor).toBeFocused();
+});
+
+test("drafting can send through a model configured in Settings", async ({ page }) => {
+  const address = "https://remembered.example.test/v1";
+  const endpoint = `${address}/chat/completions`;
+  await page.route(endpoint, (route) =>
+    route.fulfill({
+      json: { choices: [{ message: { content: "A draft from the lab." }, finish_reason: "stop" }] },
+    }),
+  );
+  await launch(page, { locale: "en-US" });
+  await page.keyboard.press("ControlOrMeta+,");
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  await settings.getByRole("button", { name: "Model connections" }).click();
+  await settings.getByLabel("Connection name").fill("Lab model");
+  await settings.getByLabel("API address").fill(address);
+  await settings.getByLabel("Model name").fill("lab-fixture");
+  await settings.getByLabel("API key", { exact: true }).fill("session-fixture-key");
+  await settings.getByRole("button", { name: "Use for this launch" }).click();
+  await expect(settings.getByRole("region", { name: "Lab model" })).toBeVisible();
+  await settings.getByRole("button", { name: "Close", exact: true }).click();
+
+  await page.getByRole("button", { name: "Draft with AI" }).click();
+  const composer = page.getByRole("form", { name: "Draft with AI" });
+  await expect(composer.getByText(endpoint)).toBeVisible();
+  await composer.getByLabel("Drafting instruction").fill("Draft a lab update.");
+  const [sent] = await Promise.all([
+    page.waitForRequest(endpoint),
+    composer.getByRole("button", { name: "Generate draft" }).click(),
+  ]);
+  expect(sent.headers().authorization).toBe("Bearer session-fixture-key");
+  expect(sent.postDataJSON().model).toBe("lab-fixture");
+  await expect(
+    page.getByRole("tabpanel").getByRole("textbox", { name: "", exact: true }),
+  ).toHaveText("A draft from the lab.");
 });
