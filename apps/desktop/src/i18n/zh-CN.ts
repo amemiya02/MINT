@@ -122,6 +122,9 @@ export const zhCN: Messages = {
   "command.view.toggleVimMode": "切换 Vim 键位",
   "search.label": "在工作文件夹中搜索",
   "search.close": "关闭搜索",
+  "search.headings": "当前文档标题",
+  "search.names": "文件名",
+  "search.body": "文档正文",
   "search.searching": "正在搜索…",
   "search.summary": "{documents}中有 {matches}",
   "search.matches.one": "1 个结果",
@@ -267,6 +270,7 @@ export const zhCN: Messages = {
   "status.characters.other": "{count} 字符",
   "status.readingTime": "阅读约 {minutes} 分钟",
 
+  "error.staleSearchResult": "文档已更改，无法在当前草稿中定位此搜索结果。",
   "error.missingHeading": "未找到标题：{fragment}",
   "error.ambiguousHeading": "多个标题匹配：{fragment}",
   "error.open": "无法打开 {path}：{reason}",

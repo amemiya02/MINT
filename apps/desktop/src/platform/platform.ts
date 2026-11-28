@@ -62,8 +62,11 @@ export interface Platform {
    */
   listFolderFiles(path: string, extensions: readonly string[]): Promise<string[]>;
 
+  /** Indices of labels with a nonempty match, using the folder search matcher. */
+  matchSearchLabels(query: FolderSearchQuery, labels: readonly string[]): Promise<number[]>;
+
   /**
-   * Search the text of the files of a folder (the same files `listFolderFiles`
+   * Search the names and text of the files of a folder (the same files `listFolderFiles`
    * lists) in the background. Each file with matches is passed to `onFile` as
    * soon as it is searched, in path order; `onDone` is called last, unless the
    * search is cancelled. Rejects at once if `query.regexp` is set and the pattern
@@ -245,8 +248,9 @@ export interface FolderSearchListener {
   onDone(summary: { readonly truncated: boolean }): void;
 }
 
-/** The matching lines of one file. */
+/** A document with a matching file name or matching lines. */
 export interface FileMatches {
+  readonly nameMatches: boolean;
   readonly path: string;
   readonly lines: readonly LineMatch[];
 }

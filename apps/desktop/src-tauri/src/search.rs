@@ -34,6 +34,7 @@ pub struct SearchQuery {
 #[serde(rename_all = "camelCase")]
 pub struct FileMatches {
     pub path: PathBuf,
+    pub name_matches: bool,
     pub lines: Vec<LineMatch>,
 }
 
@@ -101,17 +102,28 @@ impl Search {
             if cancelled.load(Ordering::Relaxed) {
                 break;
             }
-            let lines = self.search_file(&mut searcher, &path, MAX_LINES - found, cancelled);
-            if lines.is_empty() {
-                continue;
-            }
+            let name_matches = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| self.matches_label(name));
+            // Keep finding file names even after reaching the matching-line limit.
+            let lines = if found < MAX_LINES {
+                self.search_file(&mut searcher, &path, MAX_LINES - found, cancelled)
+            } else {
+                Vec::new()
+            };
             found += lines.len();
-            on_file(FileMatches { path, lines });
-            if found >= MAX_LINES {
-                return SearchSummary { truncated: true };
+            if name_matches || !lines.is_empty() {
+                on_file(FileMatches {
+                    path,
+                    name_matches,
+                    lines,
+                });
             }
         }
-        SearchSummary { truncated: false }
+        SearchSummary {
+            truncated: found >= MAX_LINES,
+        }
     }
 
     fn search_file(
@@ -139,6 +151,16 @@ impl Search {
             return Vec::new();
         }
         lines
+    }
+
+    /// File names and rendered headings follow the same rules as line hits.
+    pub fn matches_label(&self, text: &str) -> bool {
+        let mut found = false;
+        let _ = self.matcher.find_iter(text.as_bytes(), |m| {
+            found = !m.is_empty();
+            !found
+        });
+        found
     }
 
     /// Non-empty matches in `text`, as UTF-16 offsets.

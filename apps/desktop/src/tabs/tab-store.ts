@@ -35,11 +35,30 @@ export type ExternalChange =
 export type ConflictChoice = "keepMine" | "loadDisk";
 /** A range within one line of a document, e.g. a global search match. */
 export interface LineRange {
+  /** Original line text when navigating from a search result on disk. */
+  readonly text?: string;
   /** 1-based line number; lines end at a line feed. */
   readonly line: number;
   /** `[from, to)` as UTF-16 offsets into the line. */
   readonly from: number;
   readonly to: number;
+}
+
+/** A folder text hit can move while the open draft is edited. Prefer its reported line,
+ * then accept a unique occurrence of the same line in the draft. */
+function startOfMatch(text: string, range: LineRange): number | null {
+  let start = 0;
+  let matches = 0;
+  let candidate = 0;
+  for (const [index, line] of text.split("\n").entries()) {
+    if (range.text === undefined || line.replace(/\r+$/, "") === range.text) {
+      if (index + 1 === range.line) return start;
+      candidate = start;
+      matches++;
+    }
+    start += line.length + 1;
+  }
+  return matches === 1 || range.text === undefined ? candidate : null;
 }
 
 type DocumentLocation = LineRange | { readonly fragment: string };
@@ -52,6 +71,7 @@ export interface TabsState {
 }
 
 export type TabError =
+  | { readonly kind: "staleSearchResult" }
   | { readonly kind: "missingHeading" | "ambiguousHeading"; readonly fragment: string }
   | { readonly kind: "open"; readonly path: string; readonly reason: string }
   | { readonly kind: "save" | "history"; readonly path: string; readonly reason: string }
@@ -234,11 +254,10 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
         return;
       }
       const text = editor.getText();
-      let start = 0;
-      for (let line = 1; line < range.line; line++) {
-        const next = text.indexOf("\n", start);
-        if (next < 0) break;
-        start = next + 1;
+      const start = startOfMatch(text, range);
+      if (start === null) {
+        set({ error: { kind: "staleSearchResult" } });
+        return;
       }
       const clamp = (offset: number) => Math.min(start + offset, text.length);
       editor.setSelection({

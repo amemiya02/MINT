@@ -94,12 +94,14 @@ export function createTauriPlatform(): Platform {
     readDirectory: (path) => invoke<DirectoryEntry[]>("read_directory", { path }),
     listFolderFiles: (path, extensions) =>
       invoke<string[]>("list_folder_files", { path, extensions }),
+    matchSearchLabels: (query, labels) =>
+      invoke<number[]>("match_search_labels", { query, labels }),
     async searchFolder(path, query, extensions, listener) {
       const channel = new Channel<SearchEvent>();
       let cancelled = false;
       channel.onmessage = (event) => {
         if (cancelled) return;
-        if (event.kind === "file") listener.onFile({ path: event.path, lines: event.lines });
+        if (event.kind === "file") listener.onFile(event);
         else listener.onDone({ truncated: event.truncated });
       };
       const id = await invoke<number>("search_folder", {
