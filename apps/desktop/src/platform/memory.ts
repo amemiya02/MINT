@@ -1,3 +1,4 @@
+import { sendBrowserMcpRequest } from "../ai/browser-mcp.ts";
 import { sendBrowserModelRequest } from "../ai/browser-model.ts";
 import {
   createModelSender,
@@ -358,6 +359,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     async disconnectModelConnection(id) {
       modelConnections.delete(id);
     },
+    sendMcpRequest: sendBrowserMcpRequest,
     async listZoteroItems(start, query) {
       if (!options.zoteroItems) throw new Error("unavailable");
       const needle = query?.trim().toLowerCase();
