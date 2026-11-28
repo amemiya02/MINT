@@ -364,7 +364,8 @@ test("declining a plugin update keeps its native read grant and withholds its wr
   await keyActions(typing(keys.enter));
   await until("the newly authorized write command to edit the native draft", () =>
     command<boolean>("POST", `/session/${session}/execute/sync`, {
-      script: "return document.querySelector('.cm-content')?.innerText.includes('SMOKE WRITE')",
+      script: `const draft = document.querySelector('.cm-content:focus')?.innerText;
+        return draft?.includes('plugin update draft') && draft.includes('SMOKE WRITE');`,
       args: [],
     }).then((written) => written || null),
   ).catch(explain);

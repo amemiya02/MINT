@@ -155,7 +155,9 @@ test("updating a local plugin retains its existing document grant", async ({ pag
 test("a writer can decline an additional action, then approve the update", async ({ page }) => {
   await launch(page, { locale: "en-US" });
   await page.keyboard.press("ControlOrMeta+n");
-  const editor = page.locator(".cm-content");
+  const editor = page.locator(".cm-content:visible");
+  await editor.fill("another open draft");
+  await page.keyboard.press("ControlOrMeta+n");
   await editor.fill("draft");
   const settings = page.getByRole("dialog", { name: "Settings" });
   const input = settings.getByLabel("Install a MINT plugin file");
@@ -189,6 +191,13 @@ test("a writer can decline an additional action, then approve the update", async
   await expect(page.getByRole("dialog", { name: "Draft toolkit" })).toContainText("Words: 1");
   await page.keyboard.press("Escape");
   await page.keyboard.press("ControlOrMeta+Shift+p");
-  await page.getByRole("option", { name: /Review marker/ }).click();
+  await page.getByRole("combobox").fill("Review marker");
+  await expect(page.getByRole("option", { name: /Review marker/ })).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(editor).toBeFocused();
+  await expect(editor).toContainText("draft");
   await expect(editor).toContainText("REVIEW");
+  await expect(page.locator(".cm-content").filter({ hasText: "another open draft" })).toHaveText(
+    "another open draft",
+  );
 });
