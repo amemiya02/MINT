@@ -32,6 +32,7 @@ export function ExternalAgentAccessNotice({ access }: { readonly access: AgentAc
       </p>
       <p>{t("agent.tools")}</p>
       <p>{t("agent.usesLogin")}</p>
+      <p>{t("agent.retention")}</p>
     </>
   );
 }

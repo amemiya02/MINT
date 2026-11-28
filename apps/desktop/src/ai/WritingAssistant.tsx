@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useEffectEvent,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -13,6 +14,7 @@ import { useT } from "../i18n/index.ts";
 import { isWithin, parentPath } from "../paths.ts";
 import type { Platform } from "../platform/platform.ts";
 import { useTabStore } from "../tabs/context.ts";
+import { useModalDialog } from "../window/useModalDialog.ts";
 import { FocusedWritingReview, type ReviewEntry } from "./FocusedWritingReview.tsx";
 import { MaterialRequestNotice, useMaterialRequests } from "./MaterialRequest.tsx";
 import { ProposedSelectionEdit } from "./ProposedSelectionEdit.tsx";
@@ -45,6 +47,7 @@ import {
   type SavedTurn,
   type SavedWritingTask,
   type WritingTaskOpenRequest,
+  type WritingTaskOpenResult,
   writeTaskCheckpoint,
   writingTaskWrites,
 } from "./writing-tasks.ts";
@@ -150,7 +153,10 @@ interface Props {
   readonly settingsOpen: boolean;
   readonly onAsk: () => void;
   readonly onTasks: () => void;
-  readonly onOpenReview: (task: SavedWritingTask, returnToTab: number) => Promise<boolean>;
+  readonly onOpenReview: (
+    task: SavedWritingTask,
+    returnToTab: number,
+  ) => Promise<WritingTaskOpenResult>;
   readonly onActivate: () => void;
   readonly onSettings: () => void;
   readonly externalChange: boolean;
@@ -183,6 +189,7 @@ export function WritingAssistant({
   const t = useT();
   const [hasSelection, setHasSelection] = useState(false);
   const [origin, setOrigin] = useState<Origin | null>(null);
+  const [temporary, setTemporary] = useState(false);
   const [restored, setRestored] = useState<RestoredReview | null>(null);
   const taskRunning = useRef(false);
   const [placement, setPlacement] = useState<"inline" | "sidebar" | null>(null);
@@ -223,7 +230,7 @@ export function WritingAssistant({
   useEffect(() => {
     if (!askRequest || askRequest === lastAsk.current || !editor) return;
     lastAsk.current = askRequest;
-    if (taskRunning.current) {
+    if (taskRunning.current || temporary) {
       setPlacement("sidebar");
       return;
     }
@@ -232,7 +239,7 @@ export function WritingAssistant({
     setOrigin({ id: crypto.randomUUID(), ...selection, folder: askRequest.folder });
     setRestored(null);
     setPlacement(askRequest.folder ? "sidebar" : "inline");
-  }, [askRequest, editor]);
+  }, [askRequest, editor, temporary]);
 
   useEffect(() => () => origin?.range.release(), [origin]);
 
@@ -242,6 +249,7 @@ export function WritingAssistant({
     reviews.set(origin.id, {
       tabId,
       busy: busyTask === origin.id,
+      temporary,
       focus(returnToTab) {
         onActivate();
         setPlacement("sidebar");
@@ -256,12 +264,12 @@ export function WritingAssistant({
     return () => {
       reviews.delete(origin.id);
     };
-  }, [busyTask, editor, onActivate, origin, platform, tabId]);
+  }, [busyTask, editor, onActivate, origin, platform, tabId, temporary]);
 
   const restoreTask = useEffectEvent((editor: MintEditor, request: WritingTaskOpenRequest) => {
     const { task, returnToTab } = request;
-    if (taskRunning.current) {
-      request.complete(false);
+    if (taskRunning.current || temporary) {
+      request.complete(temporary ? "temporary" : false);
       return;
     }
     const mapper = mapReviewRanges(task.baseline, editor.getText());
@@ -334,6 +342,13 @@ export function WritingAssistant({
           externalChange={externalChange}
           refreshDisk={refreshDisk}
           restored={restored}
+          temporary={temporary}
+          onTemporaryChange={setTemporary}
+          onEndTemporary={() => {
+            setTemporary(false);
+            setPlacement(null);
+            setOrigin(null);
+          }}
           onSaved={() => {
             if (!origin.folder) setHasSavedTasks(true);
           }}
@@ -363,6 +378,9 @@ function Composer({
   externalChange,
   refreshDisk,
   restored,
+  temporary,
+  onTemporaryChange,
+  onEndTemporary,
   onSaved,
   onTasks,
   onOpenReview,
@@ -384,6 +402,9 @@ function Composer({
 > & {
   readonly origin: Origin;
   readonly restored: RestoredReview | null;
+  readonly temporary: boolean;
+  readonly onTemporaryChange: (temporary: boolean) => void;
+  readonly onEndTemporary: () => void;
   readonly onSaved: () => void;
   readonly onBusyChange: (id: string | null) => void;
   readonly placement: "inline" | "sidebar" | null;
@@ -410,6 +431,11 @@ function Composer({
   const [loadFailed, setLoadFailed] = useState(false);
   const [turns, setTurns] = useState<readonly Turn[]>([]);
   const [title, setTitle] = useState(restored?.task.title ?? "");
+  const [confirmTemporaryClose, setConfirmTemporaryClose] = useState(false);
+  const [closingTemporary, setClosingTemporary] = useState(false);
+  const [temporaryCleanupFailed, setTemporaryCleanupFailed] = useState(false);
+  const temporaryAgentCopy = useRef(false);
+  const finishTabClose = useRef<((allow: boolean) => void) | null>(null);
   const savedAt = useRef(restored?.task.updatedAt);
   const [ready, setReady] = useState(!restored);
   const [saveFailed, setSaveFailed] = useState(false);
@@ -487,7 +513,7 @@ function Composer({
 
   const persist = useCallback(
     (taskTitle = title) => {
-      if (!taskTitle || !ready) return;
+      if (temporary || !taskTitle || !ready) return;
       const record = snapshot(taskTitle);
       void writeTaskCheckpoint(platform.writingTasks, async () => {
         const previous = savedAt.current;
@@ -504,7 +530,7 @@ function Composer({
         },
       );
     },
-    [platform, ready, snapshot, title],
+    [platform, ready, snapshot, temporary, title],
   );
 
   const saveCheckpoint = useEffectEvent(persist);
@@ -517,7 +543,7 @@ function Composer({
   });
 
   function queueReadingSave() {
-    if (!title || !ready) return;
+    if (temporary || !title || !ready) return;
     if (readingTimer.current !== null) clearTimeout(readingTimer.current);
     readingTimer.current = setTimeout(() => {
       readingTimer.current = null;
@@ -570,6 +596,24 @@ function Composer({
     onBusyChange(busy ? origin.id : null);
     return () => onBusyChange(null);
   }, [busy, onBusyChange, origin.id]);
+
+  useEffect(() => {
+    if (!temporary) return;
+    const unregister = store.registerCloseGuard(tabId, () => {
+      if (finishTabClose.current) return Promise.resolve(false);
+      store.activate(tabId);
+      setPlacement("sidebar");
+      setConfirmTemporaryClose(true);
+      return new Promise((resolve) => {
+        finishTabClose.current = resolve;
+      });
+    });
+    return () => {
+      unregister();
+      finishTabClose.current?.(false);
+      finishTabClose.current = null;
+    };
+  }, [setPlacement, store, tabId, temporary]);
 
   useEffect(() => {
     if (!active || !placement) return;
@@ -632,9 +676,38 @@ function Composer({
   }
 
   function close() {
+    if (temporary) {
+      setConfirmTemporaryClose(true);
+      return;
+    }
     persist();
     setPlacement(null);
     origin.editor.focus();
+  }
+
+  function finishTemporaryClose(confirmed: boolean) {
+    const finish = finishTabClose.current;
+    finishTabClose.current = null;
+    setConfirmTemporaryClose(false);
+    if (confirmed) {
+      onEndTemporary();
+      if (!finish) requestAnimationFrame(() => store.editor(tabId)?.focus());
+    }
+    finish?.(confirmed);
+  }
+
+  async function endTemporarySession() {
+    if (controller.current || checkingDisk.current || closingTemporary) return;
+    setClosingTemporary(true);
+    setTemporaryCleanupFailed(false);
+    try {
+      if (temporaryAgentCopy.current) await platform.writingTasks.removeTemporary(origin.id);
+      finishTemporaryClose(true);
+    } catch {
+      setTemporaryCleanupFailed(true);
+    } finally {
+      setClosingTemporary(false);
+    }
   }
 
   function openFocusedReview(returnToTab = tabId) {
@@ -654,7 +727,7 @@ function Composer({
     reading.current?.release();
     reading.current = null;
     setFocusedReview(false);
-    setPlacement(null);
+    setPlacement(temporary && returnToOriginal ? "sidebar" : null);
     if (returnToOriginal) {
       const id = returnTab.current;
       if (id !== tabId && store.getState().tabs.some((tab) => tab.id === id)) store.activate(id);
@@ -668,9 +741,10 @@ function Composer({
     const task = (await tasks.list(path, true)).find(
       (task) => task.id === id && task.path === path,
     );
-    if (!task || !(await onOpenReview(task, returnTab.current))) return false;
-    closeFocusedReview(false);
-    return true;
+    if (!task) return false;
+    const result = await onOpenReview(task, returnTab.current);
+    if (result === true) closeFocusedReview(false);
+    return result;
   }
 
   function locate() {
@@ -1038,7 +1112,9 @@ function Composer({
 
     const taskTitle = title || submitted.instruction;
     pending.current = submitted;
-    if (title) persist();
+    if (temporary) {
+      setTitle(taskTitle);
+    } else if (title) persist();
     else {
       try {
         const record = snapshot(taskTitle);
@@ -1065,6 +1141,10 @@ function Composer({
 
     let sentContext = submitted.context;
     try {
+      if (temporary && connection.kind === "agent") {
+        temporaryAgentCopy.current = true;
+        await platform.writingTasks.createTemporary(origin.id);
+      }
       const result = await materialRequests.send(
         (outbound, options) => {
           sentContext = outbound.taskContext;
@@ -1288,6 +1368,24 @@ function Composer({
   if (!placement) return null;
   const sidebar = placement === "sidebar";
   const latest = turns.at(-1);
+  const closeLabel = t(temporary ? "writing.temporary.close" : "settings.close");
+  const closeConfirmation = confirmTemporaryClose && (
+    <TemporarySessionClose
+      busy={busy}
+      closing={closingTemporary}
+      failed={temporaryCleanupFailed}
+      onCancel={() => finishTemporaryClose(false)}
+      onReview={
+        !sidebar && latest?.suggestions?.length
+          ? () => {
+              finishTemporaryClose(false);
+              viewChanges();
+            }
+          : undefined
+      }
+      onConfirm={() => void endTemporarySession()}
+    />
+  );
   if (focusedReview) {
     const entries = turns
       .flatMap((turn, index) =>
@@ -1320,7 +1418,7 @@ function Composer({
         }),
       )
       .sort((a, b) => a.from - b.from);
-    return (
+    const review = (
       <FocusedWritingReview
         entries={entries}
         file={name}
@@ -1364,6 +1462,12 @@ function Composer({
         onClose={() => closeFocusedReview()}
       />
     );
+    return (
+      <>
+        {review}
+        {closeConfirmation}
+      </>
+    );
   }
   if (
     !sidebar &&
@@ -1405,8 +1509,9 @@ function Composer({
           </button>
         )}
         <button type="button" className={buttonClass} onClick={close}>
-          {t("settings.close")}
+          {closeLabel}
         </button>
+        {closeConfirmation}
       </section>
     );
   }
@@ -1475,7 +1580,7 @@ function Composer({
           : "absolute right-3 bottom-3 max-h-[70%] w-[min(36rem,calc(100%-1.5rem))] rounded-lg shadow-lg"
       }`}
       onKeyDown={(event) => {
-        if (event.key === "Escape" && !event.nativeEvent.isComposing) {
+        if (event.key === "Escape" && !confirmTemporaryClose && !event.nativeEvent.isComposing) {
           event.stopPropagation();
           close();
         }
@@ -1491,13 +1596,14 @@ function Composer({
           {t(sidebar ? "writing.title" : "writing.ask")}
         </span>
         <div className="flex gap-2">
-          {title && (
+          {temporary && <span className="self-center text-xs">{t("writing.temporary.label")}</span>}
+          {title && !temporary && (
             <button type="button" className={buttonClass} onClick={onTasks}>
               {t("writing.tasks")}
             </button>
           )}
           <button type="button" className={buttonClass} onClick={close}>
-            {t("settings.close")}
+            {closeLabel}
           </button>
         </div>
       </header>
@@ -1821,6 +1927,16 @@ function Composer({
               </p>
             )}
             {loadFailed && <p role="alert">{t("writing.connectionsFailed")}</p>}
+            {!title && (
+              <label className="flex items-center gap-2 text-xs">
+                <input
+                  type="checkbox"
+                  checked={temporary}
+                  onChange={(event) => onTemporaryChange(event.target.checked)}
+                />
+                {t("writing.temporary.label")}
+              </label>
+            )}
             <TaskContextChecklist
               platform={platform}
               named={named}
@@ -1880,6 +1996,62 @@ function Composer({
           }}
         />
       )}
+      {closeConfirmation}
     </Container>
+  );
+}
+
+function TemporarySessionClose({
+  busy,
+  closing,
+  failed,
+  onCancel,
+  onReview,
+  onConfirm,
+}: {
+  readonly busy: boolean;
+  readonly closing: boolean;
+  readonly failed: boolean;
+  readonly onCancel: () => void;
+  readonly onReview?: () => void;
+  readonly onConfirm: () => void;
+}) {
+  const t = useT();
+  const { props, close } = useModalDialog(onCancel);
+  const description = useId();
+  return (
+    <dialog
+      {...props}
+      onCancel={(event) => {
+        if (closing) event.preventDefault();
+        else props.onCancel(event);
+      }}
+      aria-label={t("writing.temporary.close")}
+      aria-describedby={description}
+      className="m-auto max-h-[85vh] w-[min(28rem,90vw)] space-y-3 overflow-auto rounded-lg border border-(--mint-border) bg-(--mint-bg) p-4 text-(--mint-fg) backdrop:bg-black/30"
+    >
+      <h2 className="font-medium">{t("writing.temporary.close")}</h2>
+      <p id={description}>{t("writing.temporary.closePrompt")}</p>
+      {busy && <p>{t("writing.temporary.wait")}</p>}
+      {failed && <p role="alert">{t("writing.temporary.cleanupFailed")}</p>}
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className={buttonClass} disabled={closing} onClick={close}>
+          {t("unsaved.cancel")}
+        </button>
+        {onReview && (
+          <button type="button" className={buttonClass} disabled={closing} onClick={onReview}>
+            {t("writing.viewChanges")}
+          </button>
+        )}
+        <button
+          type="button"
+          className={buttonClass}
+          disabled={busy || closing}
+          onClick={onConfirm}
+        >
+          {t("writing.temporary.close")}
+        </button>
+      </div>
+    </dialog>
   );
 }

@@ -26,6 +26,7 @@ import {
   openWritingReviews,
   type SavedWritingTask,
   type WritingTaskOpenRequest,
+  type WritingTaskOpenResult,
   writingTaskWrites,
 } from "./ai/writing-tasks.ts";
 import type { AnnotationReviewKind } from "./annotations/AnnotationReview.tsx";
@@ -190,7 +191,10 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   >(null);
   const [taskListRevision, setTaskListRevision] = useState(0);
 
-  async function openWritingTask(task: SavedWritingTask | WritingTask, returnToTab?: number) {
+  async function openWritingTask(
+    task: SavedWritingTask | WritingTask,
+    returnToTab?: number,
+  ): Promise<WritingTaskOpenResult> {
     const from = store.getState().activeId;
     if (task.folder && task.folder !== folder) {
       await openFolder(task.folder);
@@ -209,7 +213,11 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     let tabId: number;
     if (task.path !== null) {
       const openTabs = store.getState().tabs.filter(({ path }) => path === task.path);
-      const busy = [...reviews.values()].some(
+      const openReviews = [...reviews.values()];
+      // Opening an existing document selects its first view.
+      if (openReviews.some((review) => review.tabId === openTabs[0]?.id && review.temporary))
+        return "temporary";
+      const busy = openReviews.some(
         (review) => review.busy && openTabs.some(({ id }) => id === review.tabId),
       );
       if (busy) return false;
@@ -221,12 +229,12 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     } else {
       tabId = store.restoreDocument(null, task.baseline);
     }
-    return new Promise<boolean>((resolve) => {
-      function complete(opened: boolean) {
+    return new Promise<WritingTaskOpenResult>((resolve) => {
+      function complete(result: WritingTaskOpenResult) {
         unsubscribe();
         setTaskRestore(null);
-        if (!opened && from !== null) store.activate(from);
-        resolve(opened);
+        if (result !== true && from !== null) store.activate(from);
+        resolve(result);
       }
       const unsubscribe = store.subscribe(() => {
         if (!store.getState().tabs.some(({ id }) => id === tabId)) complete(false);

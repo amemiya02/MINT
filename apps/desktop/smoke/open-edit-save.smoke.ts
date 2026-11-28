@@ -2656,6 +2656,8 @@ test("external Agent consent gates a real CLI process and keeps the manuscript o
   const executable = join(fixture, "fixture-codex");
   const calls = join(fixture, "calls.jsonl");
   const cancelInstruction = "Generate a reply I can stop.";
+  const temporaryInstruction = "Shorten this privately, apply directly";
+  const privateMaterial = "A confidential interview excerpt for the temporary session.";
   const writeTarget = join(fixture, "agent-write.txt");
   const initial = "Unsent paragraph.\n\nOn-disk sentence.";
   const configuredAccessNotice = "Configured file access may include writes across your account.";
@@ -2672,12 +2674,18 @@ fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify({
   args, prompt, pid: process.pid, cwd: process.cwd(), entries: fs.readdirSync(process.cwd()), readable,
 }) + "\\n");
 if (prompt.instruction === "Is the selected line clear?") fs.writeFileSync("review-copy.md", prompt.selectedText);
+if (prompt.instruction.startsWith(${JSON.stringify(temporaryInstruction)})) {
+  const copy = require("node:path").join(process.cwd(), "..", "retained-task-copy.md");
+  fs.writeFileSync(copy, prompt.taskContext.materials[0].text);
+}
 if (!readOnly) fs.writeFileSync(${JSON.stringify(writeTarget)}, "configured access ran");
 if (prompt.instruction === ${JSON.stringify(cancelInstruction)}) {
   console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "Partial Agent reply." } }));
   setInterval(() => {}, 1000);
 } else {
-  const text = prompt.annotationBatch
+  const text = prompt.instruction.startsWith(${JSON.stringify(temporaryInstruction)})
+    ? "<replacement>Short sentence.</replacement>"
+    : prompt.annotationBatch
     ? JSON.stringify({ results: prompt.annotationBatch.map(({ id }) => ({ id, replacement: "Brief sentence." })) })
     : "Fixture Agent reply.";
   console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text } }));
@@ -3006,8 +3014,8 @@ if (prompt.instruction === ${JSON.stringify(cancelInstruction)}) {
   await shows("Partial Agent reply.");
   const runningCall = JSON.parse((await readFile(calls, "utf8")).trim().split("\n").at(-1) ?? "");
   assert.equal(runningCall.prompt.instruction, cancelInstruction);
-  const callsBeforeReplacement = (await readFile(calls, "utf8")).trim().split("\n").length;
-  assert.equal(callsBeforeReplacement, callsBeforeRestart + 3);
+  const callsBeforeTemporary = (await readFile(calls, "utf8")).trim().split("\n").length;
+  assert.equal(callsBeforeTemporary, callsBeforeRestart + 3);
   process.kill(runningCall.pid, 0);
   await clickPath("//section[@aria-label='Ask AI']//button[normalize-space(.)='Stop generation']");
   await until("the stopped CLI process to be reaped", async () => {
@@ -3028,6 +3036,84 @@ if (prompt.instruction === ${JSON.stringify(cancelInstruction)}) {
   await shows("Partial Agent reply.");
   await assert.rejects(readdir(runningCall.cwd), { code: "ENOENT" });
   assert.equal(await readFile(draft, "utf8"), initial);
+
+  const composer = "//section[@aria-label='Ask AI']";
+  await clickPath(`${composer}//button[normalize-space(.)='Close']`);
+  await keyActions([...chord(keys.control, keys.end), ...chord(keys.shift, keys.home)]);
+  await click("Ask AI");
+  await clickPath(`${composer}//label[normalize-space(.)='Temporary session']/input`);
+  await addPastedWritingMaterial(privateMaterial);
+  await clickPath(`${composer}//label[normalize-space(.)='Instruction']/input`);
+  await keyActions([...typing(temporaryInstruction), ...typing(keys.enter)]);
+  await clickPath(`${composer}//button[normalize-space(.)='View changes']`);
+  const assistant = "//aside[@aria-label='Writing Assistant']";
+  await waitForView(
+    "the applied temporary edit to remain reviewable",
+    `const edit = document.querySelector('aside[aria-label="Writing Assistant"] [aria-label="Proposed edit 1 of 1"]');
+      return edit?.innerText.includes("Short sentence.") &&
+        [...edit.querySelectorAll("button")].some((button) => button.textContent === "Revert this edit");`,
+  );
+
+  const temporaryCall = JSON.parse((await readFile(calls, "utf8")).trim().split("\n").at(-1) ?? "");
+  assert.ok(temporaryCall.args.includes("--ephemeral"));
+  assert.equal(temporaryCall.prompt.selectedText, "On-disk sentence.");
+  assert.deepEqual(temporaryCall.prompt.taskContext.materials, [
+    { name: "Pasted text", text: privateMaterial },
+  ]);
+  const temporaryDir = dirname(temporaryCall.cwd);
+  assert.equal(
+    dirname(temporaryDir),
+    join(process.env.XDG_DATA_HOME, "io.github.amemiya02.mint", "ai", "temporary-tasks"),
+  );
+  assert.equal(
+    await readFile(join(temporaryDir, "retained-task-copy.md"), "utf8"),
+    privateMaterial,
+  );
+  assert.equal((await readdir(temporaryDir)).includes("review.json"), false);
+  await nativeShortcut("ctrl+s");
+  const retained = initial.replace("On-disk sentence.", "Short sentence.");
+  await until(
+    "the temporary revision to save",
+    async () => (await readFile(draft, "utf8")) === retained || null,
+  ).catch(explain);
+  const versionIds = await until("the ordinary version of the temporary revision", async () => {
+    const ids = await invokeNative<number[]>("list_versions", { path: draft });
+    const latest = ids.at(-1);
+    if (latest === undefined) return null;
+    const text = await invokeNative<string>("read_version", { path: draft, id: latest });
+    return text === retained ? ids : null;
+  }).catch(explain);
+  const taskRecordsBefore = await invokeNative<unknown[]>("list_writing_tasks", { path: draft });
+  assert.equal(JSON.stringify(taskRecordsBefore).includes(temporaryInstruction), false);
+
+  await clickPath(`${assistant}//button[normalize-space(.)='Close temporary session']`);
+  await shows("You will lose the option to revert edits by task.");
+  await clickPath("//dialog[@open]//button[normalize-space(.)='Close temporary session']");
+  await until("the temporary task directory to be removed", async () => {
+    try {
+      await readdir(temporaryDir);
+      return null;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return true;
+      throw error;
+    }
+  }).catch(explain);
+  await waitForView(
+    "the temporary review to close",
+    `return !document.querySelector('aside[aria-label="Writing Assistant"], dialog[aria-label="Close temporary session"]');`,
+  );
+  assert.equal(await readFile(draft, "utf8"), retained);
+  assert.deepEqual(await invokeNative<number[]>("list_versions", { path: draft }), versionIds);
+  assert.equal(
+    await invokeNative<string>("read_version", { path: draft, id: versionIds.at(-1) }),
+    retained,
+  );
+  assert.deepEqual(
+    await invokeNative<unknown[]>("list_writing_tasks", { path: draft }),
+    taskRecordsBefore,
+  );
+  const callsBeforeReplacement = (await readFile(calls, "utf8")).trim().split("\n").length;
+  assert.equal(callsBeforeReplacement, callsBeforeTemporary + 1);
 
   await openSettings();
   await clickSettingsButton("External Agents");

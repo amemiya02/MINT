@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useT } from "../i18n/index.ts";
+import { type MessageKey, useT } from "../i18n/index.ts";
 import { baseName } from "../paths.ts";
 import { useModalDialog } from "../window/useModalDialog.ts";
 import { type WritingTask, writingTaskDecisionLabel } from "./WritingTasks.tsx";
@@ -7,6 +7,7 @@ import {
   hasProposedEdits,
   openWritingReviews,
   type SavedWritingTask,
+  type WritingTaskOpenResult,
   type WritingTasksPlatform,
   writeTaskCheckpoint,
   writingTaskWrites,
@@ -30,7 +31,7 @@ export function WritingTasksDialog({
   readonly mode: "current" | "all" | "review";
   readonly onScopeChange: (all: boolean) => void;
   readonly onClose: () => void;
-  readonly onOpen: (task: SavedWritingTask | WritingTask) => Promise<boolean>;
+  readonly onOpen: (task: SavedWritingTask | WritingTask) => Promise<WritingTaskOpenResult>;
   readonly onDelete: (id: string) => void;
 }) {
   const t = useT();
@@ -42,7 +43,7 @@ export function WritingTasksDialog({
   const { props, close } = useModalDialog(onClose);
   const [entries, setEntries] = useState<readonly SavedWritingTask[] | null>(null);
   const [failed, setFailed] = useState(false);
-  const [openFailed, setOpenFailed] = useState(false);
+  const [openFailure, setOpenFailure] = useState<MessageKey | null>(null);
   const [opening, setOpening] = useState(false);
   const [confirm, setConfirm] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -90,13 +91,16 @@ export function WritingTasksDialog({
   const rowIds = new Set([...live.map(([id]) => id), ...saved.keys()]);
 
   async function open(task: SavedWritingTask | WritingTask) {
-    setOpenFailed(false);
+    const failure = reviewing ? "writing.review.fileOpenFailed" : "writing.tasks.openFailed";
+    setOpenFailure(null);
     setOpening(true);
     try {
-      if (await onOpen(task)) close();
-      else setOpenFailed(true);
+      const result = await onOpen(task);
+      if (result === true) close();
+      else
+        setOpenFailure(result === "temporary" ? "writing.temporary.closeBeforeOpening" : failure);
     } catch {
-      setOpenFailed(true);
+      setOpenFailure(failure);
     } finally {
       setOpening(false);
     }
@@ -159,11 +163,7 @@ export function WritingTasksDialog({
           {t("settings.close")}
         </button>
       </header>
-      {openFailed && (
-        <p role="alert">
-          {t(reviewing ? "writing.review.fileOpenFailed" : "writing.tasks.openFailed")}
-        </p>
-      )}
+      {openFailure && <p role="alert">{t(openFailure)}</p>}
       {failed && <p role="alert">{t("writing.tasks.loadFailed")}</p>}
       {!failed && !entries && <p role="status">{t("writing.tasks.loading")}</p>}
       {!!entries && !rowIds.size && (

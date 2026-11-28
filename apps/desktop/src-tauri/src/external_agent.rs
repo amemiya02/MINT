@@ -361,7 +361,7 @@ pub(crate) async fn send_external_agent(
             &current.path,
             access,
             &request,
-            scratch.path(),
+            &scratch,
             cli_paths(&app),
             &stopped,
             progress.as_ref(),
@@ -406,7 +406,7 @@ fn run_codex(
     path: &Path,
     access: AgentAccess,
     request: &WritingRequest,
-    scratch: &Path,
+    scratch: &crate::writing_tasks::AgentScratch,
     paths: Vec<PathBuf>,
     stopped: &AtomicBool,
     events: Option<&Channel<AgentEvent>>,
@@ -416,9 +416,9 @@ fn run_codex(
     if request.instruction.trim().is_empty() || input.len() > MAX_INPUT {
         return Err(failed());
     }
-    let private = tempfile::tempdir().map_err(|_| failed())?;
+    let private = scratch.private_spool().map_err(|_| failed())?;
     // Independent offsets allow live reads. Keep the spool outside the Agent task copy.
-    let stdin = temporary_input(&input).map_err(|_| failed())?;
+    let stdin = temporary_input(&input, private.path()).map_err(|_| failed())?;
     let output = tempfile::NamedTempFile::new_in(private.path()).map_err(|_| failed())?;
     let stdout = output.reopen().map_err(|_| failed())?;
     let mut reader = BufReader::new(output.reopen().map_err(|_| failed())?);
@@ -453,7 +453,7 @@ fn run_codex(
     }
     let mut child = command
         .arg("-")
-        .current_dir(scratch)
+        .current_dir(scratch.path())
         .stdin(Stdio::from(stdin))
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::null())
@@ -554,9 +554,9 @@ impl AgentOutput {
     }
 }
 
-fn temporary_input(input: &[u8]) -> std::io::Result<File> {
+fn temporary_input(input: &[u8], directory: &Path) -> std::io::Result<File> {
     use std::io::Write;
-    let mut stdin = tempfile::tempfile()?;
+    let mut stdin = tempfile::tempfile_in(directory)?;
     stdin.write_all(input)?;
     stdin.rewind()?;
     Ok(stdin)
