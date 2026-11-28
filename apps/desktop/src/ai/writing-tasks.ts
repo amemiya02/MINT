@@ -17,6 +17,8 @@ export interface SavedSuggestion {
   readonly after: string;
   readonly status: EditStatus;
   readonly appliedText?: string;
+  readonly note?: string;
+  readonly batchApplied?: boolean;
   readonly comments?: readonly (WritingTurn & { readonly id: number })[];
   readonly range: ReviewRange;
 }
@@ -44,6 +46,7 @@ export interface SavedWritingTask {
   readonly origin: ReviewRange & { readonly text: string };
   readonly reading: { readonly anchor: number; readonly head: number; readonly top: number };
   readonly reviewScroll: number;
+  readonly reviewSelection?: string;
   readonly showSource: boolean;
   readonly turns: readonly SavedTurn[];
   readonly pending?: Omit<SavedTurn, "reply" | "suggestions" | "direct" | "status" | "partial">;
@@ -51,6 +54,7 @@ export interface SavedWritingTask {
 
 export interface WritingTasksPlatform {
   list(path: string | null, all?: boolean): Promise<SavedWritingTask[]>;
+  listReviewsInFolder(folder: string): Promise<readonly SavedReviewLink[]>;
   create(task: SavedWritingTask): Promise<void>;
   update(task: SavedWritingTask, expectedUpdatedAt: number): Promise<void>;
   remove(id: string): Promise<void>;
@@ -58,11 +62,27 @@ export interface WritingTasksPlatform {
   removeTemporary(id: string): Promise<void>;
 }
 
+export interface SavedReviewLink {
+  readonly id: string;
+  readonly path: string;
+  readonly title: string;
+}
+
+export interface WritingTaskOpenRequest {
+  readonly task: SavedWritingTask;
+  readonly returnToTab: number | undefined;
+  readonly complete: (opened: boolean) => void;
+}
+
+export function hasProposedEdits(task: SavedWritingTask) {
+  return task.turns.some((turn) => !!turn.suggestions?.length);
+}
+
 interface OpenWritingReview {
   readonly tabId: number;
   readonly busy: boolean;
   readonly temporary: boolean;
-  focus(): void;
+  focus(returnToTab?: number): void;
   remove(): void;
 }
 

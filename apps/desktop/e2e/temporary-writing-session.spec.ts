@@ -119,6 +119,9 @@ test("a temporary session allows selective reversion before clearing its review 
   await confirm.getByRole("button", { name: "Cancel" }).click();
   await expect(review.getByRole("button", { name: "Revert this edit" })).toHaveCount(1);
 
+  await review.getByRole("button", { name: "Review proposed edits", exact: true }).click();
+  const focusedReview = page.getByRole("dialog", { name: "Review proposed edits" });
+  await expect(focusedReview).toBeVisible();
   const closingWindow = page.evaluate(async () => {
     const platform = (window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__;
     await platform.closeWindow();
@@ -127,6 +130,7 @@ test("a temporary session allows selective reversion before clearing its review 
   await expect(confirm).toBeVisible();
   await confirm.getByRole("button", { name: "Cancel" }).click();
   expect(await closingWindow).toBe(false);
+  await focusedReview.getByRole("button", { name: "Close", exact: true }).click();
 
   await runMenuItem(page, "edit.writingTasks");
   const historyDialog = page.getByRole("dialog", { name: "Writing tasks", exact: true });

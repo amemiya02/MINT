@@ -340,6 +340,48 @@ pub async fn list_writing_tasks(
     .await
 }
 
+#[derive(Serialize)]
+pub struct ReviewLink {
+    id: String,
+    path: String,
+    title: String,
+}
+
+#[tauri::command]
+pub async fn list_writing_reviews_in_folder(
+    app: AppHandle,
+    folder: String,
+) -> Result<Vec<ReviewLink>, String> {
+    blocking(move || {
+        let root = root(&app, SAVED_TASKS)?;
+        let _guard = TASKS.lock().map_err(|error| error.to_string())?;
+        Ok(records(&root)?
+            .into_iter()
+            .filter_map(|(_, task)| {
+                let path = task
+                    .path
+                    .filter(|path| Path::new(path).starts_with(&folder))?;
+                let has_edits = task.review.get("turns")?.as_array()?.iter().any(|turn| {
+                    turn.get("suggestions")
+                        .and_then(Value::as_array)
+                        .is_some_and(|suggestions| !suggestions.is_empty())
+                });
+                has_edits.then(|| ReviewLink {
+                    id: task.id,
+                    path,
+                    title: task
+                        .review
+                        .get("title")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
+                })
+            })
+            .collect())
+    })
+    .await
+}
+
 #[tauri::command]
 pub async fn create_writing_task(app: AppHandle, task: WritingTask) -> Result<(), String> {
     blocking(move || save(&root(&app, SAVED_TASKS)?, task, None)).await
