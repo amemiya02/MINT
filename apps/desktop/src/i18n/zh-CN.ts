@@ -46,6 +46,7 @@ export const zhCN: Messages = {
   "writing.scope": "范围",
   "writing.scope.selection": "当前选区",
   "writing.scope.document": "当前稿件",
+  "writing.scope.untitled": "未命名稿件",
   "writing.scope.instruction": "仅指令",
   "writing.context": "将发送的任务材料",
   "materials.currentDraft": "当前稿",

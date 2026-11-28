@@ -15,6 +15,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
 import { createModelSender, type ModelResponseEvent } from "../ai/model.ts";
+import type { WritingReply } from "../ai/writing-sender.ts";
 import { type PrintJob, printEvents } from "../print/protocol.ts";
 import { pickBrowserFile } from "./pick-file.ts";
 import type {
@@ -41,27 +42,57 @@ const nativeItems = {
 } as const satisfies Record<string, PredefinedMenuItemOptions["item"]>;
 
 type NativeModelEvent =
-  | Exclude<ModelResponseEvent, { kind: "data" }>
+  | { readonly kind: "started" }
+  | Exclude<ModelResponseEvent, { kind: "data" | "done" }>
+  | { readonly kind: "done"; readonly error: number | string | null }
   | { readonly kind: "data"; readonly bytes: number[] };
 
-const sendTauriModelMessage = createModelSender(async (request, receive) => {
-  let finish = () => {};
-  const completed = new Promise<void>((resolve) => {
+function writingCancellation(signal?: AbortSignal) {
+  const requestId = signal ? crypto.randomUUID() : undefined;
+  let started = false;
+  function stop() {
+    if (started && requestId) void invoke("stop_writing_request", { requestId }).catch(() => {});
+  }
+  signal?.addEventListener("abort", stop, { once: true });
+  return {
+    requestId,
+    started() {
+      started = true;
+      if (signal?.aborted) stop();
+    },
+    dispose() {
+      signal?.removeEventListener("abort", stop);
+    },
+  };
+}
+
+const sendTauriModelMessage = createModelSender(async (request, receive, signal) => {
+  signal?.throwIfAborted();
+  const cancellation = writingCancellation(signal);
+  let finish: (error: number | string | null) => void = () => {};
+  const completed = new Promise<number | string | null>((resolve) => {
     finish = resolve;
   });
   const onEvent = new Channel<NativeModelEvent>((event) => {
+    if (event.kind === "started") {
+      cancellation.started();
+      return;
+    }
     receive(event.kind === "data" ? { ...event, bytes: Uint8Array.from(event.bytes) } : event);
-    if (event.kind === "done") finish();
+    if (event.kind === "done") finish(event.error);
   });
   try {
+    const { requestId } = cancellation;
     if ("connectionId" in request) {
-      await invoke<void>("send_connected_model_request", { ...request, onEvent });
+      await invoke<void>("send_connected_model_request", { ...request, onEvent, requestId });
     } else {
-      await invoke<void>("send_model_request", { request, onEvent });
+      await invoke<void>("send_model_request", { request, onEvent, requestId });
     }
     // The invoke result can arrive before the ordered channel's last chunk.
-    await completed;
+    const error = await completed;
+    if (error !== null) throw error;
   } finally {
+    cancellation.dispose();
     onEvent.onmessage = () => {};
   }
 });
@@ -77,8 +108,38 @@ export function createTauriPlatform(): Platform {
       approve: ({ path, revision }, access) =>
         invoke("approve_external_agent", { path, revision, access }),
       forget: (path) => invoke("forget_external_agent", { path }),
-      send: ({ path, revision }, access, request) =>
-        invoke("send_external_agent", { path, revision, access, request }),
+      async send({ path, revision }, access, request, options) {
+        const args = { path, revision, access, request };
+        if (!options) return invoke("send_external_agent", args);
+        options.signal?.throwIfAborted();
+        const cancellation = writingCancellation(options.signal);
+        type AgentEvent =
+          | { kind: "started" }
+          | { kind: "text"; text: string }
+          | { kind: "done"; reply: WritingReply | null; error: string | null };
+        let finish: (result: Extract<AgentEvent, { kind: "done" }>) => void = () => {};
+        const completed = new Promise<Extract<AgentEvent, { kind: "done" }>>((resolve) => {
+          finish = resolve;
+        });
+        const onEvent = new Channel<AgentEvent>((event) => {
+          if (event.kind === "started") cancellation.started();
+          else if (event.kind === "done") finish(event);
+          else if (!options.signal?.aborted) options.onDelta?.(event.text);
+        });
+        try {
+          await invoke("send_external_agent", {
+            ...args,
+            onEvent,
+            requestId: cancellation.requestId,
+          });
+          const { error, reply } = await completed;
+          if (error || !reply) throw error ?? "agentFailed";
+          return reply;
+        } finally {
+          cancellation.dispose();
+          onEvent.onmessage = () => {};
+        }
+      },
     },
     sendModelMessage: sendTauriModelMessage,
     listModelConnections: () => invoke("list_model_connections"),

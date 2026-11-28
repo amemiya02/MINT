@@ -83,16 +83,19 @@ export function useMaterialRequests() {
       request: WritingRequest,
       recipient: string,
       folder: string | null,
-      options?: WritingOptions & { readonly onResume?: () => void },
+      options?: WritingOptions & {
+        readonly onApproval?: () => void;
+        readonly onResume?: (decision: MaterialDecision | null) => void;
+      },
     ) {
       const id = ++sequence.current;
       let outbound = request;
       while (true) {
         options?.signal?.throwIfAborted();
         const reply = await send(outbound, options);
-        options?.signal?.throwIfAborted();
         const extra = requestedMaterial(reply);
         if (!extra) return reply;
+        options?.signal?.throwIfAborted();
         // A skipped or supplied request is already resolved for this task.
         const previous = outbound.taskContext?.materialDecisions ?? [];
         if (id !== sequence.current || previous.some(({ name }) => name === extra.name))
@@ -107,11 +110,12 @@ export function useMaterialRequests() {
           };
           signal?.addEventListener("abort", abort, { once: true });
           setPending({ ...extra, id: previous.length, recipient, folder });
+          options?.onApproval?.();
         });
         if (id === sequence.current) {
           decision.current = null;
           setPending(null);
-          options?.onResume?.();
+          options?.onResume?.(response);
         }
         if (!response || id !== sequence.current) throw new Error("cancelled");
         outbound = {

@@ -1116,6 +1116,8 @@ test("a model receives only the sample or the chosen selection through the nativ
   const requests: { url?: string; method?: string; authorization?: string; body: unknown }[] = [];
   let pendingReply: ServerResponse | undefined;
   let pendingPreview: ServerResponse | undefined;
+  let stopped = false;
+  const stopInstruction = "Start another preview for the background task.";
   const previewInstruction = "Revise the opening and closing.";
   const endpoint = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
@@ -1132,11 +1134,30 @@ test("a model receives only the sample or the chosen selection through the nativ
       return;
     }
     const payload = JSON.parse(body);
-    if (!payload.stream) {
-      if (payload.messages.at(-1)?.content.includes(previewInstruction)) {
-        pendingPreview = response;
-        return;
-      }
+    const instruction = payload.messages.at(-1)?.content ?? "";
+    if (instruction.includes(stopInstruction)) {
+      response.once("close", () => {
+        stopped = !response.writableEnded;
+      });
+      response.writeHead(200, { "Content-Type": "text/event-stream" });
+      response.write(
+        `data: ${JSON.stringify({
+          choices: [
+            {
+              delta: {
+                content: "<replacement>Ready to review.</replacement> Native partial text.",
+              },
+            },
+          ],
+        })}\n\n`,
+      );
+      return;
+    }
+    if (instruction.includes(previewInstruction)) {
+      pendingPreview = response;
+      return;
+    }
+    if (instruction.includes("apply directly")) {
       response.writeHead(200, { "Content-Type": "application/json" }).end(
         JSON.stringify({
           choices: [
@@ -1287,7 +1308,7 @@ test("a model receives only the sample or the chosen selection through the nativ
       messages: { role: string; content: string }[];
     };
     assert.equal(payload.model, "native-fixture");
-    assert.equal(payload.stream, false);
+    assert.equal(payload.stream, true);
     assert.deepEqual(
       payload.messages.map(({ role }) => role),
       ["system", "user"],
@@ -1321,7 +1342,7 @@ test("a model receives only the sample or the chosen selection through the nativ
     assert.equal(requests[2]?.authorization, `Bearer ${secret}`);
     assert.deepEqual(requests[2]?.body, {
       model: "native-fixture",
-      stream: false,
+      stream: true,
       messages: [
         { role: "system", content: payload.messages[0]?.content },
         {
@@ -1372,6 +1393,32 @@ test("a model receives only the sample or the chosen selection through the nativ
     await until(
       "undo to preserve the external edit",
       async () => (await readFile(draft, "utf8")) === externallyEdited || null,
+    ).catch(explain);
+
+    await keyActions(chord(keys.control, "a"));
+    await askSelection(stopInstruction);
+    await shows("Native partial text.");
+    await nativeShortcut("ctrl+n");
+    await waitForView(
+      "the second document to have focus during native streaming",
+      "return document.querySelector('[role=tab][aria-selected=true]')?.textContent === 'Untitled' && document.activeElement?.matches('.cm-content');",
+    );
+    await clickPath(
+      "//section[@aria-label='Writing tasks']//button[normalize-space(.)='Stop generation']",
+    );
+    await until("Stop to close the unfinished HTTP response", async () => stopped || null).catch(
+      explain,
+    );
+    await clickPath(
+      "//section[@aria-label='Writing tasks']//button[normalize-space(.)='Open task for ask-ai-model.md']",
+    );
+    await shows("Native partial text.");
+    await clickPath(
+      "//aside[@aria-label='Writing Assistant']//button[normalize-space(.)='Apply proposed edit']",
+    );
+    await until(
+      "only the complete native edit to be autosaved",
+      async () => (await readFile(draft, "utf8")) === "\uFEFFReady to review." || null,
     ).catch(explain);
   } finally {
     endpoint.closeAllConnections();
@@ -1689,7 +1736,7 @@ test("a native model reply stays editable and untitled until the author chooses 
       assert.equal(request.method, "POST");
       assert.equal(request.authorization, "Bearer draft-fixture-secret");
       assert.equal(request.body.model, "native-draft-fixture");
-      assert.equal(request.body.stream, false);
+      assert.equal(request.body.stream, true);
       assert.deepEqual(JSON.parse(request.body.messages.at(-1)?.content ?? ""), {
         instruction: `Write a Markdown draft following this instruction. Return only the draft text, without a surrounding code fence.\n\n${instruction}`,
         taskContext:
@@ -2026,6 +2073,7 @@ test("external Agent consent gates a real CLI process and keeps the manuscript o
   const draft = join(fixture, "draft.md");
   const executable = join(fixture, "fixture-codex");
   const calls = join(fixture, "calls.jsonl");
+  const cancelInstruction = "Generate a reply I can stop.";
   const writeTarget = join(fixture, "agent-write.txt");
   const initial = "Unsent paragraph.\n\nOn-disk sentence.";
   await writeFile(draft, initial);
@@ -2035,14 +2083,19 @@ test("external Agent consent gates a real CLI process and keeps the manuscript o
 const fs = require("node:fs");
 const args = process.argv.slice(2);
 const readOnly = args.includes("--sandbox") && args[args.indexOf("--sandbox") + 1] === "read-only";
-const prompt = fs.readFileSync(0, "utf8");
+const prompt = JSON.parse(fs.readFileSync(0, "utf8"));
 const readable = fs.readFileSync(${JSON.stringify(draft)}, "utf8");
 fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify({
-  args, prompt: JSON.parse(prompt), cwd: process.cwd(), entries: fs.readdirSync(process.cwd()), readable,
+  args, prompt, pid: process.pid, cwd: process.cwd(), entries: fs.readdirSync(process.cwd()), readable,
 }) + "\\n");
 if (!readOnly) fs.writeFileSync(${JSON.stringify(writeTarget)}, "configured access ran");
-console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "Fixture Agent reply." } }));
-console.log(JSON.stringify({ type: "turn.completed" }));
+if (prompt.instruction === ${JSON.stringify(cancelInstruction)}) {
+  console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "Partial Agent reply." } }));
+  setInterval(() => {}, 1000);
+} else {
+  console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "Fixture Agent reply." } }));
+  console.log(JSON.stringify({ type: "turn.completed" }));
+}
 `,
     { mode: 0o755 },
   );
@@ -2255,6 +2308,40 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   assert.ok(!draftCall.args.includes("--sandbox"));
   assert.equal(await readFile(draft, "utf8"), initial);
 
+  const sourceTab = "//button[@role='tab' and normalize-space(.)='draft.md']";
+  await clickPath(sourceTab);
+  await keyActions([...chord(keys.control, keys.end), ...chord(keys.shift, keys.home)]);
+  await click("Ask AI");
+  await waitForView(
+    "the configured Agent to appear in Ask AI",
+    `return [...document.querySelectorAll('section[aria-label="Ask AI"] select option')]
+      .some((option) => option.textContent.includes(${JSON.stringify(path)}));`,
+  );
+  await command("POST", `/session/${session}/execute/sync`, {
+    script: `const action = document.querySelector('section[aria-label="Ask AI"] select');
+      action.value = 'comment';
+      action.dispatchEvent(new Event('change', { bubbles: true }));`,
+    args: [],
+  });
+  await clickPath("//section[@aria-label='Ask AI']//label[normalize-space(.)='Instruction']/input");
+  await keyActions([...typing(cancelInstruction), ...typing(keys.enter)]);
+  await shows("Partial Agent reply.");
+  const runningCall = JSON.parse((await readFile(calls, "utf8")).trim().split("\n").at(-1) ?? "");
+  assert.equal(runningCall.prompt.instruction, cancelInstruction);
+  process.kill(runningCall.pid, 0);
+  await clickPath("//section[@aria-label='Ask AI']//button[normalize-space(.)='Stop generation']");
+  await until("the stopped CLI process to be reaped", async () => {
+    try {
+      process.kill(runningCall.pid, 0);
+      return null;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") return true;
+      throw error;
+    }
+  }).catch(explain);
+  await shows("Partial Agent reply.");
+  assert.equal(await readFile(draft, "utf8"), initial);
+
   await openSettings();
   await click("External Agents");
   await writeFile(
@@ -2265,7 +2352,7 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   );
   await click("Try example");
   await shows("Agent access changed. Review its permissions before sending.");
-  assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, 6);
+  assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, 7);
   // The warning can render before reinspection finishes and enables the retry.
   await clickSettingsButton("Try example");
   await click("Decline");

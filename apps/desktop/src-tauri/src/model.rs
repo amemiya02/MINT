@@ -1,5 +1,6 @@
 //! Send an OpenAI-compatible request from a document window using the system TLS
 //! configuration. The renderer owns the message format and reply interpretation.
+use crate::writing_requests::Registration;
 use reqwest::header::{HeaderValue, CONTENT_TYPE};
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
@@ -44,9 +45,10 @@ struct Message {
     rename_all_fields = "camelCase"
 )]
 pub(crate) enum ModelEvent {
+    Started,
     Headers { content_type: String },
     Data { bytes: Vec<u8> },
-    Done,
+    Done { error: Option<ModelError> },
 }
 
 #[derive(Serialize)]
@@ -112,13 +114,22 @@ pub(crate) async fn send_model_request(
     window: WebviewWindow,
     request: ModelRequest,
     on_event: Channel<ModelEvent>,
+    request_id: Option<String>,
 ) -> Result<(), ModelError> {
     require_document_window(&window)?;
     let url = service_url(&request.url)?;
     if !url.path().ends_with("/chat/completions") {
         return Err(ModelError::Request("invalidAddress"));
     }
-    send(url, request.api_key, request.body, on_event).await
+    send_until_stopped(
+        window,
+        request_id,
+        url,
+        request.api_key,
+        request.body,
+        on_event,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -127,17 +138,60 @@ pub(crate) async fn send_connected_model_request(
     connection_id: String,
     body: ConnectedCompletion,
     on_event: Channel<ModelEvent>,
+    request_id: Option<String>,
 ) -> Result<(), ModelError> {
-    let (endpoint, model, key) = crate::model_connections::with_connections(window, move |store| {
-        store.resolve(&connection_id)
-    })
-    .await?;
+    let (endpoint, model, key) =
+        crate::model_connections::with_connections(window.clone(), move |store| {
+            store.resolve(&connection_id)
+        })
+        .await?;
     let body = Completion {
         model,
         messages: body.messages,
         stream: body.stream,
     };
-    send(endpoint, key, body, on_event).await
+    send_until_stopped(window, request_id, endpoint, key, body, on_event).await
+}
+
+async fn send_until_stopped(
+    window: WebviewWindow,
+    request_id: Option<String>,
+    url: Url,
+    api_key: Option<String>,
+    completion: Completion,
+    on_event: Channel<ModelEvent>,
+) -> Result<(), ModelError> {
+    let events = on_event.clone();
+    let result = if let Some(id) = request_id {
+        let (start, mut ready) = tauri::async_runtime::channel(1);
+        let job = tauri::async_runtime::spawn(async move {
+            ready.recv().await.ok_or(ModelError::Request("stopped"))?;
+            send(url, api_key, completion, events).await
+        });
+        let abort = job.inner().abort_handle();
+        let registration = Registration::start(&window, id, move || abort.abort());
+        let _registration = match registration {
+            Ok(registration) => registration,
+            Err(error) => {
+                job.abort();
+                return Err(ModelError::Request(error));
+            }
+        };
+        if on_event.send(ModelEvent::Started).is_ok() {
+            let _ = start.send(()).await;
+        } else {
+            job.abort();
+        }
+        job.await.unwrap_or(Err(ModelError::Request("stopped")))
+    } else {
+        send(url, api_key, completion, events).await
+    };
+    // Send failures on the same ordered channel so their preceding deltas are retained.
+    on_event
+        .send(ModelEvent::Done {
+            error: result.err(),
+        })
+        .map_err(|_| ModelError::Request("network"))
 }
 
 async fn send(
@@ -192,5 +246,5 @@ async fn send(
             bytes: chunk.to_vec(),
         })?;
     }
-    send(ModelEvent::Done)
+    Ok(())
 }

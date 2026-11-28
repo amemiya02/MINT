@@ -138,8 +138,7 @@ interface Choice {
   finish_reason?: string | null;
 }
 
-function readChoice(payload: string): Choice | undefined {
-  const value = JSON.parse(payload);
+function readChoice(value: { choices?: Choice[] } | null): Choice | undefined {
   if (!Array.isArray(value?.choices)) throw "invalidReply";
   return value.choices[0];
 }
@@ -154,6 +153,7 @@ export function createModelSender(transport: ModelTransport): SendModelMessage {
     let finishReason: string | null = null;
     let sawEnd = false;
     let malformed = false;
+    let limitReached = false;
     let buffer = "";
     let eventData: string[] = [];
 
@@ -161,13 +161,19 @@ export function createModelSender(transport: ModelTransport): SendModelMessage {
       if (!eventData.length) return;
       const payload = eventData.join("\n");
       eventData = [];
-      if (sawEnd || malformed) return;
+      if (sawEnd || malformed || limitReached) return;
       if (payload === "[DONE]") {
         sawEnd = true;
         return;
       }
       try {
-        const choice = readChoice(payload);
+        const event = JSON.parse(payload);
+        const code = event?.error?.code;
+        if (code === "insufficient_quota" || code === "rate_limit_exceeded") {
+          limitReached = true;
+          return;
+        }
+        const choice = readChoice(event);
         if (typeof choice?.finish_reason === "string") finishReason = choice.finish_reason;
         const delta = choice?.delta?.content;
         if (typeof delta === "string" && delta) {
@@ -215,11 +221,12 @@ export function createModelSender(transport: ModelTransport): SendModelMessage {
       await transport({ url, apiKey, body: { ...body, model } }, receive, options?.signal);
     }
     if (streamed) {
+      if (limitReached) throw "limit";
       if (malformed) throw "invalidReply";
       if (!sawEnd && !finishReason) throw "interrupted";
     } else {
       try {
-        const choice = readChoice(buffer);
+        const choice = readChoice(JSON.parse(buffer));
         const content = choice?.message?.content;
         if (typeof content === "string") text = content;
         if (typeof choice?.finish_reason === "string") finishReason = choice.finish_reason;
@@ -227,7 +234,7 @@ export function createModelSender(transport: ModelTransport): SendModelMessage {
         throw "invalidReply";
       }
     }
-    if (!text.trim()) throw "invalidReply";
+    if (!text.trim()) throw finishReason === "length" ? "limit" : "invalidReply";
     return { text, streamed, finishReason };
   };
 }

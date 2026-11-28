@@ -13,6 +13,7 @@ import { sharedFileEffects } from "./file-text.ts";
 export type RequestInlineCompletion = (context: {
   readonly before: string;
   readonly after: string;
+  readonly signal: AbortSignal;
 }) => Promise<string | null>;
 
 const pause = 450;
@@ -50,6 +51,7 @@ export function inlineCompletion(request: RequestInlineCompletion) {
       suggestion: string | null = null;
       private timer: ReturnType<typeof setTimeout> | undefined;
       private version = 0;
+      private running: AbortController | undefined;
 
       update(update: ViewUpdate) {
         if (
@@ -94,6 +96,8 @@ export function inlineCompletion(request: RequestInlineCompletion) {
       private invalidate() {
         this.version++;
         clearTimeout(this.timer);
+        this.running?.abort();
+        this.running = undefined;
       }
 
       dismiss(view: EditorView) {
@@ -106,14 +110,19 @@ export function inlineCompletion(request: RequestInlineCompletion) {
       private async complete(view: EditorView, version: number) {
         const from = insertionPoint(view);
         if (version !== this.version || from === null) return;
+        const running = new AbortController();
+        this.running = running;
         let text: string | null;
         try {
           text = await request({
             before: view.state.sliceDoc(Math.max(0, from - prefixLimit), from),
             after: view.state.sliceDoc(from, from + suffixLimit),
+            signal: running.signal,
           });
         } catch {
           return;
+        } finally {
+          if (this.running === running) this.running = undefined;
         }
         if (version !== this.version || from !== insertionPoint(view)) return;
         if (!text?.trim() || text.length > suggestionLimit || /[\r\n]/.test(text)) return;

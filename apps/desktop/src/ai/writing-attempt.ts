@@ -1,6 +1,13 @@
-import type { WritingReply } from "./writing-sender.ts";
+import type { WritingReply, WritingRequest } from "./writing-sender.ts";
 
-export type AttemptStatus = "working" | "approval" | "complete" | "stopped" | "interrupted" | "limit" | "failed";
+export type AttemptStatus =
+  | "working"
+  | "approval"
+  | "complete"
+  | "stopped"
+  | "interrupted"
+  | "limit"
+  | "failed";
 
 export function replyStatus(reply: WritingReply): AttemptStatus {
   if (reply.finishReason === "length") return "limit";
@@ -14,4 +21,12 @@ export function failureStatus(problem: unknown, signal: AbortSignal): AttemptSta
   return code === "network" || code === "timeout" || code === "interrupted"
     ? "interrupted"
     : "failed";
+}
+
+export function writingMaterialNames(request: WritingRequest): string[] {
+  const context = request.taskContext;
+  return [
+    ...(context?.currentDraft ? [context.currentDraft.name] : []),
+    ...(context?.materials?.map(({ name }) => name) ?? []),
+  ];
 }

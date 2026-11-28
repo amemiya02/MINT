@@ -142,7 +142,9 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   } = useOverlays();
   const { shortcuts, wikilinkFolders, inlineCompletionModel } = useSettings().settings;
   const active = tabs.find((tab) => tab.id === activeId) ?? null;
-  const [writingTasks, setWritingTasks] = useState<ReadonlyMap<string, WritingTask>>(() => new Map());
+  const [writingTasks, setWritingTasks] = useState<ReadonlyMap<string, WritingTask>>(
+    () => new Map(),
+  );
   const publishWritingTask = useCallback((id: string, task: WritingTask | null) => {
     setWritingTasks((previous) => {
       if (!task && !previous.has(id)) return previous;
@@ -160,7 +162,14 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     tabId: number;
     origin: WritingSelection;
   } | null>(null);
+  const [agentDialogVisible, setAgentDialogVisible] = useState(false);
   useEffect(() => () => agentSelection?.origin.range.release(), [agentSelection]);
+  useEffect(() => {
+    if (agentSelection && !tabs.some(({ id }) => id === agentSelection.tabId)) {
+      setAgentSelection(null);
+      setAgentDialogVisible(false);
+    }
+  }, [agentSelection, tabs]);
   const [historyPath, setHistoryPath] = useState<string | null>(null);
   const [annotationsOpen, setAnnotationsOpen] = useState(false);
   const [annotationError, setAnnotationError] = useState<{ path: string; reason: string } | null>(
@@ -466,6 +475,11 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
       if (active) setAnnotationsOpen((open) => !open);
     },
     "edit.askExternalAgent": () => {
+      if (agentSelection) {
+        store.activate(agentSelection.tabId);
+        setAgentDialogVisible(true);
+        return;
+      }
       const editor = activeId === null ? undefined : store.editor(activeId);
       const origin = editor && captureWritingSelection(editor);
       if (activeId === null || !origin) {
@@ -474,6 +488,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
       }
       setShellError(null);
       setAgentSelection({ tabId: activeId, origin });
+      setAgentDialogVisible(true);
     },
     "edit.pastePlainText": () => {
       const editor = activeId === null ? undefined : store.editor(activeId);
@@ -554,6 +569,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     [platform, store, recovery, annotationStorage],
   );
 
+  const agentTab = tabs.find(({ id }) => id === agentSelection?.tabId);
   const exportedTab = tabs.find((tab) => tab.id === exporting?.tab) ?? null;
   const name = active ? tabName(t, active) : null;
   const dirty = active?.dirty ?? false;
@@ -572,7 +588,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     return true;
   }
 
-  return (
+  const content = (
     <div className="flex h-full flex-col bg-(--mint-bg) text-(--mint-fg)">
       <UpdateNotice updates={updates} />
       <SettingsIssues />
@@ -705,7 +721,6 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
               />
             )}
             <WritingTasks tasks={writingTasks} activeId={activeId} />
-            <WritingTasksContext value={publishWritingTask}>
             <main
               className={`grid min-h-0 flex-1 grid-rows-1 ${selected.reference === null ? "grid-cols-1" : "grid-cols-2"}`}
             >
@@ -737,6 +752,9 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
                     draftTabs.has(tab.id) ? (
                       <DraftComposer
                         platform={platform}
+                        tabId={tab.id}
+                        name={tabName(t, tab)}
+                        active={activeId === tab.id}
                         folder={folder}
                         settingsOpen={settingsOpen}
                         canApplyDraft={() => emptyDraftEditor(tab.id) !== null}
@@ -779,7 +797,6 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
                 />
               )}
             </main>
-            </WritingTasksContext>
             {active && (
               <StatusBar
                 openHistory={() => setHistoryPath(active.path)}
@@ -899,6 +916,14 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
         <ExternalAgentDialog
           platform={platform.externalAgent}
           selection={agentSelection.origin.text}
+          tabId={agentSelection.tabId}
+          name={agentTab ? tabName(t, agentTab) : t("writing.scope.untitled")}
+          visible={agentDialogVisible}
+          onReveal={() => {
+            store.activate(agentSelection.tabId);
+            setAgentDialogVisible(true);
+          }}
+          onHide={() => setAgentDialogVisible(false)}
           renderReply={(reply, close) => (
             <ReplyExcerpt
               reply={reply}
@@ -909,6 +934,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
           )}
           onClose={() => {
             setAgentSelection(null);
+            setAgentDialogVisible(false);
             const current = store.getState().activeId;
             if (current !== null) store.editor(current)?.focus();
           }}
@@ -928,6 +954,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
       )}
     </div>
   );
+  return <WritingTasksContext value={publishWritingTask}>{content}</WritingTasksContext>;
 }
 
 function errorMessage(t: Translate, error: TabError): string {

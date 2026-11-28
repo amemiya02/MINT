@@ -47,6 +47,7 @@ export const en = {
   "writing.scope": "Scope",
   "writing.scope.selection": "Current selection",
   "writing.scope.document": "Current document",
+  "writing.scope.untitled": "Untitled draft",
   "writing.scope.instruction": "Instruction only",
   "writing.context": "Task context to send",
   "materials.currentDraft": "Current draft",

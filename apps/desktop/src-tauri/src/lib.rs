@@ -20,6 +20,7 @@ mod settings;
 mod themes;
 mod updates;
 mod walk;
+mod writing_requests;
 mod zotero;
 
 use std::collections::HashMap;
@@ -740,7 +741,13 @@ pub fn run() {
             );
             Ok(())
         })
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                writing_requests::cancel_window_requests(window.label());
+            }
+        })
         .invoke_handler(tauri::generate_handler![
+            writing_requests::stop_writing_request,
             external_agent::discover_external_agents,
             external_agent::saved_external_agents,
             external_agent::inspect_external_agent,

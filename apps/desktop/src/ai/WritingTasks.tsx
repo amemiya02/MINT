@@ -13,9 +13,9 @@ export interface WritingTask {
   readonly reveal: () => void;
 }
 
-export const WritingTasksContext = createContext<
-  (id: string, task: WritingTask | null) => void
->(() => {});
+export const WritingTasksContext = createContext<(id: string, task: WritingTask | null) => void>(
+  () => {},
+);
 
 export function useWritingTask(task: WritingTask | null) {
   const publish = useContext(WritingTasksContext);
@@ -36,7 +36,10 @@ export function WritingTasks({
   const t = useT();
   if (!tasks.size) return null;
   return (
-    <section aria-label={t("writing.tasks")} className="border-b border-(--mint-border) px-4 py-1 text-sm">
+    <section
+      aria-label={t("writing.tasks")}
+      className="border-b border-(--mint-border) px-4 py-1 text-sm"
+    >
       <details open={[...tasks.values()].some((task) => task.tabId !== activeId)}>
         <summary className="cursor-pointer">{t("writing.tasks")}</summary>
         <ul className="max-h-36 space-y-1 overflow-auto">
