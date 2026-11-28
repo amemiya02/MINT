@@ -6,9 +6,12 @@ export interface WritingSelection {
   readonly range: ReturnType<MintEditor["trackRange"]>;
 }
 
-export function captureWritingSelection(editor: MintEditor): WritingSelection | null {
+export function captureWritingSelection(
+  editor: MintEditor,
+  allowCaret = false,
+): WritingSelection | null {
   const { anchor, head } = editor.getSelection();
-  if (anchor === head) return null;
+  if (anchor === head && !allowCaret) return null;
   const from = Math.min(anchor, head);
   const to = Math.max(anchor, head);
   return {

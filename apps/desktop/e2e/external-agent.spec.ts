@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { forgetExternalAgent, launch } from "./memory-platform.ts";
+import { forgetExternalAgent, launch, runMenuItem } from "./memory-platform.ts";
 
 test("settings tries a discovered Agent only after the author allows its access", async ({
   page,
@@ -159,4 +159,15 @@ test("a manually added Agent receives only the selected unsaved text after conse
   await expect(editor).toBeFocused();
   await expect(editor).toContainText("Original line. shorter");
   await expect(editor).toContainText("Private paragraph.");
+
+  await runMenuItem(page, "edit.writingTasks");
+  const tasks = page.getByRole("dialog", { name: "Writing tasks" });
+  const result = tasks.getByRole("button", { name: "Can you shorten this?", exact: true }).first();
+  await expect(result).toBeVisible();
+  await result.click();
+  const assistant = page.getByRole("complementary", { name: "Writing Assistant" });
+  await expect(assistant.getByRole("textbox", { name: "AI reply" })).toHaveValue(
+    "Use a shorter phrase.",
+  );
+  expect(received).toHaveLength(2);
 });
