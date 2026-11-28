@@ -17,7 +17,7 @@ interface EditorPaneProps {
   /** Initial file text. The editor is recreated only when the pane is remounted (use a `key`). */
   readonly text: string;
   readonly document: SharedDocument;
-  /** Whether the pane is the one on screen; it takes focus when it becomes active. */
+  /** Whether this editor reports the active document’s word count. */
   readonly active: boolean;
   readonly onReady: (editor: MintEditor | null) => void;
   readonly onChange: (fromHistory: boolean) => void;
@@ -129,7 +129,6 @@ export function EditorPane({
 
   useEffect(() => {
     if (!active || !editor.current) return;
-    editor.current.focus();
     callbacks.current.onWordCount(editor.current.getWordCount());
   }, [active]);
 

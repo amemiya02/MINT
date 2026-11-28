@@ -64,6 +64,9 @@ export const zhCN: Messages = {
   "command.view.toggleTypewriterMode": "切换打字机模式",
 
   "command.tab.close": "关闭标签页",
+  "command.view.toolbarTop": "在上方显示格式栏",
+  "command.view.toolbarSide": "在侧边显示格式栏",
+  "command.view.toolbarHide": "隐藏格式栏",
   "command.view.openInOtherPane": "在另一栏打开",
   "command.view.focusOtherPane": "切换到另一栏",
   "command.view.closeReferencePane": "关闭参考栏",
@@ -87,6 +90,8 @@ export const zhCN: Messages = {
   "command.paragraph.codeBlock": "代码块",
   "command.paragraph.table": "表格",
   "command.paragraph.formatTable": "格式化表格",
+  "toolbar.left": "左栏 {name} 的格式栏",
+  "toolbar.right": "右栏 {name} 的格式栏",
   "command.format.bold": "加粗",
   "command.format.italic": "斜体",
   "command.format.link": "链接",

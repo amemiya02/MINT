@@ -1,7 +1,7 @@
 import { historyField } from "@codemirror/commands";
 import { Compartment, type Extension, Transaction } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
-import { fileText, sharedFileEffects } from "./file-text.ts";
+import { copyFileDocument, sharedFileEffects } from "./file-text.ts";
 
 /** Views of one manuscript share CodeMirror changes and the immutable history field.
  * Each view maps its own selection through a sibling's changes and keeps its own viewport. */
@@ -10,9 +10,9 @@ export class SharedDocument {
   private history = new Compartment();
   private lastWriter: EditorView | null = null;
 
-  currentText(): string | undefined {
+  currentDocument() {
     const first = this.views.values().next().value;
-    return first ? fileText(first.state) : undefined;
+    return first && copyFileDocument(first.state);
   }
 
   initialHistory(): Extension {
