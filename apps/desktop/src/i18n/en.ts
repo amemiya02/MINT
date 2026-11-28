@@ -7,7 +7,10 @@ export const en = {
   "plugin.templateEmpty": "Open a document to insert a template.",
   "plugin.insertTemplate": "Insert template · {name}",
   "plugin.file": "Install a MINT plugin file",
-  "plugin.invalid": "Unsupported plugin package or plugin already installed.",
+  "plugin.update": "Update {name}",
+  "plugin.allowUpdate": "Allow and update",
+  "plugin.keep": "Keep current version",
+  "plugin.invalid": "Unsupported plugin package.",
   "plugin.title": "Plugins",
   "plugin.exampleMarkdown": "Example Markdown",
   "plugin.timingSyntax":
@@ -232,6 +235,11 @@ export const en = {
   "export.html.failed": "Could not export: {reason}",
   "export.pdf.title": "Export as PDF",
   "export.pdf.print": "Print…",
+  "export.pdf.paper": "Paper size",
+  "export.pdf.margins": "Margins (mm)",
+  "export.pdf.font": "Font size (pt)",
+  "export.pdf.preview": "Page preview",
+  "export.pdf.pages": "{count} pages",
   "export.pdf.hint":
     "In the print dialog, choose “Save as PDF” (macOS), “Microsoft Print to PDF” (Windows) or “Print to File” (Linux).",
 

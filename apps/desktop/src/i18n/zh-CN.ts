@@ -8,7 +8,10 @@ export const zhCN: Messages = {
   "plugin.templateEmpty": "请先打开文档以插入模板。",
   "plugin.insertTemplate": "插入模板 · {name}",
   "plugin.file": "从文件安装 MINT 插件",
-  "plugin.invalid": "插件包不受支持，或插件已安装。",
+  "plugin.update": "更新{name}",
+  "plugin.allowUpdate": "允许并更新",
+  "plugin.keep": "保留当前版本",
+  "plugin.invalid": "插件包不受支持。",
   "plugin.title": "插件",
   "plugin.exampleMarkdown": "Markdown 示例",
   "plugin.timingSyntax":
@@ -228,6 +231,11 @@ export const zhCN: Messages = {
   "export.html.failed": "导出失败：{reason}",
   "export.pdf.title": "导出为 PDF",
   "export.pdf.print": "打印…",
+  "export.pdf.paper": "纸张",
+  "export.pdf.margins": "页边距（毫米）",
+  "export.pdf.font": "字号（磅）",
+  "export.pdf.preview": "分页预览",
+  "export.pdf.pages": "共 {count} 页",
   "export.pdf.hint":
     "在打印对话框中选择“存储为 PDF”（macOS）、“Microsoft Print to PDF”（Windows）或“打印到文件”（Linux）。",
 
