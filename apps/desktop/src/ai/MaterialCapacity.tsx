@@ -16,9 +16,11 @@ const encoder = new TextEncoder();
 export function materialBytes({
   selectedText,
   taskContext,
-}: Pick<WritingRequest, "selectedText" | "taskContext">) {
+  folderDocuments,
+}: Pick<WritingRequest, "selectedText" | "taskContext" | "folderDocuments">) {
   return (
     encoder.encode(selectedText ?? "").length +
+    (folderDocuments?.reduce((total, { text }) => total + encoder.encode(text).length, 0) ?? 0) +
     contextMaterials(taskContext).reduce(
       (total, { text, image }) => total + encoder.encode(text).length + (image?.length ?? 0),
       0,

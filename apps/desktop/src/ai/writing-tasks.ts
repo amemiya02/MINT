@@ -1,5 +1,6 @@
 import diffSequence from "@jest/diff-sequences";
 import { compareLines, rawLines } from "../tabs/line-diff.ts";
+import type { FolderChange } from "./folder-changes.ts";
 import type { SourcePassage } from "./source-passages.ts";
 import type { AttemptStatus } from "./writing-attempt.ts";
 import type { TaskContext, WritingRequest, WritingTurn } from "./writing-sender.ts";
@@ -53,6 +54,7 @@ export interface SavedTurn extends WritingTurn {
   readonly toolOutcome?: WritingToolRecord;
   readonly sourcePassages?: readonly SourcePassage[];
   readonly suggestions?: readonly SavedSuggestion[];
+  readonly folderChanges?: readonly FolderChange[];
 }
 
 export interface SavedWritingTask {

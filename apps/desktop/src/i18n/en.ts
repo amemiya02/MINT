@@ -268,6 +268,24 @@ export const en = {
   "writing.askFolder": "Ask AI about working folder",
   "writing.tasks.noFolder": "Open a working folder to ask AI about its documents.",
   "writing.scope.folder": "Working folder",
+  "writing.folder.include": "Documents to include in the task copy",
+  "writing.folder.copyDetails":
+    "Selected documents include unsaved edits. Review proposed file changes before applying them.",
+  "writing.folder.changes": "Folder changes",
+  "writing.folder.create": "Create {path}",
+  "writing.folder.modify": "Modify {path}",
+  "writing.folder.move": "Move {from} → {path}",
+  "writing.folder.rename": "Rename {from} → {path}",
+  "writing.folder.moveRename": "Move and rename {from} → {path}",
+  "writing.folder.outside": "Outside the task scope · {path}",
+  "writing.folder.requires": "Requires {paths}",
+  "writing.folder.failed":
+    "Could not apply this file change. Check whether the source changed or the destination is occupied.",
+  "writing.folder.conflict":
+    "The document changed since this task began. Your edits are still in place.",
+  "writing.folder.saveFirst": "Save the open document before applying its move or rename.",
+  "writing.folder.missingDependency": "A required document is missing or unreadable.",
+  "writing.folderRead": "Could not read the selected working-folder documents.",
   "writing.tasks.folder": "Working folder · {folder}",
   "writing.tasks.current": "Current document",
   "writing.tasks.allEmpty": "No writing tasks.",
@@ -328,7 +346,7 @@ export const en = {
   "agent.taskCopyLogin": "Codex uses its existing login and sends task content to its provider.",
   "agent.taskCopyVerified": "Task copy editing verified",
   "agent.taskCopyUnverified": "Task copy editing unverified",
-  "agent.taskCopySingle": "Task copy editing applies to one manuscript at a time.",
+  "agent.taskCopyFolder": "Use Ask AI about working folder to review changes across documents.",
   "agent.taskCopyIgnored": "Other changes in the task copy were discarded.",
   "agent.taskCopyUnavailable":
     "Codex could not verify the task copy sandbox. Update Codex or choose a different connection.",
