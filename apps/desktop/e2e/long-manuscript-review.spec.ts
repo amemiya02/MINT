@@ -185,7 +185,8 @@ test("section acceptance preserves prior decisions and can be undone in one edit
   await expect(
     section.getByRole("option", { name: "Methods · 2 pending of 5 edits" }),
   ).toBeAttached();
-  await section.selectOption({ label: "Methods · 2 pending of 5 edits" });
+  await tabTo(page, section);
+  await page.keyboard.press("m");
   const accept = review.getByRole("button", { name: "Accept remaining edits in Methods" });
   await tabTo(page, accept);
   await page.keyboard.press("Enter");
@@ -193,10 +194,15 @@ test("section acceptance preserves prior decisions and can be undone in one edit
   await expect(review.getByRole("status")).toHaveText("Accepted 2 edits.");
 
   const status = review.getByRole("combobox", { name: "Review status" });
-  await status.selectOption({ label: "Dismissed" });
+  await tabTo(page, status);
+  await page.keyboard.press("a");
   await expect(review.getByText("Proposed edit dismissed.")).toBeVisible();
   await expect(review.getByText("Old opening.", { exact: true })).toBeVisible();
-  await status.selectOption({ label: "With comments" });
+  const next = review.getByRole("button", { name: "Next edit" });
+  for (let index = 0; index < 2; index++) {
+    await tabTo(page, next);
+    await page.keyboard.press("Enter");
+  }
   await expect(review.getByText("Confirm this detail.", { exact: true })).toBeVisible();
 
   await page.keyboard.press("Escape");

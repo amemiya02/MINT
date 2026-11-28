@@ -32,7 +32,8 @@ export async function readSourceRevision(file: File, excerpt: SourceExcerpt) {
   if (original?.kind !== "pdf" || file.size > 32 * 1024 * 1024) throw new Error("invalidMaterial");
   const source = await loadMaterialSource(original);
   try {
-    return (await prepareRangedMaterial(file.name, source, range, format, "")).text;
+    return (await prepareRangedMaterial(file.name, source, range, format, "", { allowBlank: true }))
+      .text;
   } finally {
     await source.dispose();
   }
