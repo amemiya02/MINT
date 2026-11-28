@@ -54,7 +54,11 @@ const sendTauriModelMessage = createModelSender(async (request, receive) => {
     if (event.kind === "done") finish();
   });
   try {
-    await invoke<void>("send_model_request", { request, onEvent });
+    if ("connectionId" in request) {
+      await invoke<void>("send_connected_model_request", { ...request, onEvent });
+    } else {
+      await invoke<void>("send_model_request", { request, onEvent });
+    }
     // The invoke result can arrive before the ordered channel's last chunk.
     await completed;
   } finally {
@@ -67,6 +71,9 @@ export function createTauriPlatform(): Platform {
   return {
     locale: navigator.language,
     sendModelMessage: sendTauriModelMessage,
+    listModelConnections: () => invoke("list_model_connections"),
+    saveModelConnection: (connection) => invoke("save_model_connection", { connection }),
+    disconnectModelConnection: (id) => invoke("disconnect_model_connection", { id }),
     listZoteroItems: (start) => invoke("list_zotero_items", { start }),
     savesPdfDirectly: /Windows/.test(navigator.userAgent),
     readTextFile: (path) => invoke<string>("read_text_file", { path }),

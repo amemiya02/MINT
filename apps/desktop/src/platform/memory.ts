@@ -1,4 +1,10 @@
-import { sendBrowserModelMessage } from "../ai/browser-model.ts";
+import { sendBrowserModelRequest } from "../ai/browser-model.ts";
+import {
+  createModelSender,
+  modelApiKey,
+  modelEndpoint,
+  type SavedModelConnection,
+} from "../ai/model.ts";
 import { baseName, parentPath } from "../paths.ts";
 import { createIgnoreRules } from "./gitignore.ts";
 import { pickBrowserFile } from "./pick-file.ts";
@@ -288,8 +294,48 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
     for (const dir of [...directories]) if (within(dir, path)) directories.delete(dir);
   }
 
+  const modelConnections = new Map<
+    string,
+    {
+      summary: SavedModelConnection;
+      model: string;
+      apiKey: string;
+    }
+  >();
+
   return {
-    sendModelMessage: sendBrowserModelMessage,
+    sendModelMessage: createModelSender(async (request, receive) => {
+      if ("url" in request) return sendBrowserModelRequest(request, receive);
+      const connection = modelConnections.get(request.connectionId);
+      if (!connection) throw "connectionMissing";
+      return sendBrowserModelRequest(
+        {
+          url: modelEndpoint(connection.summary.address),
+          apiKey: connection.apiKey,
+          body: { ...request.body, model: connection.model },
+        },
+        receive,
+      );
+    }),
+    async listModelConnections() {
+      return [...modelConnections.values()].map(({ summary }) => summary);
+    },
+    async saveModelConnection(connection) {
+      const apiKey = modelApiKey(connection.apiKey);
+      if (connection.lifetime === "persistent") throw "credentialStoreUnavailable";
+      const summary = {
+        id: crypto.randomUUID(),
+        name: connection.name.trim(),
+        address: connection.address.trim(),
+        keySuffix: apiKey.length > 4 ? apiKey.slice(-4) : apiKey ? "" : null,
+        lifetime: connection.lifetime,
+      };
+      modelConnections.set(summary.id, { summary, model: connection.model.trim(), apiKey });
+      return summary;
+    },
+    async disconnectModelConnection(id) {
+      modelConnections.delete(id);
+    },
     async listZoteroItems(start) {
       if (!options.zoteroItems) throw new Error("unavailable");
       return {

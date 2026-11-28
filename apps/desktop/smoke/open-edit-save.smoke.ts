@@ -1034,7 +1034,7 @@ test("a model trial sends only the visible sample and shows native streaming rep
     await click("Model connections");
     await fill("API address", `http://127.0.0.1:${address.port}/fixture/v1/chat/completions`);
     await fill("Model name", "native-fixture");
-    await fill("API key (this trial only)", secret);
+    await fill("API key", secret);
     const form = await command<{ sample: string; settingsPath: string }>(
       "POST",
       `/session/${session}/execute/sync`,
@@ -1093,6 +1093,168 @@ test("a model trial sends only the visible sample and shows native streaming rep
   } finally {
     endpoint.closeAllConnections();
     await new Promise<void>((resolve) => endpoint.close(() => resolve()));
+  }
+});
+
+const credentialPolicy = process.env.MINT_SMOKE_CREDENTIAL_POLICY;
+test("model keys survive a restart only when remembered and disconnect removes the OS credential", {
+  skip: !credentialPolicy && "requires the hosted smoke suite's isolated Secret Service",
+}, async () => {
+  assert.ok(credentialPolicy && process.env.XDG_DATA_HOME);
+  const persistentKey = "mint-smoke-remembered-7291";
+  const sessionKey = "mint-smoke-session-8732";
+  const requests: { authorization?: string; body: unknown }[] = [];
+  const endpoint = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(chunk);
+    requests.push({
+      authorization: request.headers.authorization,
+      body: JSON.parse(Buffer.concat(chunks).toString("utf8")),
+    });
+    response
+      .writeHead(200, { "Content-Type": "application/json" })
+      .end(
+        JSON.stringify({ choices: [{ message: { content: `Fixture reply ${requests.length}` } }] }),
+      );
+  });
+  await new Promise<void>((resolve, reject) => {
+    endpoint.once("error", reject);
+    endpoint.listen(0, "127.0.0.1", resolve);
+  });
+  const address = endpoint.address();
+  assert.ok(address && typeof address !== "string");
+  const api = `http://127.0.0.1:${address.port}/v1`;
+  const lookup = ["lookup", "service", "io.github.amemiya02.mint.model"];
+  const lookupKey = () => exec("secret-tool", lookup, { timeout: 10_000 });
+  const openConnections = async () => {
+    await openSettings();
+    await click("Model connections");
+  };
+  const card = (name: string) => `//section[@aria-label='${name}']`;
+  const clickCard = (name: string, action: string) =>
+    clickPath(`${card(name)}//button[not(@disabled) and normalize-space(.)='${action}']`);
+  async function fill(name: string, value: string) {
+    const element = await command<Record<string, string>>("POST", `/session/${session}/element`, {
+      using: "xpath",
+      value: `//dialog[@open]//label[normalize-space(.)='${name}']/input`,
+    });
+    await command("POST", `/session/${session}/element/${element[elementKey]}/clear`, {});
+    await command("POST", `/session/${session}/element/${element[elementKey]}/value`, {
+      text: value,
+    });
+  }
+  async function setStoreAvailable(available: boolean) {
+    await writeFile(
+      credentialPolicy as string,
+      available
+        ? "<busconfig/>"
+        : '<busconfig><policy context="mandatory"><deny send_destination="org.freedesktop.secrets"/></policy></busconfig>',
+    );
+    await exec("gdbus", [
+      "call",
+      "--session",
+      "--dest",
+      "org.freedesktop.DBus",
+      "--object-path",
+      "/org/freedesktop/DBus",
+      "--method",
+      "org.freedesktop.DBus.ReloadConfig",
+    ]);
+  }
+  const versions = () => invokeNative<number[]>("list_versions", { path: document });
+
+  try {
+    await restart([document]);
+    const manuscript = await readFile(document);
+    const history = await versions();
+    assert.ok(history.length > 0, "verify an existing local version history survives");
+    await openConnections();
+    await fill("API address", api);
+    await fill("Model name", "smoke-model");
+    await fill("Connection name", "Remembered model");
+    await fill("API key", persistentKey);
+    await clickPath("//button[not(@disabled) and normalize-space(.)='Remember connection']");
+    await shows("••••7291");
+    assert.equal((await lookupKey()).stdout.trim(), persistentKey);
+    const metadata = await readFile(
+      join(
+        process.env.XDG_DATA_HOME,
+        "io.github.amemiya02.mint",
+        "model-connections",
+        "connections.json",
+      ),
+      "utf8",
+    );
+    assert.ok(metadata.includes("Remembered model") && !metadata.includes(persistentKey));
+    const visible = await command<string>("POST", `/session/${session}/execute/sync`, {
+      script: "return document.querySelector('dialog[open]').innerText",
+      args: [],
+    });
+    assert.ok(!visible.includes(persistentKey));
+
+    await setStoreAvailable(false);
+    await fill("Connection name", "Launch model");
+    await fill("API key", sessionKey);
+    await clickPath("//button[not(@disabled) and normalize-space(.)='Remember connection']");
+    await shows("System credential store is unavailable");
+    await clickPath("//button[not(@disabled) and normalize-space(.)='Use for this launch']");
+    await shows("••••8732");
+    await clickCard("Launch model", "Run sample");
+    await shows("Fixture reply 1");
+    await setStoreAvailable(true);
+
+    await click("Close");
+    await restart([document]);
+    await openConnections();
+    await shows("Remembered model");
+    const launchCards = () =>
+      command<unknown[]>("POST", `/session/${session}/elements`, {
+        using: "xpath",
+        value: card("Launch model"),
+      });
+    assert.deepEqual(await launchCards(), []);
+    await clickCard("Remembered model", "Run sample");
+    await shows("Fixture reply 2");
+    for (const [index, key] of [sessionKey, persistentKey].entries()) {
+      assert.deepEqual(requests[index], {
+        authorization: `Bearer ${key}`,
+        body: {
+          model: "smoke-model",
+          stream: true,
+          messages: [
+            {
+              role: "user",
+              content: await command<string>("POST", `/session/${session}/execute/sync`, {
+                script: "return document.querySelector('dialog[open] textarea[readonly]').value",
+                args: [],
+              }),
+            },
+          ],
+        },
+      });
+    }
+    await clickCard("Remembered model", "Disconnect");
+    await until("the OS credential to be removed", async () => {
+      try {
+        await lookupKey();
+        return null;
+      } catch (error) {
+        assert.equal((error as NodeJS.ErrnoException).code, 1);
+        return true;
+      }
+    }).catch(explain);
+    await click("Close");
+    await restart([document]);
+    await openConnections();
+    assert.deepEqual(await invokeNative("list_model_connections", {}), []);
+    assert.deepEqual(await readFile(document), manuscript);
+    assert.deepEqual(await versions(), history);
+    assert.equal(requests.length, 2, "reopening Settings never sends a model request");
+    await click("Close");
+  } finally {
+    endpoint.closeAllConnections();
+    await new Promise<void>((resolve) => endpoint.close(() => resolve()));
+    await setStoreAvailable(true);
   }
 });
 

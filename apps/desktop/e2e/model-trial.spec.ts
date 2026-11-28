@@ -38,7 +38,7 @@ test("try a model with sample text, correct the key and verify the returned capa
   await provider.selectOption({ label: "Custom compatible service" });
   await settings.getByLabel("API address").fill(apiBase);
   await settings.getByLabel("Model name").fill("fixture-model");
-  const key = settings.getByLabel("API key (this trial only)");
+  const key = settings.getByLabel("API key");
   await key.fill("wrong-fixture-key");
   const sample = await settings.getByLabel("Sample prompt").inputValue();
   expect(sample).toContain("The research team met again to discuss the results.");

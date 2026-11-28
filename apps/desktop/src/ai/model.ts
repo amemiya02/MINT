@@ -3,6 +3,20 @@ export interface ModelConnection {
   readonly model: string;
 }
 
+export interface SavedModelConnection {
+  readonly id: string;
+  readonly name: string;
+  readonly address: string;
+  readonly keySuffix: string | null;
+  readonly lifetime: "persistent" | "session";
+}
+
+export interface NewModelConnection extends ModelConnection {
+  readonly name: string;
+  readonly apiKey: string;
+  readonly lifetime: SavedModelConnection["lifetime"];
+}
+
 export interface ModelMessage {
   readonly role: "system" | "user" | "assistant";
   readonly content: string;
@@ -21,20 +35,26 @@ interface ModelReply {
 }
 
 export type SendModelMessage = (
-  connection: ModelConnection,
+  connection: ModelConnection | Pick<SavedModelConnection, "id">,
   messages: readonly ModelMessage[],
   options?: ModelOptions,
 ) => Promise<ModelReply>;
 
+interface CompletionInput {
+  readonly messages: readonly ModelMessage[];
+  readonly stream: boolean;
+}
+
 export interface ModelRequest {
   readonly url: string;
   readonly apiKey?: string;
-  readonly body: {
-    readonly model: string;
-    readonly messages: readonly ModelMessage[];
-    readonly stream: boolean;
-  };
+  readonly body: CompletionInput & { readonly model: string };
 }
+
+type ConnectedModelRequest = {
+  readonly connectionId: string;
+  readonly body: CompletionInput;
+};
 
 export type ModelResponseEvent =
   | { readonly kind: "headers"; readonly contentType: string }
@@ -42,7 +62,7 @@ export type ModelResponseEvent =
   | { readonly kind: "done" };
 
 type ModelTransport = (
-  request: ModelRequest,
+  request: ModelRequest | ConnectedModelRequest,
   receive: (event: ModelResponseEvent) => void,
 ) => Promise<void>;
 
@@ -89,12 +109,7 @@ function readChoice(payload: string): Choice | undefined {
 
 export function createModelSender(transport: ModelTransport): SendModelMessage {
   return async (connection, messages, options) => {
-    const url = modelEndpoint(connection.address);
-    const model = connection.model.trim();
-    if (!model || !messages.length) throw "invalidRequest";
-    const apiKey = options?.apiKey?.trim();
-    // A bearer token must fit in one HTTP header.
-    if (apiKey && !/^[!-~]+$/.test(apiKey)) throw "invalidKey";
+    if (!messages.length) throw "invalidRequest";
     const onDelta = options?.onDelta;
     const decoder = new TextDecoder();
     let streamed = false;
@@ -150,7 +165,16 @@ export function createModelSender(transport: ModelTransport): SendModelMessage {
       }
     }
 
-    await transport({ url, apiKey, body: { model, messages, stream: !!onDelta } }, receive);
+    const body = { messages, stream: !!onDelta };
+    if ("id" in connection) {
+      await transport({ connectionId: connection.id, body }, receive);
+    } else {
+      const url = modelEndpoint(connection.address);
+      const model = connection.model.trim();
+      if (!model) throw "invalidRequest";
+      const apiKey = modelApiKey(options?.apiKey ?? "");
+      await transport({ url, apiKey, body: { ...body, model } }, receive);
+    }
     if (streamed) {
       if (malformed) throw "invalidReply";
       if (!sawEnd && !finishReason) throw "interrupted";
@@ -167,4 +191,11 @@ export function createModelSender(transport: ModelTransport): SendModelMessage {
     if (!text.trim()) throw "invalidReply";
     return { text, streamed, finishReason };
   };
+}
+
+export function modelApiKey(input: string): string {
+  const apiKey = input.trim();
+  // A bearer token must fit in one HTTP header.
+  if (apiKey && !/^[!-~]+$/.test(apiKey)) throw "invalidKey";
+  return apiKey;
 }
