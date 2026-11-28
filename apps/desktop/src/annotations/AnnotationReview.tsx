@@ -3,8 +3,11 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { useMaterialRequests } from "../ai/MaterialRequest.tsx";
 import { isLocalModelOffline } from "../ai/model.ts";
 import { ProposedSelectionEdit } from "../ai/ProposedSelectionEdit.tsx";
-import { useWritingCallLimit, WritingCallPlan, WritingReportedUsage } from "../ai/WritingCallLimit.tsx";
-import type { WritingRequest } from "../ai/writing-sender.ts";
+import {
+  useWritingCallLimit,
+  WritingCallPlan,
+  WritingReportedUsage,
+} from "../ai/WritingCallLimit.tsx";
 import {
   effectiveWritingRecipient,
   loadWritingRecipients,
@@ -12,6 +15,7 @@ import {
   writingConnectionChoice,
   writingRecipientLabel,
 } from "../ai/writing-recipients.ts";
+import type { WritingRequest } from "../ai/writing-sender.ts";
 import { useT } from "../i18n/index.ts";
 import type { Platform } from "../platform/platform.ts";
 import { useSettings } from "../settings/useSettings.ts";

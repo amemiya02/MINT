@@ -32,6 +32,8 @@ export const zhCN: Messages = {
   "writing.calls.retained": "已保留的结果",
   "writing.calls.usageOne": "接收方报告 1 次写作调用用了 {tokens} 个词元",
   "writing.calls.usage": "接收方报告 {count} 次写作调用共用了 {tokens} 个词元",
+  "writing.calls.retryEstimateOne":
+    "根据先前的回复估算：重试时，已测量的 1 次调用需要 {tokens} 个输入词元。",
   "writing.calls.retryEstimate":
     "根据先前的回复估算：重试时，已测量的 {count} 次调用需要 {tokens} 个输入词元。",
   "writing.task.failed": "生成失败",

@@ -40,6 +40,7 @@ import {
   useNamedMaterials,
 } from "./TaskContext.tsx";
 import {
+  largeWritingSelection,
   useWritingCallLimit,
   WritingCallPause,
   WritingCallPlan,
@@ -640,7 +641,7 @@ function Composer({
     named.entries.length > 0 ||
     !!searchFolder ||
     !!toolPicker.plan ||
-    (selectedText?.length ?? 0) >= 8_192;
+    (selectedText?.length ?? 0) >= largeWritingSelection;
 
   useEffect(() => {
     if (!origin.folder) return;
@@ -1481,7 +1482,7 @@ function Composer({
           },
           onContext: (context) => {
             sentContext = context;
-            pending.current = { ...submitted, context, partial: pending.current?.partial };
+            pending.current = { ...submitted, ...pending.current, context };
             persist(taskTitle);
           },
           onApproval: (completed) => {
@@ -1490,7 +1491,12 @@ function Composer({
           },
           onPause: (completed) => {
             text = completed;
-            pending.current = { ...submitted, context: sentContext, partial: completed };
+            pending.current = {
+              ...submitted,
+              context: sentContext,
+              partial: completed,
+              toolOutcome: toolApproval.result(),
+            };
             persist(taskTitle);
             setAttempt({ ...entry, approved, status: "paused", partial: completed });
           },
@@ -2185,6 +2191,7 @@ function Composer({
                   recipient={labelFor(connection)}
                   requests={baseline.requests}
                   limit={comparisonLimit}
+                  folderFileCount={first.folderDocuments?.length}
                   fixed
                 />
                 {renderAgentAccess(connection)}
@@ -2432,6 +2439,7 @@ function Composer({
               </pre>
             )}
             {renderSentContext(pending.current.context, pending.current.searchFolder)}
+            <WritingToolOutcome outcome={pending.current.toolOutcome} />
             {pending.current.partial && renderReplyExcerpt(pending.current.partial)}
           </article>
         )}
@@ -2444,12 +2452,16 @@ function Composer({
           </>
         )}
         {canRetry && <p role="status">{t(`writing.task.${attempt.status}`)}</p>}
-        {sidebar && !busy && task && (
-          (task.callLimit !== undefined || task.scope === "document" || task.scope === "folder" ||
-            task.alternativeTo || (materialRequests.usage?.reportedCalls ?? 0) > 1) && (
+        {sidebar &&
+          !busy &&
+          task &&
+          (task.callLimit !== undefined ||
+            task.scope === "document" ||
+            task.scope === "folder" ||
+            task.alternativeTo ||
+            (materialRequests.usage?.reportedCalls ?? 0) > 1) && (
             <WritingReportedUsage usage={materialRequests.usage} />
-          )
-        )}
+          )}
       </div>
       {busy && (
         <button type="button" className={buttonClass} onClick={stop}>

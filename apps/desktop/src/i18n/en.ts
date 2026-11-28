@@ -31,6 +31,8 @@ export const en = {
   "writing.calls.retained": "Retained results",
   "writing.calls.usageOne": "{tokens} tokens reported across 1 writing call",
   "writing.calls.usage": "{tokens} tokens reported across {count} writing calls",
+  "writing.calls.retryEstimateOne":
+    "Retry estimate from an earlier reply: {tokens} input tokens for 1 previously measured call.",
   "writing.calls.retryEstimate":
     "Retry estimate from earlier replies: {tokens} input tokens for {count} previously measured calls.",
   "writing.task.failed": "Generation failed",

@@ -10,7 +10,12 @@ import {
 } from "./external-agent.ts";
 import { MaterialRequestNotice, useMaterialRequests } from "./MaterialRequest.tsx";
 import { TaskContextChecklist, useNamedMaterials } from "./TaskContext.tsx";
-import { useWritingCallLimit, WritingCallPause, WritingCallPlan } from "./WritingCallLimit.tsx";
+import {
+  largeWritingSelection,
+  useWritingCallLimit,
+  WritingCallPause,
+  WritingCallPlan,
+} from "./WritingCallLimit.tsx";
 import { useWritingTask } from "./WritingTasks.tsx";
 import {
   useWritingToolPicker,
@@ -310,7 +315,9 @@ function ExternalAgentPanel({
   const selectedContext: WritingRequest["taskContext"] = named.entries.length
     ? { materials: named.entries.map(({ material }) => material) }
     : undefined;
-  const showCallPlan = !!materialsPlatform && (!!selectedContext || !!picker.plan);
+  const showCallPlan =
+    !!materialsPlatform &&
+    (!!selectedContext || !!picker.plan || material.length >= largeWritingSelection);
 
   const select = useCallback(
     (next: ExternalAgent | null, requestedAccess = next?.preferredAccess) => {
@@ -404,6 +411,22 @@ function ExternalAgentPanel({
     if (running) setAttempt({ ...entry, status: "working" });
     void run(async () => {
       let text = "";
+      let context = request.taskContext;
+      let atCallLimit = false;
+      const recipient = t("writing.recipient.agent", { path: current.path });
+      function record(reply: string, status: AttemptStatus) {
+        target?.record(entry.id, {
+          instruction: request.instruction,
+          material: request.selectedText,
+          context,
+          reply,
+          recipient,
+          toolOutcome: toolApproval.result(),
+          recipientId: `agent:${current.path}`,
+          direct: false,
+          status,
+        });
+      }
       try {
         const connection = approve ? await platform.approve(current, access) : current;
         if (!mounted.current) return;
@@ -418,8 +441,6 @@ function ExternalAgentPanel({
         }
         if (signal?.aborted) throw "stopped";
         const sender = externalAgentSender(platform, connection, access);
-        const recipient = t("writing.recipient.agent", { path: current.path });
-        let context = request.taskContext;
         const result = materialsPlatform
           ? await materialRequests.send(sender, request, recipient, null, {
               signal,
@@ -435,7 +456,11 @@ function ExternalAgentPanel({
               },
               onPause(completed) {
                 text = completed;
+                atCallLimit = true;
                 setStreaming("");
+              },
+              onResume() {
+                atCallLimit = false;
               },
             })
           : await sender(request);
@@ -460,23 +485,14 @@ function ExternalAgentPanel({
         setSaved(connections);
         onConnectionsChanged?.(connections);
         setReply(result.taskCopy ?? result.text);
-        target?.record(entry.id, {
-          instruction: request.instruction,
-          material: request.selectedText,
-          context,
-          reply: result.text,
-          recipient,
-          toolOutcome: toolApproval.result(),
-          recipientId: `agent:${current.path}`,
-          direct: false,
-          status: outcome,
-        });
+        record(result.text, outcome);
       } catch (problem) {
         if (!mounted.current) return;
         if (!signal) throw problem;
         const outcome = failureStatus(problem, signal);
         setAttempt({ ...entry, status: outcome });
         retainPartial(text);
+        if (atCallLimit && (text || toolApproval.result())) record(text, outcome);
         if (outcome === "failed") throw problem;
       } finally {
         controller.current = null;

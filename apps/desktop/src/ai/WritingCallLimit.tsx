@@ -5,6 +5,8 @@ import type { WritingRequest } from "./writing-sender.ts";
 
 const utf8 = new TextEncoder();
 
+export const largeWritingSelection = 8_192;
+
 export function useWritingCallLimit() {
   const [value, setValue] = useState("");
   const limit = value === "" ? undefined : Number(value);
@@ -119,10 +121,15 @@ export function WritingRetryEstimate({ usage }: { readonly usage: WritingCallUsa
   if (!usage?.repeatedCalls) return null;
   return (
     <p className="text-xs">
-      {t("writing.calls.retryEstimate", {
-        tokens: usage.repeatedInputTokens.toLocaleString(),
-        count: String(usage.repeatedCalls),
-      })}
+      {t(
+        usage.repeatedCalls === 1
+          ? "writing.calls.retryEstimateOne"
+          : "writing.calls.retryEstimate",
+        {
+          tokens: usage.repeatedInputTokens.toLocaleString(),
+          count: String(usage.repeatedCalls),
+        },
+      )}
     </p>
   );
 }

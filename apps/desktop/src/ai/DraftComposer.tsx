@@ -91,6 +91,7 @@ interface DraftAttempt {
   readonly partial: string;
   readonly approved: readonly NamedMaterial[];
   readonly capacityRejected?: boolean;
+  readonly savedAtLimit?: boolean;
 }
 
 export function DraftComposer({
@@ -302,6 +303,7 @@ export function DraftComposer({
     let readingSources = false;
     let status: AttemptStatus;
     let capacityRejected = false;
+    let atCallLimit = false;
     function saveResult(
       text: string,
       status: AttemptStatus,
@@ -374,10 +376,12 @@ export function DraftComposer({
           },
           onPause(text) {
             partial = text;
+            atCallLimit = true;
             setAttempt({ ...entry, approved, partial, status: "paused" });
           },
           onResume(decision, text) {
             partial = text;
+            atCallLimit = false;
             if (decision?.outcome === "allowed") approved = [...approved, decision.material];
             if (!signal.aborted) setAttempt({ ...entry, approved, partial, status: "working" });
           },
@@ -423,13 +427,13 @@ export function DraftComposer({
       }
     }
     if (!mounted.current) return;
+    const savedAtLimit = atCallLimit && (!!partial || !!toolApproval.result());
+    if (savedAtLimit) saveResult(partial, status, false);
     if (partial) {
-      const finished = status === "callLimit";
-      if (finished) saveResult(partial, status, false);
-      const reply = { id: crypto.randomUUID(), text: partial, finished };
+      const reply = { id: crypto.randomUUID(), text: partial, finished: atCallLimit };
       setPartials((previous) => [...previous, reply]);
     }
-    setAttempt({ ...entry, approved, status, partial: "", capacityRejected });
+    setAttempt({ ...entry, approved, status, partial: "", capacityRejected, savedAtLimit });
     controller.current = null;
   }
 
@@ -509,8 +513,7 @@ export function DraftComposer({
   const alternateVision = checkVision(alternate?.visionTarget);
   function retryDraft(connection: DraftConnection) {
     if (!retry) return;
-    const task =
-      retry.status === "callLimit" ? { ...retry.task, id: crypto.randomUUID() } : retry.task;
+    const task = retry.savedAtLimit ? { ...retry.task, id: crypto.randomUUID() } : retry.task;
     void runDraft(task, connection);
   }
 
@@ -562,7 +565,8 @@ export function DraftComposer({
           </section>
         )}
         <WritingToolOutcome outcome={toolApproval.outcome} />
-        {(attempt?.task.plan.contexts.some(Boolean) || (materialRequests.usage?.reportedCalls ?? 0) > 1) && (
+        {(attempt?.task.plan.contexts.some(Boolean) ||
+          (materialRequests.usage?.reportedCalls ?? 0) > 1) && (
           <WritingReportedUsage usage={materialRequests.usage} />
         )}
         {saveFailed && <p role="alert">{t("writing.tasks.saveFailed")}</p>}
