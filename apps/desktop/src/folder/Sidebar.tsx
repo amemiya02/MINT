@@ -25,7 +25,7 @@ import type { FolderTree, TreeRow } from "./file-tree.ts";
 
 export type SidebarView = "files" | "outline";
 
-export type SidebarTool = SidebarView | "backlinks" | "search" | `plugin:${string}`;
+export type SidebarTool = SidebarView | "bookmarks" | "backlinks" | "search" | `plugin:${string}`;
 
 export function NavigationRail({
   active,
@@ -53,6 +53,11 @@ export function NavigationRail({
       view: "backlinks",
       label: t("backlinks.label"),
       icon: <path d="M6 4 2 8l4 4M3 8h6a4 4 0 0 0 4-4V2" />,
+    },
+    {
+      view: "bookmarks",
+      label: t("bookmarks.label"),
+      icon: <path d="M4 2h8v12l-4-3-4 3z" />,
     },
     { view: "outline", label: t("sidebar.outline"), icon: <path d="M2 3h12M5 8h9M5 13h9" /> },
   ] as const;
