@@ -1,7 +1,8 @@
 import { GFM, parser } from "@lezer/markdown";
 import type { NamedMaterial, TaskContext } from "./writing-sender.ts";
 
-interface SourceExcerpt extends Pick<NamedMaterial, "name" | "range" | "format"> {
+export interface SourceExcerpt
+  extends Pick<NamedMaterial, "name" | "range" | "format" | "sourceFile"> {
   readonly quote: string;
   /** One-based line in the text actually sent. A material label may also name an original range. */
   readonly line: number;
@@ -13,7 +14,7 @@ export interface SourcePassage {
   readonly excerpts: readonly SourceExcerpt[];
 }
 
-function sourceMaterials(context?: TaskContext) {
+export function sourceMaterials(context?: TaskContext) {
   return [
     ...(context?.materials ?? []),
     ...(context?.materialDecisions ?? []).flatMap((decision) =>
@@ -70,19 +71,21 @@ export function readDraftPassages(reply: string, context?: TaskContext) {
     if (index < 0 || source.text.indexOf(quote, index + 1) >= 0) continue;
     const line = 1 + (source.text.slice(0, index).match(/\r\n|\r|\n/g)?.length ?? 0);
     const excerpts = byClaim.get(claim) ?? [];
-    const { name, range, format } = source;
+    const { name, range, format, sourceFile } = source;
     if (
       excerpts.some(
         (entry) =>
           entry.name === name &&
           entry.range === range &&
           entry.format === format &&
+          entry.sourceFile?.path === sourceFile?.path &&
+          entry.sourceFile?.line === sourceFile?.line &&
           entry.line === line &&
           entry.quote === quote,
       )
     )
       continue;
-    excerpts.push({ name, range, format, quote, line });
+    excerpts.push({ name, range, format, sourceFile, quote, line });
     byClaim.set(claim, excerpts);
   }
 

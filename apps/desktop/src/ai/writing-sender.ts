@@ -10,6 +10,8 @@ export interface NamedMaterial {
   readonly format?: "extractedText" | "caption" | "image" | "summary";
   /** A locally prepared PNG of the selected range. The original file is never part of a request. */
   readonly image?: string;
+  /** Private provenance for rereading a working-folder excerpt. */
+  readonly sourceFile?: { readonly path: string; readonly line: number };
 }
 
 export interface ImageRegion {
@@ -41,6 +43,25 @@ export function contextMaterials(context?: TaskContext): NamedMaterial[] {
       decision.outcome === "allowed" ? [decision.material] : [],
     ),
   ];
+}
+
+/** Transform the materials at the outgoing boundary and omit local provenance. */
+export function outboundTaskContext<Material>(
+  context: TaskContext | undefined,
+  transform: (material: Omit<NamedMaterial, "sourceFile">) => Material,
+) {
+  if (!context) return;
+  const outbound = ({ sourceFile: _sourceFile, ...material }: NamedMaterial) => transform(material);
+  return {
+    ...context,
+    currentDraft: context.currentDraft && outbound(context.currentDraft),
+    materials: context.materials?.map(outbound),
+    materialDecisions: context.materialDecisions?.map((decision) =>
+      decision.outcome === "allowed"
+        ? { ...decision, material: outbound(decision.material) }
+        : decision,
+    ),
+  };
 }
 
 export function hasTaskImages(...contexts: readonly (TaskContext | undefined)[]): boolean {

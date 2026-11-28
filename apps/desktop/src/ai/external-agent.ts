@@ -1,6 +1,7 @@
 import {
   hasTaskImages,
   materialRequestInstruction,
+  outboundTaskContext,
   replacementInstruction,
   sourcePassageInstruction,
   type WritingOptions,
@@ -50,7 +51,11 @@ export function externalAgentSender(
     return platform.send(
       agent,
       access,
-      { ...request, instruction: instruction.join("\n\n") },
+      {
+        ...request,
+        taskContext: outboundTaskContext(request.taskContext, (material) => material),
+        instruction: instruction.join("\n\n"),
+      },
       options,
     );
   };
