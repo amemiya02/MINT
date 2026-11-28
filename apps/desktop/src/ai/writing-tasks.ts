@@ -38,6 +38,7 @@ export interface WritingToolRecord {
 export interface SavedTurn extends WritingTurn {
   readonly id?: string;
   readonly alternativeTo?: string;
+  readonly skillInstruction?: string;
   readonly baseline?: {
     readonly scope: "selection" | "document" | "instruction" | "folder";
     readonly requests: readonly WritingRequest[];

@@ -2784,6 +2784,148 @@ async function addPastedWritingMaterial(text: string) {
   await clickPath("//form//button[normalize-space(.)='Add pasted text']");
 }
 
+test("a slash writing skill sends the approved plan and remembers its folder action across native launches", async () => {
+  const folder = await mkdtemp(join(dir, "writing-skills-"));
+  const draft = join(folder, "skill-manuscript.md");
+  const source = "The trails is open.";
+  const revised = "The trails are open.";
+  const material = "Trail is plural in this passage.";
+  await writeFile(draft, source);
+  const received: { path?: string; messages: { role: string; content: string }[] }[] = [];
+  const endpoint = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(chunk);
+    const { messages } = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    received.push({ path: request.url, messages });
+    const editing = messages.some(({ content }: { content: string }) =>
+      content.includes("<replacement>"),
+    );
+    response.writeHead(200, { "Content-Type": "application/json" }).end(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: editing ? `<replacement>${revised}</replacement>` : "Use a plural verb.",
+            },
+            finish_reason: "stop",
+          },
+        ],
+      }),
+    );
+  });
+  await new Promise<void>((resolve, reject) => {
+    endpoint.once("error", reject);
+    endpoint.listen(0, "127.0.0.1", resolve);
+  });
+  const composer = 'section[aria-label="Ask AI"]';
+  const action = `${composer} select:has(option[value="direct"])`;
+  const chooseAction = (value: string) =>
+    waitForView(
+      `the ${value} action to be available`,
+      `
+    const select = document.querySelector(${JSON.stringify(action)});
+    const option = [...(select?.options ?? [])].find(option => option.value === ${JSON.stringify(value)});
+    if (!option || option.disabled) return false;
+    select.value = option.value;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  `,
+    );
+  const chooseRecipient = () =>
+    waitForView(
+      "the loopback model to be available",
+      `
+    const select = [...document.querySelectorAll('${composer} label')]
+      .find(label => label.firstChild?.textContent === 'Recipient')?.control;
+    const option = [...(select?.options ?? [])].find(option => option.text.startsWith('Native skill fixture'));
+    if (!option) return false;
+    select.value = option.value;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  `,
+    );
+  const openSkill = async () => {
+    await clickPath("//*[@role='treeitem' and @aria-label='skill-manuscript.md']");
+    await clickPath("//div[contains(concat(' ', normalize-space(@class), ' '), ' cm-content ')]");
+    await keyActions(chord(keys.control, "a"));
+    await click("Ask AI");
+    await clickPath(
+      "//section[@aria-label='Ask AI']//label[normalize-space(.)='Instruction']/input",
+    );
+    await keyActions(typing("/copyedit"));
+    await showsIn(composer, "Correct spelling, punctuation, and grammar.");
+  };
+
+  let connectionId: string | undefined;
+  try {
+    const address = endpoint.address();
+    assert.ok(address && typeof address !== "string");
+    const base = `http://127.0.0.1:${address.port}/v1`;
+    await restart([folder, draft]);
+    connectionId = (
+      await invokeNative<{ id: string }>("save_model_connection", {
+        connection: {
+          name: "Native skill fixture",
+          address: base,
+          model: "native-skill",
+          apiKey: "",
+          lifetime: "persistent",
+        },
+      })
+    ).id;
+
+    await openSkill();
+    await chooseRecipient();
+    await chooseAction("comment");
+    await click(`Remember this action for ${folder}`);
+    await showsIn(composer, `Remembered for ${folder} · Comment only`);
+    await addPastedWritingMaterial(material);
+    assert.equal(received.length, 0, "inspecting and remembering a skill does not send material");
+    await click(
+      `Comment only · Current selection · Native skill fixture · ${base}/chat/completions`,
+    );
+    await waitForView(
+      "the model's comment",
+      `return document.querySelector('${composer} textarea[aria-label="AI reply"]')?.value === 'Use a plural verb.';`,
+    );
+    assert.equal(await readFile(draft, "utf8"), source);
+    assert.equal(received[0]?.path, "/v1/chat/completions");
+    const first = JSON.parse(received[0]?.messages.at(-1)?.content ?? "");
+    assert.equal(first.selectedText, source);
+    assert.deepEqual(first.taskContext, { materials: [{ name: "Pasted text", text: material }] });
+    assert.match(first.instruction, /Correct spelling, punctuation, and grammar\./);
+    assert.match(first.instruction, /Give comments only\./);
+
+    await restart([folder, draft]);
+    await openSkill();
+    await showsIn(composer, `Remembered for ${folder} · Comment only`);
+    await waitForView(
+      "the remembered comment action after restart",
+      `return document.querySelector(${JSON.stringify(action)})?.value === 'comment';`,
+    );
+    assert.equal(received.length, 1, "restoring a folder's action does not rerun the skill");
+    await chooseRecipient();
+    await chooseAction("direct");
+    await click(
+      `Apply directly · Current selection · Native skill fixture · ${base}/chat/completions`,
+    );
+    await showsIn(".cm-content", revised);
+    await nativeShortcut("ctrl+s");
+    await until(
+      "the direct skill edit to reach disk",
+      async () => (await readFile(draft, "utf8")) === revised || null,
+    ).catch(explain);
+    assert.equal(received.length, 2);
+    const second = JSON.parse(received[1]?.messages.at(-1)?.content ?? "");
+    assert.equal(second.selectedText, source);
+    assert.match(second.instruction, /Revise the text\./);
+  } finally {
+    endpoint.closeAllConnections();
+    await new Promise<void>((resolve) => endpoint.close(() => resolve()));
+    if (connectionId) await invokeNative("disconnect_model_connection", { id: connectionId });
+  }
+});
+
 test("native writing sends only the approved excerpt after a model capacity error", async () => {
   const publicLine = "Ridge is open.\n";
   const privateLine = "Private ranger contact details.";
@@ -4037,6 +4179,14 @@ test("Codex provides manuscript and folder reviews from approved task copies", a
   const unsaved = initial.replace("Original.", "Original. Unsaved note.");
   const changed = unsaved.replace("Original.", "Revised.");
   const approved = "Only the approved passage.";
+  const skillInstruction = [
+    "Correct spelling, punctuation, and grammar.",
+    "Check capitalization and terminology for consistency.",
+    "Preserve the author's meaning, voice, and Markdown structure.",
+    "Follow the author's task instructions where they refine these steps.",
+    "Revise the original sentence.",
+    "Revise the text. Keep the rest of the passage intact.",
+  ].join("\n");
   await writeFile(draft, initial);
   await writeFile(sibling, "Private text.");
   await writeFile(index, "[Old](old.md#section)\n");
@@ -4056,6 +4206,8 @@ const config = args.flatMap((arg, i) =>
   arg === "-c" && args[i + 1].startsWith("permissions.") ? ["-c", args[i + 1]] : []);
 const sample = prompt.instruction.startsWith("Suggest one concise rewrite");
 const folder = prompt.folderDocuments !== undefined;
+if (!sample && !folder && (!prompt.instruction.startsWith(${JSON.stringify(`${skillInstruction}\n\n`)}) ||
+  !prompt.instruction.includes("Write the resulting Markdown to draft.md."))) process.exit(12);
 if (folder && JSON.stringify(prompt.folderDocuments) !== JSON.stringify([
   "documents/index.md", "documents/manuscript.md", "documents/old.md",
 ])) process.exit(11);
@@ -4166,7 +4318,8 @@ console.log(JSON.stringify({ type: "turn.completed" }));
     await clickPath(
       "//section[@aria-label='Ask AI']//label[normalize-space(.)='Instruction']/input",
     );
-    await keyActions([...typing("Revise the original sentence."), ...typing(keys.enter)]);
+    await keyActions(typing("/copyedit Revise the original sentence."));
+    await clickPath("//section[@aria-label='Ask AI']//button[@type='submit' and not(@disabled)]");
   }
 
   await send("preview");
@@ -4245,7 +4398,7 @@ console.log(JSON.stringify({ type: "turn.completed" }));
     assert.equal(modelRequests.length, 1);
     assert.equal(modelRequests[0]?.model, "task-copy-comparison");
     assert.deepEqual(JSON.parse(modelRequests[0]?.messages.at(-1)?.content ?? ""), {
-      instruction: "Revise the original sentence.",
+      instruction: skillInstruction,
       selectedText: unsaved,
       taskContext: { materials: [{ name: "Pasted text", text: approved }] },
     });
