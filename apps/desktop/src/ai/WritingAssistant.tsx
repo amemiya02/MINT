@@ -103,6 +103,8 @@ interface Task {
   readonly scope: Scope;
   readonly searchFolder: string | null;
   readonly seen: Set<string>;
+  readonly alternativeTo?: string;
+  readonly fixedRequests?: readonly WritingRequest[];
   readonly rewrite?: { index: number; position: number; current: string };
 }
 
@@ -304,11 +306,24 @@ export function WritingAssistant({
       return;
     }
     const mapper = mapReviewRanges(task.baseline, editor.getText());
+    const location = mapper.range(task.origin);
+    const range = restoreRange(editor, location);
+    const selectionMapper = mapReviewRanges(
+      task.origin.text,
+      editor.getText().slice(location.from, location.to),
+    );
     setOrigin({
       id: task.id,
       editor,
       text: task.origin.text,
-      range: restoreRange(editor, mapper.range(task.origin)),
+      range: {
+        ...range,
+        trackSubrange(part, options) {
+          const mapped = selectionMapper.range({ ...part, located: location.located });
+          const subrange = range.trackSubrange(mapped, options);
+          return { ...subrange, hasBoundaries: () => mapped.located && subrange.hasBoundaries() };
+        },
+      },
       folder: task.folder,
     });
     setRestored({ task, mapper, restoreReading: returnToTab === undefined });
@@ -460,7 +475,9 @@ function Composer({
   const [includeHistory, setIncludeHistory] = useState(true);
   const [recipients, setRecipients] = useState<readonly WritingRecipient[]>([]);
   const [recipientId, setRecipientId] = useState<string | null>(
-    restored?.task.pending?.recipientId ?? restored?.task.turns.at(-1)?.recipientId ?? null,
+    (restored?.task.pending?.alternativeTo ? undefined : restored?.task.pending?.recipientId) ??
+      restored?.task.turns.findLast((turn) => !turn.alternativeTo)?.recipientId ??
+      null,
   );
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -476,6 +493,8 @@ function Composer({
   const [saveFailed, setSaveFailed] = useState(false);
   const [attempt, setAttempt] = useState<Attempt | null>(null);
   const [retryId, setRetryId] = useState("");
+  const [baselineId, setBaselineId] = useState<string | null>(null);
+  const [comparisonId, setComparisonId] = useState<string | null>(null);
   const controller = useRef<AbortController | null>(null);
   const busy = attempt?.status === "working" || attempt?.status === "approval";
   const store = useTabStore();
@@ -497,6 +516,8 @@ function Composer({
   const mounted = useRef(true);
   const isActive = useRef(active);
   isActive.current = active;
+  const isVisible = useRef(false);
+  isVisible.current = active && !!placement;
   const checkingDisk = useRef(false);
   const trackedSuggestions = useRef(new Set<TrackedRange>());
   const [showSource, setShowSource] = useState(restored?.task.showSource ?? false);
@@ -726,14 +747,18 @@ function Composer({
     void loadWritingRecipients(platform).then(({ available, failed }) => {
       if (!current) return;
       setRecipients(available);
-      setRecipientId((previous) => previous ?? available[0]?.id ?? null);
+      setRecipientId((previous) =>
+        (restored && previous !== null) || available.some(({ id }) => id === previous)
+          ? previous
+          : (available[0]?.id ?? null),
+      );
       setLoadFailed(failed);
       setLoading(false);
     });
     return () => {
       current = false;
     };
-  }, [platform, settingsOpen]);
+  }, [platform, restored, settingsOpen]);
 
   useEffect(() => {
     if (!placement || !isActive.current || settingsOpen) return;
@@ -1194,13 +1219,15 @@ function Composer({
       }
     }
     const history = includeHistory
-      ? turns.flatMap(({ status, instruction, reply, suggestions }) => [
-          ...((status ?? "complete") === "complete" && reply ? [{ instruction, reply }] : []),
-          ...(suggestions?.flatMap(
-            ({ comments }) =>
-              comments?.map(({ instruction, reply }) => ({ instruction, reply })) ?? [],
-          ) ?? []),
-        ])
+      ? turns
+          .filter(({ alternativeTo }) => !alternativeTo)
+          .flatMap(({ status, instruction, reply, suggestions }) => [
+            ...((status ?? "complete") === "complete" && reply ? [{ instruction, reply }] : []),
+            ...(suggestions?.flatMap(
+              ({ comments }) =>
+                comments?.map(({ instruction, reply }) => ({ instruction, reply })) ?? [],
+            ) ?? []),
+          ])
       : [];
     const task: Task = {
       plan: capacity.plan,
@@ -1238,7 +1265,10 @@ function Composer({
   ) {
     if (controller.current || checkingDisk.current) return false;
     if (
-      hasTaskImages(...(task.plan?.contexts ?? [task.request.taskContext])) &&
+      hasTaskImages(
+        ...(task.fixedRequests?.map(({ taskContext }) => taskContext) ??
+          task.plan?.contexts ?? [task.request.taskContext]),
+      ) &&
       !visionFor(connection)?.verified
     ) {
       setError("visionRequired");
@@ -1252,6 +1282,8 @@ function Composer({
     const recipient = labelFor(connection);
     const entry = { id: crypto.randomUUID(), task, recipientId: connection.id, recipient };
     const submitted = {
+      id: entry.id,
+      alternativeTo: task.alternativeTo,
       instruction: task.request.instruction,
       material: task.request.selectedText ?? task.request.taskContext?.currentDraft?.text,
       context: task.request.taskContext,
@@ -1262,12 +1294,19 @@ function Composer({
     const editing = task.action !== "comment";
     const fileEdit = editing && connection.kind === "agent" && connection.access === "taskCopy";
     let text = "";
-    let approved: NamedMaterial[] = [];
+    let approved: NamedMaterial[] =
+      task.fixedRequests?.flatMap(({ taskContext }) =>
+        (taskContext?.materialDecisions ?? []).flatMap((decision) =>
+          decision.outcome === "allowed" ? [decision.material] : [],
+        ),
+      ) ?? [];
     let status: AttemptStatus;
     let finalReplacement: string | undefined;
     let ignoredChanges: boolean | undefined;
     let capacityRejected = false;
+    const dispatched: WritingRequest[] = [];
     setRetryId("");
+    setBaselineId(null);
     setError(null);
     setAttempt({ ...entry, approved, status: "working", partial: "" });
 
@@ -1323,6 +1362,10 @@ function Composer({
           signal,
           plan: task.plan,
           tool,
+          fixedRequests: task.fixedRequests,
+          onDispatch: (request, batch) => {
+            dispatched[batch] = request;
+          },
           onContext: (context) => {
             sentContext = context;
             pending.current = { ...submitted, context };
@@ -1430,6 +1473,10 @@ function Composer({
         ...previous,
         {
           ...submitted,
+          baseline:
+            status === "complete" && dispatched.length && !task.alternativeTo
+              ? { scope: task.scope, requests: dispatched }
+              : undefined,
           context: sentContext,
           toolOutcome: toolApproval.result(),
           reply: rewrite ? "" : status === "complete" ? (replacement ?? text) : (replacement ?? ""),
@@ -1443,6 +1490,12 @@ function Composer({
     else if (!rewrite) persist(taskTitle);
     setAttempt({
       ...entry,
+      task: {
+        ...task,
+        fixedRequests:
+          task.fixedRequests ??
+          (dispatched.length === (task.plan?.contexts.length ?? 1) ? dispatched : undefined),
+      },
       approved,
       status,
       partial: "",
@@ -1451,6 +1504,10 @@ function Composer({
     });
     controller.current = null;
     taskRunning.current = false;
+    if (status === "complete" && task.alternativeTo && isVisible.current) {
+      setPlacement("sidebar");
+      setComparisonId(entry.id);
+    }
     return status === "complete";
   }
 
@@ -1557,10 +1614,17 @@ function Composer({
 
   const canRetry = attempt && !busy && !attempt.capacityRejected && attempt.status !== "complete";
   const sameConnection = canRetry && recipients.find(({ id }) => id === attempt.recipientId);
-  const otherConnection = canRetry && recipients.find(({ id }) => id === retryId);
+  const otherRecipients =
+    canRetry && !attempt.task.alternativeTo
+      ? recipients.filter(({ id }) => id !== attempt.recipientId)
+      : [];
+  const otherConnection = otherRecipients.find(({ id }) => id === retryId);
   const retryHasImages =
     !!canRetry &&
-    hasTaskImages(...(attempt.task.plan?.contexts ?? [attempt.task.request.taskContext]));
+    hasTaskImages(
+      ...(attempt.task.fixedRequests?.map(({ taskContext }) => taskContext) ??
+        attempt.task.plan?.contexts ?? [attempt.task.request.taskContext]),
+    );
   const sameVision = visionFor(sameConnection || undefined);
   const otherVision = visionFor(otherConnection || undefined);
   if (!placement) return null;
@@ -1712,6 +1776,17 @@ function Composer({
             {t("writing.edit.undoDirect")}
           </button>
         )}
+        {latest.baseline && latest.id && recipients.some(({ id }) => id !== latest.recipientId) && (
+          <button
+            type="button"
+            className={buttonClass}
+            onClick={() => {
+              if (latest.id) openBaseline(latest.id);
+            }}
+          >
+            {t("writing.compare.retry")}
+          </button>
+        )}
         <button type="button" className={buttonClass} onClick={close}>
           {closeLabel}
         </button>
@@ -1767,6 +1842,262 @@ function Composer({
     );
   }
 
+  function renderTurnContent(turn: Turn, index: number, inComparison = false) {
+    const canRewrite = !loading && recipients.some(({ id }) => id === turn.recipientId);
+    const { suggestions } = turn;
+    return (
+      <>
+        <WritingToolOutcome outcome={turn.toolOutcome} />
+        {suggestions?.length ? (
+          suggestions.map((suggestion, position) => {
+            const status = reviewStatus(suggestion, draft);
+            const pending = status === "preview";
+            const revertible = !pending && canRevert(suggestion);
+            const current = pending || revertible ? currentText(suggestion, draft) : "";
+            const conflict = pending && current !== suggestion.before;
+            const located = suggestion.range.hasBoundaries();
+            const reverted = revertible && located && current === suggestion.before;
+            const revertConflict =
+              revertible && !reverted && (!located || current !== suggestion.appliedText);
+            const blocked = externalChange ? "disk" : !located ? "boundaries" : undefined;
+            return (
+              <ProposedSelectionEdit
+                key={suggestion.id}
+                label={t("writing.edit.position", {
+                  index: String(position + 1),
+                  total: String(suggestions.length),
+                })}
+                before={suggestion.before}
+                after={suggestion.appliedText ?? suggestion.after}
+                status={reverted ? "reverted" : status}
+                showAppliedComparison={revertible}
+                source={showSource}
+                current={conflict || revertConflict ? current : undefined}
+                blocked={pending || (revertible && !reverted) ? blocked : undefined}
+                busy={busy}
+                recipient={turn.recipient}
+                conversation={
+                  <>
+                    {suggestion.note && (
+                      <p className="whitespace-pre-wrap wrap-anywhere">{suggestion.note}</p>
+                    )}
+                    {suggestion.comments?.map(({ id, instruction, reply }) => (
+                      <div key={id} className="rounded bg-(--mint-hover) p-2">
+                        <p className="font-medium">{instruction}</p>
+                        {renderReplyExcerpt(reply)}
+                      </div>
+                    ))}
+                  </>
+                }
+                onApply={
+                  blocked || !pending
+                    ? undefined
+                    : () => void decide(index, position, suggestion, current, inComparison)
+                }
+                onDiscard={pending ? () => void decide(index, position, suggestion) : undefined}
+                onRestore={
+                  status === "discarded"
+                    ? () => updateSuggestion(index, position, { status: "preview" })
+                    : undefined
+                }
+                onRevert={
+                  revertible && !reverted && !blocked
+                    ? () => void revertEdits([suggestion], current)
+                    : undefined
+                }
+                onKeepCurrent={revertConflict ? () => keepCurrent(suggestion.range) : undefined}
+                onRewrite={
+                  blocked || !pending || !canRewrite
+                    ? undefined
+                    : (prompt) => rewrite(index, position, turn, suggestion, current, prompt)
+                }
+              />
+            );
+          })
+        ) : suggestions ? (
+          <p>{t("writing.edit.unchanged")}</p>
+        ) : null}
+        {turn.partial && (
+          <div>
+            <p>{t("writing.task.partial")}</p>
+            <pre className="whitespace-pre-wrap wrap-anywhere">{turn.partial}</pre>
+          </div>
+        )}
+        {!!turn.sourcePassages?.length && (
+          <SourcePassageReview
+            draft={turn.reply}
+            passages={turn.sourcePassages}
+            editor={turn.direct ? origin.editor : undefined}
+            context={turn.context}
+            platform={platform}
+            recipients={recipients.map((recipient) => ({
+              ...recipient,
+              label: labelFor(recipient),
+              agentAccess: recipient.kind === "agent" ? recipient.access : undefined,
+            }))}
+            originalRecipient={turn.recipientId}
+          />
+        )}
+        {turn.ignoredChanges && <p role="status">{t("agent.taskCopyIgnored")}</p>}
+        {!!turn.reply && renderReplyExcerpt(turn.reply, suggestions !== undefined)}
+      </>
+    );
+  }
+
+  function openBaseline(id: string) {
+    setRetryId("");
+    setBaselineId((previous) => (previous === id ? null : id));
+    viewChanges();
+  }
+
+  function renderBaselineRetry(turn: Turn) {
+    if (
+      !turn.id ||
+      !turn.baseline ||
+      turn.alternativeTo ||
+      !recipients.some(({ id }) => id !== turn.recipientId)
+    )
+      return null;
+    const { id, baseline } = turn;
+    const connection = recipients.find(({ id }) => id === retryId && id !== turn.recipientId);
+    const first = baseline.requests[0];
+    const hasImages = hasTaskImages(...baseline.requests.map(({ taskContext }) => taskContext));
+    const check = visionFor(connection);
+    return (
+      <>
+        <button
+          type="button"
+          className={buttonClass}
+          disabled={busy || loading}
+          aria-expanded={baselineId === id}
+          onClick={() => openBaseline(id)}
+        >
+          {t("writing.compare.retry")}
+        </button>
+        {baselineId === id && sidebar && first && (
+          <fieldset className="min-w-0 space-y-2 rounded border border-(--mint-border) p-2">
+            <legend>{t("writing.compare.retry")}</legend>
+            <p className="whitespace-pre-wrap wrap-anywhere">{turn.instruction}</p>
+            <label className="grid gap-1">
+              {t("writing.task.retryConnection")}
+              <select
+                className={fieldClass}
+                value={retryId}
+                onChange={(event) => setRetryId(event.target.value)}
+              >
+                <option value="">{t("writing.chooseRecipient")}</option>
+                {recipients
+                  .filter((candidate) => candidate.id !== turn.recipientId)
+                  .map((candidate) => (
+                    <option key={candidate.id} value={candidate.id}>
+                      {labelFor(candidate)}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            {connection && (
+              <>
+                <p className="text-xs wrap-anywhere">{labelFor(connection)}</p>
+                {renderAgentAccess(connection)}
+                <p className="text-xs">
+                  {t(
+                    first.responseFormat === "replacement" ? "writing.preview" : "writing.comment",
+                  )}
+                  {" · "}
+                  {t(`writing.scope.${baseline.scope}`)}
+                </p>
+                {first.selectedText !== undefined && (
+                  <details className="text-xs">
+                    <summary>{t("writing.scope.selection")}</summary>
+                    <pre className="max-h-24 overflow-auto whitespace-pre-wrap wrap-anywhere">
+                      {first.selectedText}
+                    </pre>
+                  </details>
+                )}
+                {baseline.requests.map(({ taskContext, instruction, history }, index) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: The saved requests are in fixed send order.
+                  <div key={index} className="space-y-1">
+                    {baseline.requests.length > 1 && (
+                      <p className="text-xs">
+                        {t("materials.capacity.batchNumber", {
+                          number: String(index + 1),
+                          count: String(baseline.requests.length),
+                        })}
+                      </p>
+                    )}
+                    {renderSentContext(taskContext, turn.searchFolder)}
+                    {instruction !== turn.instruction && (
+                      <details className="text-xs">
+                        <summary>{t("writing.compare.instructions")}</summary>
+                        <pre className="max-h-32 overflow-auto whitespace-pre-wrap wrap-anywhere">
+                          {instruction}
+                        </pre>
+                      </details>
+                    )}
+                    {!!history?.length && (
+                      <details className="text-xs">
+                        <summary>{t("writing.compare.history")}</summary>
+                        {history.map(({ instruction, reply }, position) => (
+                          // biome-ignore lint/suspicious/noArrayIndexKey: The saved messages are in fixed send order.
+                          <div key={position} className="whitespace-pre-wrap wrap-anywhere">
+                            <p className="font-medium">{instruction}</p>
+                            <p>{reply}</p>
+                          </div>
+                        ))}
+                      </details>
+                    )}
+                  </div>
+                ))}
+                {hasImages && check && <VisionControl check={check} />}
+                {hasImages && !check && <p role="alert">{t("materials.visionRequired")}</p>}
+                <button
+                  type="button"
+                  className={buttonClass}
+                  disabled={busy || loading || (hasImages && !check?.verified)}
+                  onClick={() =>
+                    void runTask(
+                      {
+                        request: first,
+                        documentBaseline:
+                          baseline.scope === "document" && first.responseFormat === "replacement"
+                            ? first.taskContext?.currentDraft?.text
+                            : undefined,
+                        action: first.responseFormat === "replacement" ? "preview" : "comment",
+                        scope: baseline.scope,
+                        searchFolder: turn.searchFolder ?? null,
+                        seen: new Set(),
+                        alternativeTo: id,
+                        fixedRequests: baseline.requests,
+                      },
+                      connection,
+                    )
+                  }
+                >
+                  {t("writing.compare.send", { recipient: labelFor(connection) })}
+                </button>
+              </>
+            )}
+          </fieldset>
+        )}
+      </>
+    );
+  }
+
+  function renderAgentAccess(candidate: WritingRecipient) {
+    if (candidate.kind !== "agent") return null;
+    return (
+      <p className="text-xs text-(--mint-muted)">
+        {t("agent.processAccess")} {t(`agent.${candidate.access}Access`)}{" "}
+        {t(candidate.access === "taskCopy" ? "agent.taskCopyTools" : "agent.tools")}{" "}
+        {t(candidate.access === "taskCopy" ? "agent.taskCopyLogin" : "agent.usesLogin")}
+      </p>
+    );
+  }
+
+  const alternateIndex = turns.findIndex((turn) => turn.id === comparisonId);
+  const alternate = turns[alternateIndex];
+  const originalIndex = turns.findIndex((turn) => turn.id && turn.id === alternate?.alternativeTo);
+  const original = turns[originalIndex];
   return (
     <Container
       ref={review}
@@ -1857,8 +2188,6 @@ function Composer({
       <div aria-live="polite" className="space-y-2">
         {messages.map((turn, position) => {
           const index = sidebar ? position : turns.length - 1;
-          const canRewrite = !loading && recipients.some(({ id }) => id === turn.recipientId);
-          const { suggestions } = turn;
           return (
             <article key={index} className="space-y-1">
               {sidebar && (
@@ -1873,103 +2202,17 @@ function Composer({
                 </details>
               )}
               {sidebar && renderSentContext(turn.context, turn.searchFolder)}
-              <WritingToolOutcome outcome={turn.toolOutcome} />
-              {suggestions?.length ? (
-                suggestions.map((suggestion, position) => {
-                  const status = reviewStatus(suggestion, draft);
-                  const pending = status === "preview";
-                  const revertible = !pending && canRevert(suggestion);
-                  const current = pending || revertible ? currentText(suggestion, draft) : "";
-                  const conflict = pending && current !== suggestion.before;
-                  const located = suggestion.range.hasBoundaries();
-                  const reverted = revertible && located && current === suggestion.before;
-                  const revertConflict =
-                    revertible && !reverted && (!located || current !== suggestion.appliedText);
-                  const blocked = externalChange ? "disk" : !located ? "boundaries" : undefined;
-                  return (
-                    <ProposedSelectionEdit
-                      key={suggestion.id}
-                      label={t("writing.edit.position", {
-                        index: String(position + 1),
-                        total: String(suggestions.length),
-                      })}
-                      before={suggestion.before}
-                      after={suggestion.appliedText ?? suggestion.after}
-                      status={reverted ? "reverted" : status}
-                      showAppliedComparison={revertible}
-                      source={showSource}
-                      current={conflict || revertConflict ? current : undefined}
-                      blocked={pending || (revertible && !reverted) ? blocked : undefined}
-                      busy={busy}
-                      recipient={turn.recipient}
-                      conversation={
-                        <>
-                          {suggestion.note && (
-                            <p className="whitespace-pre-wrap wrap-anywhere">{suggestion.note}</p>
-                          )}
-                          {suggestion.comments?.map(({ id, instruction, reply }) => (
-                            <div key={id} className="rounded bg-(--mint-hover) p-2">
-                              <p className="font-medium">{instruction}</p>
-                              {renderReplyExcerpt(reply)}
-                            </div>
-                          ))}
-                        </>
-                      }
-                      onApply={
-                        blocked || !pending
-                          ? undefined
-                          : () => void decide(index, position, suggestion, current)
-                      }
-                      onDiscard={
-                        pending ? () => void decide(index, position, suggestion) : undefined
-                      }
-                      onRestore={
-                        status === "discarded"
-                          ? () => updateSuggestion(index, position, { status: "preview" })
-                          : undefined
-                      }
-                      onRevert={
-                        revertible && !reverted && !blocked
-                          ? () => void revertEdits([suggestion], current)
-                          : undefined
-                      }
-                      onKeepCurrent={
-                        revertConflict ? () => keepCurrent(suggestion.range) : undefined
-                      }
-                      onRewrite={
-                        blocked || !pending || !canRewrite
-                          ? undefined
-                          : (prompt) => rewrite(index, position, turn, suggestion, current, prompt)
-                      }
-                    />
-                  );
-                })
-              ) : suggestions ? (
-                <p>{t("writing.edit.unchanged")}</p>
-              ) : null}
-              {turn.partial && (
-                <div>
-                  <p>{t("writing.task.partial")}</p>
-                  <pre className="whitespace-pre-wrap wrap-anywhere">{turn.partial}</pre>
-                </div>
+              {renderTurnContent(turn, index)}
+              {renderBaselineRetry(turn)}
+              {turn.alternativeTo && turn.id && turn.status === "complete" && (
+                <button
+                  type="button"
+                  className={buttonClass}
+                  onClick={() => setComparisonId(turn.id ?? null)}
+                >
+                  {t("writing.compare.open")}
+                </button>
               )}
-              {!!turn.sourcePassages?.length && (
-                <SourcePassageReview
-                  draft={turn.reply}
-                  passages={turn.sourcePassages}
-                  editor={turn.direct ? origin.editor : undefined}
-                  context={turn.context}
-                  platform={platform}
-                  recipients={recipients.map((recipient) => ({
-                    ...recipient,
-                    label: labelFor(recipient),
-                    agentAccess: recipient.kind === "agent" ? recipient.access : undefined,
-                  }))}
-                  originalRecipient={turn.recipientId}
-                />
-              )}
-              {turn.ignoredChanges && <p role="status">{t("agent.taskCopyIgnored")}</p>}
-              {!!turn.reply && renderReplyExcerpt(turn.reply, suggestions !== undefined)}
             </article>
           );
         })}
@@ -2022,7 +2265,7 @@ function Composer({
               .filter(Boolean)
               .join(" · ")}
           </p>
-          {recipients.some(({ id }) => id !== attempt.recipientId) && (
+          {otherRecipients.length > 0 && (
             <>
               <label className="grid gap-1">
                 {t("writing.task.retryConnection")}
@@ -2032,18 +2275,25 @@ function Composer({
                   onChange={(event) => setRetryId(event.target.value)}
                 >
                   <option value="">{t("writing.chooseRecipient")}</option>
-                  {recipients
-                    .filter(({ id }) => id !== attempt.recipientId)
-                    .map((candidate) => (
-                      <option key={candidate.id} value={candidate.id}>
-                        {labelFor(candidate)}
-                      </option>
-                    ))}
+                  {otherRecipients.map((candidate) => (
+                    <option key={candidate.id} value={candidate.id}>
+                      {labelFor(candidate)}
+                    </option>
+                  ))}
                 </select>
               </label>
               {attempt.task.plan && otherConnection && (
                 <MaterialPlanPreview
-                  plan={attempt.task.plan}
+                  plan={
+                    attempt.task.fixedRequests
+                      ? {
+                          ...attempt.task.plan,
+                          contexts: attempt.task.fixedRequests.map(
+                            ({ taskContext }) => taskContext,
+                          ),
+                        }
+                      : attempt.task.plan
+                  }
                   recipient={labelFor(otherConnection)}
                 />
               )}
@@ -2055,7 +2305,16 @@ function Composer({
                 type="button"
                 className={buttonClass}
                 disabled={!otherConnection || busy || (retryHasImages && !otherVision?.verified)}
-                onClick={() => otherConnection && void runTask(attempt.task, otherConnection)}
+                onClick={() =>
+                  otherConnection &&
+                  void runTask(
+                    {
+                      ...attempt.task,
+                      action: attempt.task.action === "direct" ? "preview" : attempt.task.action,
+                    },
+                    otherConnection,
+                  )
+                }
               >
                 {t("writing.task.retryOther")}
               </button>
@@ -2134,7 +2393,7 @@ function Composer({
                 </select>
               </label>
               <label className="grid min-w-0 flex-1 gap-1">
-                {t("writing.recipient")}
+                {t(sidebar && turns.length ? "writing.compare.nextRecipient" : "writing.recipient")}
                 <select
                   className={fieldClass}
                   value={recipient?.id ?? ""}
@@ -2159,13 +2418,7 @@ function Composer({
                 </select>
               </label>
             </div>
-            {recipient?.kind === "agent" && (
-              <p className="text-xs text-(--mint-muted)">
-                {t("agent.processAccess")} {t(`agent.${recipient.access}Access`)}{" "}
-                {t(recipient.access === "taskCopy" ? "agent.taskCopyTools" : "agent.tools")}{" "}
-                {t(recipient.access === "taskCopy" ? "agent.taskCopyLogin" : "agent.usesLogin")}
-              </p>
-            )}
+            {recipient && renderAgentAccess(recipient)}
             {loadFailed && <p role="alert">{t("writing.connectionsFailed")}</p>}
             {!title && (
               <label className="flex items-center gap-2 text-xs">
@@ -2249,7 +2502,86 @@ function Composer({
         />
       )}
       {closeConfirmation}
+      {original && alternate && (
+        <WritingComparison
+          instruction={original.instruction}
+          original={original.recipient}
+          alternative={alternate.recipient}
+          source={showSource}
+          onSource={setShowSource}
+          onClose={() => setComparisonId(null)}
+          originalContent={renderTurnContent(original, originalIndex, true)}
+          alternativeContent={renderTurnContent(alternate, alternateIndex, true)}
+        />
+      )}
     </Container>
+  );
+}
+
+function WritingComparison({
+  instruction,
+  original,
+  alternative,
+  source,
+  onSource,
+  onClose,
+  originalContent,
+  alternativeContent,
+}: {
+  readonly instruction: string;
+  readonly original: string;
+  readonly alternative: string;
+  readonly source: boolean;
+  readonly onSource: (value: boolean) => void;
+  readonly onClose: () => void;
+  readonly originalContent: ReactNode;
+  readonly alternativeContent: ReactNode;
+}) {
+  const t = useT();
+  const { props, close } = useModalDialog(onClose);
+  return (
+    <dialog
+      {...props}
+      onKeyDown={(event) => event.stopPropagation()}
+      aria-label={t("writing.compare.title")}
+      className="m-auto max-h-[90vh] w-[min(68rem,94vw)] overflow-auto rounded-lg border border-(--mint-border) bg-(--mint-bg) p-4 text-sm text-(--mint-fg) backdrop:bg-black/30"
+    >
+      <header className="mb-3 space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-medium">{t("writing.compare.title")}</h2>
+          <button type="button" className={buttonClass} onClick={close}>
+            {t("settings.close")}
+          </button>
+        </div>
+        <p className="whitespace-pre-wrap wrap-anywhere">{instruction}</p>
+        <label className="flex items-center gap-1">
+          <input
+            type="checkbox"
+            checked={source}
+            onChange={(event) => onSource(event.target.checked)}
+          />
+          {t("writing.edit.source")}
+        </label>
+      </header>
+      <div className="grid gap-3 md:grid-cols-2">
+        <section
+          aria-label={t("writing.compare.original")}
+          className="min-w-0 space-y-2 rounded border border-(--mint-border) p-3 md:max-h-[65vh] md:overflow-auto"
+        >
+          <h3 className="font-medium">{t("writing.compare.original")}</h3>
+          <p className="text-xs wrap-anywhere">{original}</p>
+          {originalContent}
+        </section>
+        <section
+          aria-label={t("writing.compare.alternative")}
+          className="min-w-0 space-y-2 rounded border border-(--mint-border) p-3 md:max-h-[65vh] md:overflow-auto"
+        >
+          <h3 className="font-medium">{t("writing.compare.alternative")}</h3>
+          <p className="text-xs wrap-anywhere">{alternative}</p>
+          {alternativeContent}
+        </section>
+      </div>
+    </dialog>
   );
 }
 

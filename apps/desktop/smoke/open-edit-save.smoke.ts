@@ -4062,7 +4062,110 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   );
   assert.equal(await readFile(draft, "utf8"), initial);
   assert.equal(await readFile(sibling, "utf8"), "Private text.");
-  await clickPath("//section[@aria-label='Ask AI']//button[@aria-label='Close']");
+  const modelRequests: { model: string; messages: { role: string; content: string }[] }[] = [];
+  const modelDraft = unsaved.replace("First paragraph.", "Model opening.");
+  const endpoint = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(chunk);
+    modelRequests.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+    response.writeHead(200, { "Content-Type": "application/json" }).end(
+      JSON.stringify({
+        choices: [
+          {
+            message: { content: `<replacement>${modelDraft}</replacement>` },
+            finish_reason: "stop",
+          },
+        ],
+      }),
+    );
+  });
+  await new Promise<void>((resolve, reject) => {
+    endpoint.once("error", reject);
+    endpoint.listen(0, "127.0.0.1", resolve);
+  });
+  let modelId: string | undefined;
+  try {
+    const address = endpoint.address();
+    assert.ok(address && typeof address !== "string");
+    const modelAddress = `http://127.0.0.1:${address.port}/v1/chat/completions`;
+    const modelLabel = `Comparison fixture · ${modelAddress}`;
+    modelId = (
+      await invokeNative<{ id: string }>("save_model_connection", {
+        connection: {
+          name: "Comparison fixture",
+          address: modelAddress,
+          model: "task-copy-comparison",
+          apiKey: "",
+          lifetime: "persistent",
+        },
+      })
+    ).id;
+    await openSettings();
+    await clickSettingsButton("Close");
+    await clickPath("//button[not(@disabled) and normalize-space(.)='Retry same baseline']");
+    await waitForView(
+      "the comparison model to appear in the retry recipient selector",
+      `return [...document.querySelectorAll('aside fieldset select option')]
+        .some(option => option.textContent === ${JSON.stringify(modelLabel)});`,
+    );
+    await select("Retry connection", modelLabel);
+    await waitForView(
+      "the saved task-copy material and model recipient before approval",
+      `const approval = [...document.querySelectorAll('aside fieldset')].find(
+        fieldset => fieldset.querySelector('legend')?.textContent === 'Retry same baseline');
+       return approval?.innerText.includes('Pasted text') &&
+         approval.innerText.includes(${JSON.stringify(modelLabel)});`,
+    );
+    assert.equal(modelRequests.length, 0);
+    await click(`Send same baseline to ${modelLabel}`);
+
+    const comparison = "//dialog[@open and @aria-label='Compare writing alternatives']";
+    await waitForView(
+      "two proposals from the native Agent and model",
+      `const dialog = document.querySelector('dialog[open][aria-label="Compare writing alternatives"]');
+       return dialog?.querySelector('[aria-label="Original proposal"]')?.innerText.includes('Revised. Unsaved note.') &&
+         dialog?.querySelector('[aria-label="Alternative proposal"]')?.innerText.includes('Model opening.');`,
+    );
+    assert.equal(modelRequests.length, 1);
+    assert.equal(modelRequests[0]?.model, "task-copy-comparison");
+    assert.deepEqual(JSON.parse(modelRequests[0]?.messages.at(-1)?.content ?? ""), {
+      instruction: "Revise the original sentence.",
+      selectedText: unsaved,
+      taskContext: { materials: [{ name: "Pasted text", text: approved }] },
+    });
+    assert.equal(await readFile(draft, "utf8"), initial);
+    for (const proposal of ["Original proposal", "Alternative proposal"]) {
+      const section = `section[aria-label="${proposal}"]`;
+      await clickPath(
+        `${comparison}//section[@aria-label='${proposal}']//button[normalize-space(.)='Apply proposed edit']`,
+      );
+      await waitForView(
+        `the edit from the ${proposal.toLowerCase()} to apply`,
+        `const proposal = document.querySelector('dialog[open][aria-label="Compare writing alternatives"]')
+          ?.querySelector(${JSON.stringify(section)});
+         return [...(proposal?.querySelectorAll('button') ?? [])]
+          .some(button => button.textContent === 'Revert this edit');`,
+      );
+    }
+    await clickPath(`${comparison}//button[normalize-space(.)='Close']`);
+    await waitForView(
+      "the manuscript to contain one change from each receiver",
+      `const manuscript = document.querySelector('.cm-content')?.textContent;
+       return manuscript?.includes('Model opening.') && manuscript.includes('Revised. Unsaved note.');`,
+    );
+    assert.equal(await readFile(draft, "utf8"), initial);
+    await clickPath("//aside[@aria-label='Writing Assistant']//button[normalize-space(.)='Close']");
+    await keyActions([...chord(keys.control, "z"), ...chord(keys.control, "z")]);
+    await waitForView(
+      "undo to keep the author's unsaved manuscript",
+      `const manuscript = document.querySelector('.cm-content')?.textContent;
+       return manuscript?.includes('First paragraph.') && manuscript.includes('Original. Unsaved note.');`,
+    );
+  } finally {
+    endpoint.closeAllConnections();
+    await new Promise<void>((resolve) => endpoint.close(() => resolve()));
+    if (modelId) await invokeNative("disconnect_model_connection", { id: modelId });
+  }
   await send("direct");
   await waitForView(
     "the manuscript change in the editor",
