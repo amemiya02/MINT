@@ -20,6 +20,7 @@ export function ProposedSelectionEdit({
   recipient,
   onApply,
   onDiscard,
+  onRestore,
   onRevert,
   onKeepCurrent,
   onRewrite,
@@ -39,6 +40,7 @@ export function ProposedSelectionEdit({
   readonly recipient?: string;
   readonly onApply?: (() => void) | undefined;
   readonly onDiscard?: (() => void) | undefined;
+  readonly onRestore?: (() => void) | undefined;
   readonly onRevert?: (() => void) | undefined;
   readonly onKeepCurrent?: (() => void) | undefined;
   readonly onRewrite?: ((instruction: string) => Promise<boolean>) | undefined;
@@ -47,9 +49,30 @@ export function ProposedSelectionEdit({
   const [rewriting, setRewriting] = useState(false);
   const [instruction, setInstruction] = useState("");
   const input = useRef<HTMLInputElement>(null);
+  const proposal = useRef<HTMLFieldSetElement>(null);
+  const restoring = useRef(false);
   useEffect(() => {
     if (rewriting) input.current?.focus();
   }, [rewriting]);
+  useEffect(() => {
+    if (status !== "preview" || !restoring.current) return;
+    restoring.current = false;
+    proposal.current?.focus({ preventScroll: true });
+  }, [status]);
+
+  const restore = onRestore && (
+    <button
+      type="button"
+      className="rounded border border-(--mint-border) px-2 py-1"
+      disabled={busy}
+      onClick={() => {
+        restoring.current = !review;
+        onRestore();
+      }}
+    >
+      {t("writing.review.restore")}
+    </button>
+  );
 
   if (
     !review &&
@@ -59,10 +82,11 @@ export function ProposedSelectionEdit({
       status === "kept")
   ) {
     return (
-      <fieldset aria-label={label} className="min-w-0">
+      <fieldset aria-label={label} className="min-w-0 space-y-1">
         <p>{t(`writing.edit.${status}`)}</p>
         {status !== "kept" && <pre className="whitespace-pre-wrap wrap-anywhere">{after}</pre>}
         {conversation}
+        {restore}
       </fieldset>
     );
   }
@@ -90,6 +114,8 @@ export function ProposedSelectionEdit({
   );
   return (
     <fieldset
+      ref={proposal}
+      tabIndex={-1}
       aria-label={label}
       className="@container min-w-0 space-y-2 rounded border border-(--mint-border) p-2"
     >
@@ -168,6 +194,7 @@ export function ProposedSelectionEdit({
             {t(replyExcerpt ? "writing.reply.dismissComparison" : "writing.edit.discard")}
           </button>
         )}
+        {restore}
         {onRevert && (
           <button
             type="button"

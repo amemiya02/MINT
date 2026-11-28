@@ -165,13 +165,15 @@ test("section acceptance preserves prior decisions and can be undone in one edit
   page,
 }) => {
   const source =
-    "# Methods\n\nOld opening.\n\nOld detail.\n\nOld sample.\n\nOld measure.\n\n# Results\n\nOld result.";
-  const replacement = source.replaceAll("Old ", "New ");
+    "# Methods\n\nOld opening.\n\nOld detail.\n\nOld context.\n\nKeep this protocol.\n\nOld sample.\n\nKeep these units.\n\nOld measure.\n\n# Results\n\nOld result.";
+  const replacement = source.replaceAll("Old ", "New ").replace("New sample.\n\n", "");
   const { assistant, editor } = await openProposals(page, source, replacement);
   await tabTo(page, assistant.getByRole("button", { name: "Review proposed edits" }));
   await page.keyboard.press("Enter");
   const review = page.getByRole("dialog", { name: "Review proposed edits" });
   const dismiss = review.getByRole("button", { name: "Dismiss proposed edit" });
+  await tabTo(page, dismiss);
+  await page.keyboard.press("Enter");
   await tabTo(page, dismiss);
   await page.keyboard.press("Enter");
   await tabTo(page, review.getByRole("button", { name: "Leave comment" }));
@@ -180,10 +182,10 @@ test("section acceptance preserves prior decisions and can be undone in one edit
   await page.keyboard.press("Enter");
 
   const section = review.getByRole("combobox", { name: "Section" });
-  await expect(section.getByRole("option", { name: "Methods · 2 pending of 4 edits" })).toHaveCount(
-    1,
-  );
-  await section.selectOption({ label: "Methods · 2 pending of 4 edits" });
+  await expect(
+    section.getByRole("option", { name: "Methods · 2 pending of 5 edits" }),
+  ).toBeAttached();
+  await section.selectOption({ label: "Methods · 2 pending of 5 edits" });
   const accept = review.getByRole("button", { name: "Accept remaining edits in Methods" });
   await tabTo(page, accept);
   await page.keyboard.press("Enter");
@@ -200,9 +202,28 @@ test("section acceptance preserves prior decisions and can be undone in one edit
   await page.keyboard.press("Escape");
   await expect(editor).toBeFocused();
   await page.keyboard.press("ControlOrMeta+S");
-  const accepted = source
-    .replace("Old sample.", "New sample.")
-    .replace("Old measure.", "New measure.");
+  const accepted = source.replace("Old sample.\n\n", "").replace("Old measure.", "New measure.");
+  await expect.poll(() => readFile(page, path)).toBe(accepted);
+  await page.getByRole("button", { name: "Open manuscript.md in other pane" }).click();
+  const peer = page.getByRole("tabpanel", { name: "manuscript.md" }).last().getByRole("textbox");
+  await expect(peer).toBeFocused();
+  await page.keyboard.press("ControlOrMeta+Z");
+  await page.keyboard.press("ControlOrMeta+S");
+  await expect.poll(() => readFile(page, path)).toBe(source);
+  await page.getByRole("button", { name: "Close manuscript.md", exact: true }).last().click();
+  await expect(editor).toBeFocused();
+
+  await page.keyboard.press("ControlOrMeta+Shift+P");
+  await page.getByRole("combobox", { name: "Command Palette" }).fill("All writing tasks");
+  await page.keyboard.press("Enter");
+  const history = page.getByRole("dialog", { name: "All writing tasks" });
+  await expect(
+    history.getByRole("listitem").filter({ hasText: "Revise the manuscript." }),
+  ).toContainText("4 decisions needed");
+  await page.keyboard.press("Escape");
+  await expect(editor).toBeFocused();
+  await page.keyboard.press("ControlOrMeta+Shift+Z");
+  await page.keyboard.press("ControlOrMeta+S");
   await expect.poll(() => readFile(page, path)).toBe(accepted);
   await page.keyboard.press("ControlOrMeta+Z");
   await page.keyboard.press("ControlOrMeta+S");
@@ -212,7 +233,46 @@ test("section acceptance preserves prior decisions and can be undone in one edit
   await page.keyboard.press("Enter");
   await tabTo(page, assistant.getByRole("button", { name: "Review proposed edits" }));
   await page.keyboard.press("Enter");
-  await expect(review.getByRole("heading", { name: "Replacement · Edit 3 of 5" })).toBeFocused();
+  await expect(review.getByRole("heading", { name: "Deletion · Edit 4 of 6" })).toBeFocused();
+  await expect(review.getByRole("button", { name: "Apply proposed edit" })).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("ControlOrMeta+Shift+P");
+  await page.getByRole("combobox", { name: "Command Palette" }).fill("All writing tasks");
+  await page.keyboard.press("Enter");
+  await tabTo(page, history.getByRole("button", { name: "Revise the manuscript.", exact: true }));
+  await page.keyboard.press("Enter");
+  const task = page.getByRole("complementary", { name: "Writing Assistant" });
+  const opening = task.getByRole("group", { name: "Proposed edit 1 of 6" });
+  const detail = task.getByRole("group", { name: "Proposed edit 2 of 6" });
+  const context = task.getByRole("group", { name: "Proposed edit 3 of 6" });
+  await tabTo(page, detail.getByRole("button", { name: "Return to pending" }));
+  await page.keyboard.press("Enter");
+  await expect(detail.getByRole("button", { name: "Apply proposed edit" })).toBeVisible();
+  await expect(opening).toContainText("Proposed edit dismissed.");
+  await expect(context).toContainText("Confirm this detail.");
+  expect(await readFile(page, path)).toBe(source);
+});
+
+test("section acceptance leaves a proposal spanning two sections for individual review", async ({
+  page,
+}) => {
+  const source = "# Methods\n\nOld opening.\n\nOld sample.\n# Results\n\nKeep this result.";
+  const replacement = "# Methods\n\nNew opening.\n\nNew sample.\n# Findings\n\nKeep this result.";
+  const { assistant } = await openProposals(page, source, replacement);
+  await assistant.getByRole("button", { name: "Review proposed edits" }).click();
+  const review = page.getByRole("dialog", { name: "Review proposed edits" });
+  await review
+    .getByRole("combobox", { name: "Section" })
+    .selectOption({ label: "Methods · 2 pending of 2 edits" });
+  await review.getByRole("button", { name: "Accept remaining edits in Methods" }).click();
+  await expect(review.getByRole("status")).toHaveText("Accepted 1 edit.");
+  await expect(review.getByRole("button", { name: "Apply proposed edit" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("ControlOrMeta+S");
+  await expect
+    .poll(() => readFile(page, path))
+    .toBe(source.replace("Old opening.", "New opening."));
 });
 
 test("saved proposals can be opened by file and closing returns to the original manuscript", async ({

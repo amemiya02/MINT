@@ -19,7 +19,9 @@ export interface SavedSuggestion {
   readonly status: EditStatus;
   readonly appliedText?: string;
   readonly note?: string;
+  /** Legacy marker used by reviews saved before section steps carried an ID. */
   readonly batchApplied?: boolean;
+  readonly sectionBatch?: { readonly id: string; readonly index: number };
   readonly comments?: readonly (WritingTurn & { readonly id: number })[];
   readonly range: ReviewRange;
 }

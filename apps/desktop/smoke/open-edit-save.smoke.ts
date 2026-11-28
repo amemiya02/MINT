@@ -10,6 +10,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { after, before, test } from "node:test";
 import { promisify } from "node:util";
 import JSZip from "jszip";
+import type { SavedWritingTask } from "../src/ai/writing-tasks.ts";
 
 const driver = process.env.TAURI_DRIVER_URL ?? "http://127.0.0.1:4444";
 const application = process.env.MINT_APP;
@@ -1628,13 +1629,22 @@ test("a saved writing review resumes after a native restart without contacting i
   const draft = join(dir, "resume-writing-review.md");
   const renamedDraft = join(dir, "renamed-writing-review.md");
   const original =
-    "| Group | Finding |\n| --- | --- |\n| Coast | First draft. |\n\nSecond draft.\n\nThird draft.\n\nLast draft.";
+    "# Methods\n\n| Group | Finding |\n| --- | --- |\n| Coast | First draft. |\n\nSecond draft.\n\nThird draft.\n\nFourth draft.\n\nFifth draft.\n\n# Results\n\nLast draft.";
   const replacement = original.replaceAll("draft.", "edit.");
-  const instruction = "Review all four passages.";
+  const instruction = "Review all six passages.";
   const excerpt = "The Tuesday field notes support the first passage.";
   const note = "Check this with the interviewer.";
   const requests: { messages: { content: string }[] }[] = [];
   let connectionId: string | undefined;
+  const savedReviewWithPending = (count: number) =>
+    until(`the saved writing review to have ${count} pending decisions`, async () => {
+      const [task] = await invokeNative<SavedWritingTask[]>("list_writing_tasks", { path: draft });
+      if (!task) return null;
+      const suggestions = task.turns[0]?.suggestions;
+      return suggestions?.filter(({ status }) => status === "preview").length === count
+        ? task
+        : null;
+    }).catch(explain);
   await writeFile(draft, original);
   const endpoint = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
@@ -1709,7 +1719,7 @@ test("a saved writing review resumes after a native restart without contacting i
       waitForView(
         `proposal ${number} to receive keyboard focus`,
         `return ${reviewRoot}?.querySelector('h3') === document.activeElement &&
-          document.activeElement.textContent.trim() === '${type} · Edit ${number} of 4';`,
+          document.activeElement.textContent.trim() === '${type} · Edit ${number} of 6';`,
       );
     const pressReviewButton = async (label: string) => {
       for (let index = 0; index < 20; index++) {
@@ -1744,6 +1754,17 @@ test("a saved writing review resumes after a native restart without contacting i
     );
     await keyActions([...typing(note), ...typing(keys.enter)]);
     await focusedEdit(4);
+    await waitForView(
+      "Methods to report two remaining edits",
+      `const option = [...${reviewRoot}?.querySelectorAll('select option') ?? []]
+        .find(option => option.textContent.trim() === 'Methods · 2 pending of 5 edits');
+       if (!option) return false;
+       option.parentElement.value = option.value;
+       option.parentElement.dispatchEvent(new Event('change', { bubbles: true }));
+       return true;`,
+    );
+    await pressReviewButton("Accept remaining edits in Methods");
+    await shows("Accepted 2 edits.");
     await keyActions(typing(keys.escape));
     assert.deepEqual(JSON.parse(requests[0]?.messages.at(-1)?.content ?? ""), {
       instruction,
@@ -1759,18 +1780,34 @@ test("a saved writing review resumes after a native restart without contacting i
       return editor === document.activeElement && line?.textContent === 'Last draft.';
     `,
     );
-    await nativeShortcut("ctrl+s");
     const accepted = original.replace("First draft.", "First edit.");
+    const batch = accepted
+      .replace("Fourth draft.", "Fourth edit.")
+      .replace("Fifth draft.", "Fifth edit.");
+    await nativeShortcut("ctrl+s");
     await until(
-      "the accepted text to reach disk",
+      "only the two remaining Methods edits to reach disk",
+      async () => (await readFile(draft)).equals(Buffer.from(batch)) || null,
+    ).catch(explain);
+    await savedReviewWithPending(2);
+    await keyActions(chord(keys.control, "z"));
+    await nativeShortcut("ctrl+s");
+    await until(
+      "one undo to restore both Methods edits and preserve the earlier acceptance",
       async () => (await readFile(draft, "utf8")) === accepted || null,
     ).catch(explain);
-    const history = await until("the accepted document history to be recorded", async () => {
-      const versions = await invokeNative<number[]>("list_versions", { path: draft });
-      return versions.length ? versions : null;
-    }).catch(explain);
-    const [review] = await invokeNative<{ id: string }[]>("list_writing_tasks", { path: draft });
-    assert.ok(review);
+    const history = await until(
+      "the batch and its undo to be recorded in version history",
+      async () => {
+        const versions = await invokeNative<number[]>("list_versions", { path: draft });
+        const [batchId, undoId] = versions.slice(-2);
+        if (batchId === undefined || undoId === undefined) return null;
+        const savedBatch = await invokeNative<string>("read_version", { path: draft, id: batchId });
+        const savedUndo = await invokeNative<string>("read_version", { path: draft, id: undoId });
+        return savedBatch === batch && savedUndo === accepted ? versions : null;
+      },
+    ).catch(explain);
+    const review = await savedReviewWithPending(4);
     const links = await invokeNative<{ id: string; path: string; title: string }[]>(
       "list_writing_reviews_in_folder",
       { folder: dirname(draft) },
@@ -1795,13 +1832,13 @@ test("a saved writing review resumes after a native restart without contacting i
       "the saved decisions and only the changed proposal marked for comparison",
       `
       const pane = document.querySelector('aside[aria-label="Writing Assistant"]');
-      const field = index => pane?.querySelector('fieldset[aria-label="Proposed edit ' + index + ' of 4"]');
+      const field = index => pane?.querySelector('fieldset[aria-label="Proposed edit ' + index + ' of 6"]');
       const button = (index, label) => [...field(index)?.querySelectorAll('button') ?? []].some(el => el.textContent.trim() === label);
       return field(1)?.innerText.includes('Applied to the selected text.') &&
         field(2)?.innerText.includes('Proposed edit dismissed.') &&
         field(3)?.innerText.includes('External third.') &&
         field(3)?.innerText.includes(${JSON.stringify(note)}) && button(3, 'Apply to compared text') &&
-        button(4, 'Apply proposed edit');
+        [4, 5, 6].every(index => button(index, 'Apply proposed edit'));
     `,
     );
     await clickPath(
@@ -1836,7 +1873,7 @@ test("a saved writing review resumes after a native restart without contacting i
        return [...dialog?.querySelectorAll('li') ?? []].some(row =>
          row.innerText.includes(${JSON.stringify(instruction)}) &&
          row.innerText.includes('renamed-writing-review.md') &&
-         row.innerText.includes('2 decisions needed'));`,
+         row.innerText.includes('4 decisions needed'));`,
     );
     await clickPath(
       `//dialog[@aria-label='All writing tasks']//button[normalize-space(.)='${instruction}']`,
@@ -1844,7 +1881,7 @@ test("a saved writing review resumes after a native restart without contacting i
     await waitForView(
       "the task to open its manuscript and saved review",
       `return document.querySelector('[role=tab][aria-selected=true]')?.textContent.includes('renamed-writing-review.md') &&
-        !!document.querySelector('aside[aria-label="Writing Assistant"] [aria-label="Proposed edit 4 of 4"]');`,
+        !!document.querySelector('aside[aria-label="Writing Assistant"] [aria-label="Proposed edit 4 of 6"]');`,
     );
     assert.equal(requests.length, 1, "finding a task does not send another native model request");
     assert.equal(await readFile(renamedDraft, "utf8"), changed);
@@ -1852,6 +1889,17 @@ test("a saved writing review resumes after a native restart without contacting i
       await invokeNative<number[]>("list_versions", { path: renamedDraft }),
       history,
     );
+    const second = "//fieldset[@aria-label='Proposed edit 2 of 6']";
+    await clickPath(`${second}//button[normalize-space(.)='Return to pending']`);
+    await waitForView(
+      "only the chosen dismissal to return to pending from the saved task",
+      `const pane = document.querySelector('aside[aria-label="Writing Assistant"]');
+       const edit = index => pane?.querySelector('fieldset[aria-label="Proposed edit ' + index + ' of 6"]');
+       return edit(1)?.innerText.includes('Applied to the selected text.') &&
+         [...edit(2)?.querySelectorAll('button') ?? []].some(el => el.textContent.trim() === 'Apply proposed edit') &&
+         edit(3)?.innerText.includes(${JSON.stringify(note)});`,
+    );
+    assert.equal(await readFile(renamedDraft, "utf8"), changed);
     const overlapping = changed.replace("First edit.", "Author's first edit.");
     await writeFile(renamedDraft, overlapping);
     await waitForView(
@@ -1861,7 +1909,7 @@ test("a saved writing review resumes after a native restart without contacting i
     await click("Open renamed-writing-review.md in other pane", "aria-label");
     await click("Writing tasks");
     await click(instruction);
-    const first = "//fieldset[@aria-label='Proposed edit 1 of 4']";
+    const first = "//fieldset[@aria-label='Proposed edit 1 of 6']";
     await clickPath(`${first}//button[normalize-space(.)='Revert to selected text']`);
     await waitForView(
       "both native panes to show the chosen reversion and preserve the external edit",

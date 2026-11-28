@@ -16,6 +16,7 @@ import {
   EditorState,
   type Extension,
   MapMode,
+  type StateEffect,
   Text,
   Transaction,
 } from "@codemirror/state";
@@ -76,6 +77,7 @@ import { markupContinuation } from "./markup-continuation.ts";
 import { type OutlineHeading, outline, sameOutline } from "./outline.ts";
 import { editorPreferences } from "./preferences.ts";
 import { type ProsePassage, prosePassageAtCursor } from "./prose-passage.ts";
+import { rangeHistory, rangeHistoryEffect } from "./range-history.ts";
 import { pasteText, richPaste } from "./rich-paste.ts";
 import type { SharedDocument } from "./shared-document.ts";
 import { type TableCommands, tableCommands } from "./table/commands.ts";
@@ -201,6 +203,12 @@ export type EditorCommand = keyof EditorCommands;
 
 export type EditorEvent =
   | { readonly type: "change"; readonly remote?: boolean; readonly fromHistory?: boolean }
+  | {
+      readonly type: "rangeHistory";
+      readonly id: string;
+      readonly direction: "undo" | "redo";
+      readonly ranges: readonly TextRange[];
+    }
   | { readonly type: "selection"; readonly restored?: true }
   /** An input method finished composing, even if its final text was already visible. */
   | { readonly type: "compositionEnd" }
@@ -233,6 +241,8 @@ export interface MintEditor {
     options?: {
       readonly collapseSelection?: TextRange;
       readonly lineEndings?: "match" | "preserve";
+      /** Identify the step and its resulting ranges in undo and redo events. */
+      readonly historyId?: string;
     },
   ): readonly TextRange[];
   /** Capture a bounded passage of ordinary prose at the cursor for proofreading. */
@@ -358,6 +368,7 @@ export function createEditor(options: EditorOptions): MintEditor {
         completion.of([]),
         preferences.extension,
         history(),
+        rangeHistory,
         options.document?.initialHistory() ?? [],
         // Several cursors: typed text goes to all of them. Alt-drag selects a rectangle.
         EditorState.allowMultipleSelections.of(true),
@@ -401,6 +412,21 @@ export function createEditor(options: EditorOptions): MintEditor {
         }),
         EditorView.updateListener.of((update) => {
           if (update.docChanged) for (const track of rangeTrackers) track(update.changes);
+          for (const transaction of update.transactions) {
+            for (const effect of transaction.effects) {
+              if (!effect.is(rangeHistoryEffect) || effect.value.phase === "apply") continue;
+              const { id, phase, after } = effect.value;
+              emit({
+                type: "rangeHistory",
+                id,
+                direction: phase,
+                ranges: after.map(({ from, to }) => ({
+                  from: toFileOffset(transaction.state, from),
+                  to: toFileOffset(transaction.state, to),
+                })),
+              });
+            }
+          }
           if (update.docChanged || update.transactions.some((t) => sharedFileEffects(t).length > 0))
             emit(
               update.transactions.some((tr) => tr.annotation(Transaction.remote))
@@ -464,9 +490,11 @@ export function createEditor(options: EditorOptions): MintEditor {
     {
       collapseSelection,
       lineEndings,
+      historyId,
     }: {
       readonly collapseSelection?: TextRange;
       readonly lineEndings?: "match" | "preserve";
+      readonly historyId?: string;
     } = {},
   ) {
     if (!replacements.length) return [];
@@ -486,19 +514,34 @@ export function createEditor(options: EditorOptions): MintEditor {
       main.to === fromFileOffset(state, collapseSelection.to)
         ? changes.mapPos(main.to, 1)
         : undefined;
+    let delta = 0;
+    const inserted = entries.map(({ from, to, insert }) => {
+      const start = from + delta;
+      delta += insert.length - (to - from);
+      return { from: start, to: start + insert.length };
+    });
+    const effects: StateEffect<unknown>[] = lineEndings
+      ? replacementLineEndings(state, entries, lineEndings)
+      : [];
+    if (historyId)
+      effects.push(
+        rangeHistoryEffect.of({
+          id: historyId,
+          phase: "apply",
+          before: entries.map(({ from, to }) => ({ from, to })),
+          after: inserted,
+        }),
+      );
     view.dispatch({
       changes,
       selection: end === undefined ? undefined : { anchor: end },
-      effects: lineEndings ? replacementLineEndings(state, entries, lineEndings) : undefined,
+      effects,
       annotations: isolateHistory.of("full"),
     });
-    let delta = 0;
-    return entries.map(({ from, to, insert }) => {
-      const start = from + delta;
-      const end = start + insert.length;
-      delta += insert.length - (to - from);
-      return { from: toFileOffset(view.state, start), to: toFileOffset(view.state, end) };
-    });
+    return inserted.map(({ from, to }) => ({
+      from: toFileOffset(view.state, from),
+      to: toFileOffset(view.state, to),
+    }));
   }
 
   const commands: { [C in EditorCommand]: (...args: EditorCommands[C]) => boolean } = {
