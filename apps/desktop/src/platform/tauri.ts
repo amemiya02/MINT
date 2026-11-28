@@ -8,7 +8,7 @@ import {
   Submenu,
 } from "@tauri-apps/api/menu";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getAllWindows, getCurrentWindow } from "@tauri-apps/api/window";
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { message } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -157,9 +157,11 @@ export function createTauriPlatform(): Platform {
       );
       windowMenu = await Menu.new({ items: submenus });
       if (isMac) {
-        // macOS has one menu bar for the whole app: it must belong to the focused window.
-        if (await getCurrentWindow().isFocused()) await windowMenu.setAsAppMenu();
         ensureMenuFollowsFocus();
+        // A lone window owns the app menu even when macOS opens a document in the background.
+        if ((await getCurrentWindow().isFocused()) || (await getAllWindows()).length === 1) {
+          await windowMenu.setAsAppMenu();
+        }
       } else {
         await windowMenu.setAsWindowMenu(getCurrentWindow());
       }
