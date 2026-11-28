@@ -1,4 +1,4 @@
-import type { MintEditor, TextRange } from "@mint/editor";
+import type { EditorEvent, MintEditor, TextRange } from "@mint/editor";
 import {
   type FormEvent,
   type ReactNode,
@@ -650,11 +650,13 @@ function Composer({
     if (ready && placement && review.current) review.current.scrollTop = reviewScroll.current;
   }, [ready, placement]);
 
+  const onBatchHistory = useEffectEvent(syncBatchHistory);
   useEffect(() => {
     const refresh = () => setDraft(origin.editor.getText());
     refresh();
     return origin.editor.subscribe((event) => {
       if (event.type === "change") refresh();
+      if (event.type === "rangeHistory") onBatchHistory(event);
     });
   }, [origin]);
 
@@ -778,6 +780,13 @@ function Composer({
     if (trackedSuggestions.current.delete(range)) range.release();
   }
 
+  function retrack(suggestion: Suggestion, range: TextRange) {
+    releaseRange(suggestion.range);
+    const tracked = origin.editor.trackRange(range);
+    trackedSuggestions.current.add(tracked);
+    return tracked;
+  }
+
   function recordReversionDecision(ranges: readonly TrackedRange[], status: "reverted" | "kept") {
     const decided = new Set(ranges);
     setTurns((previous) =>
@@ -801,10 +810,13 @@ function Composer({
     appliedText: string,
     before = suggestion.before,
   ): Suggestion {
-    releaseRange(suggestion.range);
-    const tracked = origin.editor.trackRange(range);
-    trackedSuggestions.current.add(tracked);
-    return { ...suggestion, range: tracked, appliedText, before, status: "applied" };
+    return {
+      ...suggestion,
+      range: retrack(suggestion, range),
+      appliedText,
+      before,
+      status: "applied",
+    };
   }
 
   async function applyDirectly(
@@ -911,6 +923,41 @@ function Composer({
     );
   }
 
+  function updateBatch(updates: ReadonlyMap<Suggestion, Suggestion>) {
+    if (!updates.size) return;
+    setTurns((previous) =>
+      previous.map((turn) => ({
+        ...turn,
+        suggestions: turn.suggestions?.map((item) => updates.get(item) ?? item),
+      })),
+    );
+  }
+
+  function syncBatchHistory({
+    id,
+    direction,
+    ranges,
+  }: Extract<EditorEvent, { type: "rangeHistory" }>) {
+    const undoing = direction === "undo";
+    const draft = origin.editor.getText();
+    const updates = new Map<Suggestion, Suggestion>();
+    for (const turn of turns) {
+      for (const item of turn.suggestions ?? []) {
+        if (item.sectionBatch?.id !== id || item.status !== (undoing ? "applied" : "preview"))
+          continue;
+        const range = ranges[item.sectionBatch.index];
+        if (!range) continue;
+        updates.set(
+          item,
+          undoing
+            ? { ...item, range: retrack(item, range), status: "preview", appliedText: undefined }
+            : recordApplied(item, range, draft.slice(range.from, range.to)),
+        );
+      }
+    }
+    updateBatch(updates);
+  }
+
   async function decide(
     index: number,
     position: number,
@@ -919,7 +966,11 @@ function Composer({
     keepReviewFocus = false,
   ) {
     if (busy || checkingDisk.current || reviewStatus(suggestion, draft) !== "preview") return false;
-    let update: Partial<Suggestion> = { status: "discarded", batchApplied: false };
+    let update: Partial<Suggestion> = {
+      status: "discarded",
+      batchApplied: false,
+      sectionBatch: undefined,
+    };
     if (acceptedText !== undefined) {
       checkingDisk.current = true;
       try {
@@ -927,7 +978,7 @@ function Composer({
           return false;
         const range = suggestion.range.current();
         if (origin.editor.getText().slice(range.from, range.to) !== acceptedText) return false;
-        update = { status: "applied", batchApplied: false };
+        update = { status: "applied", batchApplied: false, sectionBatch: undefined };
         if (acceptedText !== suggestion.after) {
           const [inserted] = origin.editor.replaceRanges([{ ...range, text: suggestion.after }], {
             collapseSelection: range,
@@ -936,7 +987,7 @@ function Composer({
           if (inserted) {
             const edited = origin.editor.getText();
             update = recordApplied(
-              { ...suggestion, batchApplied: false },
+              { ...suggestion, batchApplied: false, sectionBatch: undefined },
               inserted,
               edited.slice(inserted.from, inserted.to),
               acceptedText,
@@ -959,10 +1010,13 @@ function Composer({
       if (!(await refreshDisk()) || !mounted.current || !reading.current) return 0;
       const editor = origin.editor;
       const live = editor.getText();
-      const eligible = entries.flatMap(({ turn, position }) => {
+      // A refresh can change the outline and invalidate the section chosen in the dialog.
+      if (live !== draft) return 0;
+      const eligible = entries.flatMap(({ turn, position, spansSections }) => {
         const item = turns[turn]?.suggestions?.[position];
         if (
           !item ||
+          spansSections ||
           item.note ||
           reviewStatus(item, live) !== "preview" ||
           !item.range.hasBoundaries() ||
@@ -981,21 +1035,17 @@ function Composer({
         const next = eligible[index + 1]?.from;
         return !overlapsEarlier && (next === undefined || (next >= to && next !== from));
       });
-      const ranges = editor.replaceRanges(replacements, { lineEndings: "match" });
+      const id = crypto.randomUUID();
+      const ranges = editor.replaceRanges(replacements, { lineEndings: "match", historyId: id });
       const edited = editor.getText();
       const updates = new Map<Suggestion, Suggestion>();
       for (const [index, { item }] of replacements.entries()) {
         const range = ranges[index];
         if (!range) continue;
         const applied = recordApplied(item, range, edited.slice(range.from, range.to));
-        updates.set(item, { ...applied, batchApplied: true });
+        updates.set(item, { ...applied, batchApplied: false, sectionBatch: { id, index } });
       }
-      setTurns((previous) =>
-        previous.map((turn) => ({
-          ...turn,
-          suggestions: turn.suggestions?.map((item) => updates.get(item) ?? item),
-        })),
-      );
+      updateBatch(updates);
       return updates.size;
     } finally {
       checkingDisk.current = false;
@@ -1408,9 +1458,13 @@ function Composer({
     const entries = turns
       .flatMap((turn, index) =>
         (turn.suggestions ?? []).map((suggestion, position): ReviewEntry & { from: number } => {
-          const { from } = suggestion.range.current();
+          const { from, to } = suggestion.range.current();
           const located = suggestion.range.hasBoundaries();
-          const section = located ? sections.findLast((heading) => heading.from <= from) : null;
+          const sectionIndex = located
+            ? sections.findLastIndex((heading) => heading.from <= from)
+            : -1;
+          const section = sections[sectionIndex];
+          const nextSection = sections[sectionIndex + 1];
           return {
             key: `${index}:${suggestion.id}`,
             turn: index,
@@ -1421,6 +1475,7 @@ function Composer({
             current: currentText(suggestion, draft),
             status: reviewStatus(suggestion, draft),
             note: suggestion.note,
+            spansSections: located && nextSection !== undefined && to > nextSection.from,
             section: section ?? {
               id: located ? "intro" : "unlocated",
               name: t(
@@ -1741,6 +1796,11 @@ function Composer({
                       }
                       onDiscard={
                         pending ? () => void decide(index, position, suggestion) : undefined
+                      }
+                      onRestore={
+                        status === "discarded"
+                          ? () => updateSuggestion(index, position, { status: "preview" })
+                          : undefined
                       }
                       onRevert={
                         revertible && !reverted && !blocked
