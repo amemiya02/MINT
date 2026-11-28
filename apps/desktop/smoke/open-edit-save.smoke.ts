@@ -661,7 +661,7 @@ test("the task summary reads only granted folder documents and preserves their b
     `return !!document.querySelector('[role=treeitem][aria-label="draft.md"]')`,
   );
   const plugin = "//fieldset[@aria-label='Task summary']";
-  await nativeShortcut("ctrl+comma");
+  await openSettings();
   await clickPath(`${plugin}//button[normalize-space(.)='Install']`);
   await shows("Read Markdown documents in the current folder");
   await click("Deny access");
@@ -672,7 +672,7 @@ test("the task summary reads only granted folder documents and preserves their b
     "the denied task view",
     `return ${view}?.querySelector('[role=alert]')?.textContent.includes('denied') && !${view}.querySelector('button')`,
   );
-  await nativeShortcut("ctrl+comma");
+  await openSettings();
   await clickPath(`${plugin}//button[normalize-space(.)='Allow access']`);
   await click("Close");
   await waitForView(
@@ -700,7 +700,7 @@ test("the task summary reads only granted folder documents and preserves their b
     "finished.markdown",
     "outside-link.md",
   ]);
-  await nativeShortcut("ctrl+comma");
+  await openSettings();
   await clickPath(`${plugin}//button[normalize-space(.)='Uninstall']`);
   await click("Close");
 });
@@ -883,7 +883,7 @@ test("the daily journal creates one ordinary Markdown file only after permission
     await keyActions(typing(keys.enter));
   };
   await clickPath("//*[@role='treeitem' and @aria-label='draft.md']");
-  await nativeShortcut("ctrl+comma");
+  await openSettings();
   await clickPath(`${plugin}//button[normalize-space(.)='Install']`);
   await shows("Create today’s Markdown journal in the current folder and open it");
   await click("Deny access");
@@ -896,7 +896,7 @@ test("the daily journal creates one ordinary Markdown file only after permission
     }).then((el) => el[elementKey] ?? null),
   ).catch(explain);
   assert.deepEqual(await readdir(folder), ["draft.md"]);
-  await nativeShortcut("ctrl+comma");
+  await openSettings();
   await clickPath(`${plugin}//button[normalize-space(.)='Allow access']`);
   await click("Close");
   await chooseJournal();
@@ -921,7 +921,7 @@ test("the daily journal creates one ordinary Markdown file only after permission
   assert.deepEqual(await readFile(path), external);
   assert.equal(await readFile(draft, "utf8"), "Another manuscript.  \r\n");
   assert.deepEqual((await readdir(folder)).sort(), [filename, "draft.md"]);
-  await nativeShortcut("ctrl+comma");
+  await openSettings();
   await clickPath(`${plugin}//button[normalize-space(.)='Uninstall']`);
   await click("Close");
 });
