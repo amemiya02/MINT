@@ -323,9 +323,18 @@ test("moving a Kanban card changes only its status on disk after the writer gran
   await openSettings();
   await clickPath(grant("Change the status"));
   await click("Close");
-  // WebKitGTK renders the options in a native popup. Drive the enabled select itself.
-  await clickPath(`${select}[not(@disabled)]`);
-  await exec("xdotool", ["key", "Home", "Down", "Down", "Return"], { timeout: 5000 });
+  await until("the granted Kanban status control to receive focus", () =>
+    command<boolean>("POST", `/session/${session}/execute/sync`, {
+      script: `const select = document.querySelector('aside select[aria-label="Move card.md"]:enabled');
+        if (!select) return false;
+        select.scrollIntoView({block: 'nearest', inline: 'center'});
+        select.focus();
+        return document.activeElement === select;`,
+      args: [],
+    }).then((ready) => ready || null),
+  ).catch(explain);
+  // From Draft the next matching option wraps to Done.
+  await keyActions(typing("d"));
   await until(
     "the status update to reach disk",
     async () => (await readFile(path, "utf8")) === draft.replace("'Draft'", "'Done'") || null,
@@ -525,16 +534,13 @@ test("reopen a bookmark after a native restart and remove it without touching th
 });
 
 test("the native statistics view refuses a denied read and allows an explicit grant", async () => {
-  await nativeShortcut("ctrl+n");
-  await until("the new document to receive focus", async () => {
-    const ready = await command<boolean>("POST", `/session/${session}/execute/sync`, {
-      script:
-        "return document.activeElement?.matches('.cm-content') && document.activeElement.textContent === ''",
-      args: [],
-    });
-    return ready ? true : null;
-  }).catch(explain);
-  await keyActions(typing("a native draft"));
+  const path = join(dir, "statistics.md");
+  await writeFile(path, "a native draft");
+  await restart([path]);
+  await waitForView(
+    "the statistics draft to open",
+    "return document.activeElement?.matches('.cm-content') && document.activeElement.textContent === 'a native draft';",
+  );
   await openSettings();
   await clickPath(
     "//fieldset[@aria-label='Writing statistics']//button[normalize-space(.)='Install']",
@@ -588,15 +594,14 @@ test("declining a plugin update keeps its native read grant and withholds its wr
       }).then((ready) => ready || null),
     ).catch(explain);
   };
-  await nativeShortcut("ctrl+n");
-  await until("the new plugin update draft to receive focus", () =>
-    command<boolean>("POST", `/session/${session}/execute/sync`, {
-      script:
-        "return document.activeElement?.matches('.cm-content') && !document.activeElement.textContent",
-      args: [],
-    }).then((ready) => ready || null),
-  ).catch(explain);
-  await keyActions(typing("plugin update draft"));
+  const path = join(dir, "update.md");
+  await writeFile(path, "plugin update draft");
+  await restart([path]);
+  await waitForView(
+    "the plugin update draft to open",
+    "return document.activeElement?.matches('.cm-content') && document.activeElement.textContent === 'plugin update draft';",
+  );
+  await keyActions(chord(keys.control, keys.end));
   await openSettings();
   await upload(original);
   await click("Allow access");
@@ -625,6 +630,10 @@ test("declining a plugin update keeps its native read grant and withholds its wr
         return draft?.includes('plugin update draft') && draft.includes('SMOKE WRITE');`,
       args: [],
     }).then((written) => written || null),
+  ).catch(explain);
+  await nativeShortcut("ctrl+s");
+  await until("the authorized template edit to be saved", async () =>
+    (await readFile(path, "utf8")) === "plugin update draftSMOKE WRITE" ? true : null,
   ).catch(explain);
   await openSettings();
   await clickPath(
