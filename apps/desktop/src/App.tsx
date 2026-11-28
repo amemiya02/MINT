@@ -23,6 +23,7 @@ import { documentExtensions, isWithin } from "./paths.ts";
 import type { DocumentEdit, Platform } from "./platform/platform.ts";
 import { insertTemplate } from "./plugins/host.ts";
 import { PluginEntries, pluginName, useInstallations } from "./plugins/Plugins.tsx";
+import { PropertyTable } from "./plugins/PropertyTable.tsx";
 import { TagBrowser } from "./plugins/TagBrowser.tsx";
 import { timingRenderer } from "./plugins/timing-diagrams.ts";
 import { QuickOpen } from "./quick-open/QuickOpen.tsx";
@@ -147,6 +148,8 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   );
   const sidebarPlugins = plugins.filter((i) => i.enabled && "sidebar" in i.manifest);
   const selectedPlugin = sidebarPlugins.find((i) => sidebarView === `plugin:${i.manifest.id}`);
+  const PluginSidebar =
+    selectedPlugin?.manifest.sidebar === "properties" ? PropertyTable : TagBrowser;
   const removed = sidebarView.startsWith("plugin:") && !selectedPlugin;
   useEffect(() => {
     if (removed) {
@@ -476,7 +479,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
           />
         )}
         {folderSearch === null && sidebarVisible && selectedPlugin && (
-          <TagBrowser
+          <PluginSidebar
             key={JSON.stringify([
               selectedPlugin.manifest.id,
               folder,
