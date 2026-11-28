@@ -179,7 +179,18 @@ test("compare the same writing baseline, mix proposals, and continue with anothe
     const resumed = await reopened.newPage();
     await resumed.route(/https:\/\/(first|second)\.example\.test\//, (route) => {
       requests.push(route.request().postDataJSON());
-      return route.abort();
+      return route.fulfill({
+        json: {
+          choices: [
+            {
+              message: {
+                content: `<replacement>${source.replace("Old note.", "New observation.")}</replacement>`,
+              },
+              finish_reason: "stop",
+            },
+          ],
+        },
+      });
     });
     await launch(resumed, {
       locale: "en-US",
@@ -187,6 +198,17 @@ test("compare the same writing baseline, mix proposals, and continue with anothe
       files: { [path]: mixed },
       openedPaths: [{ path, kind: "file" }],
     });
+    await resumed.evaluate(async (address) => {
+      const platform = (window as unknown as { __MINT_MEMORY_PLATFORM__: MemoryPlatform })
+        .__MINT_MEMORY_PLATFORM__;
+      await platform.saveModelConnection({
+        name: "Second model",
+        address,
+        model: "second-fixture",
+        apiKey: "",
+        lifetime: "session",
+      });
+    }, second);
     await runMenuItem(resumed, "edit.writingTasks");
     await resumed.getByRole("button", { name: instruction, exact: true }).click();
     await resumed.getByRole("button", { name: "Compare proposals" }).click();
@@ -198,6 +220,42 @@ test("compare the same writing baseline, mix proposals, and continue with anothe
       "Second opening.",
     );
     expect(requests).toHaveLength(5);
+    await restored.getByRole("button", { name: "Close", exact: true }).click();
+
+    const resumedSidebar = resumed.getByRole("complementary", { name: "Writing Assistant" });
+    const nextRecipient = resumedSidebar.getByLabel("Recipient for next message");
+    await expect(nextRecipient.locator("option", { hasText: secondLabel })).toHaveCount(1);
+    await expect(nextRecipient).toHaveValue("");
+    await resumedSidebar
+      .getByRole("article")
+      .filter({ hasText: instruction })
+      .getByRole("button", { name: "Retry same baseline" })
+      .click();
+    const renewedApproval = resumedSidebar.getByRole("group", { name: "Retry same baseline" });
+    await renewedApproval.getByLabel("Retry connection").selectOption({ label: secondLabel });
+    await renewedApproval
+      .getByRole("button", { name: `Send same baseline to ${secondLabel}` })
+      .click();
+    const renewed = resumed.getByRole("dialog", { name: "Compare writing alternatives" });
+    await expect(renewed.getByText("New observation.", { exact: true })).toBeVisible();
+    expect(requests[5]).toEqual(requests[3]);
+    await renewed.getByRole("button", { name: "Close", exact: true }).click();
+
+    const resumedEditor = resumed.locator(".cm-content");
+    await resumedEditor.getByText("Old note.", { exact: true }).click();
+    await resumedEditor.press("Home");
+    await resumedEditor.press("Shift+End");
+    const author = "An observation from the author.";
+    await resumed.keyboard.type(author);
+    await resumedSidebar.getByRole("button", { name: "Compare proposals" }).last().click();
+    const proposal = renewed.getByRole("region", { name: "Alternative proposal" });
+    await expect(proposal.getByText(author, { exact: true })).toBeVisible();
+    await proposal.getByRole("button", { name: "Apply to compared text" }).click();
+    await renewed.getByRole("button", { name: "Close", exact: true }).click();
+    await resumedEditor.press("ControlOrMeta+S");
+    await expect
+      .poll(() => readFile(resumed, path))
+      .toBe(mixed.replace("Old note.", "New observation."));
   } finally {
     await reopened.close();
   }

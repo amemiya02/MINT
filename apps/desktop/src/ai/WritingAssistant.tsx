@@ -109,6 +109,7 @@ function connectionSettingForScope(scope: Scope) {
 }
 const actions = ["comment", "preview", "direct"] as const;
 type Action = (typeof actions)[number];
+const proposedEditTracking = { followReplacedEdges: true };
 
 function isTaskCopyRecipient(recipient?: WritingRecipient) {
   return recipient?.kind === "agent" && recipient.access === "taskCopy";
@@ -171,8 +172,12 @@ function savedRange(range: TrackedRange): ReviewRange {
   return { ...range.current(), located: range.hasBoundaries() };
 }
 
-function restoreRange(editor: MintEditor, range: ReviewRange): Origin["range"] {
-  const tracked = editor.trackRange(range);
+function restoreRange(
+  editor: MintEditor,
+  range: ReviewRange,
+  options?: Parameters<MintEditor["trackRange"]>[1],
+): Origin["range"] {
+  const tracked = editor.trackRange(range, options);
   return { ...tracked, hasBoundaries: () => range.located && tracked.hasBoundaries() };
 }
 
@@ -346,9 +351,9 @@ export function WritingAssistant({
       text: task.origin.text,
       range: {
         ...range,
-        trackSubrange(part) {
+        trackSubrange(part, options) {
           const mapped = selectionMapper.range({ ...part, located: location.located });
-          const subrange = range.trackSubrange(mapped);
+          const subrange = range.trackSubrange(mapped, options);
           return { ...subrange, hasBoundaries: () => mapped.located && subrange.hasBoundaries() };
         },
       },
@@ -735,7 +740,11 @@ function Composer({
         task.turns.map((turn) => ({
           ...turn,
           suggestions: turn.suggestions?.map((item) => {
-            const range = restoreRange(origin.editor, mapper.range(item.range));
+            const range = restoreRange(
+              origin.editor,
+              mapper.range(item.range),
+              item.status === "preview" ? proposedEditTracking : undefined,
+            );
             tracked.add(range);
             return { ...item, range };
           }),
@@ -937,9 +946,13 @@ function Composer({
     if (trackedSuggestions.current.delete(range)) range.release();
   }
 
-  function retrack(suggestion: Suggestion, range: TextRange) {
+  function retrack(
+    suggestion: Suggestion,
+    range: TextRange,
+    options?: Parameters<MintEditor["trackRange"]>[1],
+  ) {
     releaseRange(suggestion.range);
-    const tracked = origin.editor.trackRange(range);
+    const tracked = origin.editor.trackRange(range, options);
     trackedSuggestions.current.add(tracked);
     return tracked;
   }
@@ -1064,8 +1077,8 @@ function Composer({
         : mapReviewRanges(documentBaseline, origin.editor.getText());
     return edits.map((edit) => {
       const range = map
-        ? restoreRange(origin.editor, map.range({ ...edit, located: true }))
-        : origin.range.trackSubrange(edit);
+        ? restoreRange(origin.editor, map.range({ ...edit, located: true }), proposedEditTracking)
+        : origin.range.trackSubrange(edit, proposedEditTracking);
       trackedSuggestions.current.add(range);
       return { id: edit.from, before: edit.before, after: edit.after, range, status: "preview" };
     });
@@ -1113,7 +1126,12 @@ function Composer({
         updates.set(
           item,
           undoing
-            ? { ...item, range: retrack(item, range), status: "preview", appliedText: undefined }
+            ? {
+                ...item,
+                range: retrack(item, range, proposedEditTracking),
+                status: "preview",
+                appliedText: undefined,
+              }
             : recordApplied(item, range, draft.slice(range.from, range.to)),
         );
       }

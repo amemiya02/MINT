@@ -178,8 +178,15 @@ test("a writer can decline an additional action, then approve the update", async
     templates: [{ name: "Review marker", text: "REVIEW" }],
   };
   await page.keyboard.press("ControlOrMeta+,");
+  const statistics = settings.getByRole("group", { name: "Writing statistics" });
+  await statistics.getByRole("button", { name: "Install", exact: true }).click();
+  await settings.getByRole("button", { name: "Deny access" }).click();
   await pickFile(page, input, upload(original));
-  await settings.getByRole("button", { name: "Allow access" }).click();
+  await settings
+    .getByRole("group", { name: "Draft metrics" })
+    .getByRole("button", { name: "Allow access" })
+    .click();
+  await expect(statistics.getByRole("button", { name: "Allow access" })).toBeVisible();
   await pickFile(page, input, upload(expanded));
   const review = settings.getByRole("group", { name: "Update Draft toolkit" });
   await expect(review).toContainText("Modify the current document at the selection");

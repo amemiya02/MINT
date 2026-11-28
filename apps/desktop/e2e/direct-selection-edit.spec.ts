@@ -156,7 +156,7 @@ async function autosaveConcurrentDirectEdit(page: Page, lineBreak: "\n" | "\r\n"
   await editor.getByText("Middle line.", { exact: true }).click();
   await editor.press("Home");
   await editor.press("Shift+End");
-  await page.keyboard.insertText("Author's middle line.");
+  await page.keyboard.type("Author's middle line.");
   await expect.poll(() => readFile(page, path)).toBe(author);
   releaseReply();
   await expect(page.getByRole("status")).toHaveText("2 edits applied · 1 to review");
@@ -196,6 +196,13 @@ async function autosaveConcurrentDirectEdit(page: Page, lineBreak: "\n" | "\r\n"
   const changed = review.getByRole("group", { name: "Proposed edit 3 of 3" });
   await expect(changed.getByText(/Author's closing\./)).toBeVisible();
   await changed.getByRole("button", { name: "Revert to selected text" }).click();
+  await expect.poll(() => readFile(page, path)).toBe(author);
+
+  await conflict.getByRole("button", { name: "Apply to compared text" }).click();
+  await expect
+    .poll(() => readFile(page, path))
+    .toBe(author.replace("Author's middle line.", "Model's middle line."));
+  await editor.press("Control+Z");
   await expect.poll(() => readFile(page, path)).toBe(author);
 }
 

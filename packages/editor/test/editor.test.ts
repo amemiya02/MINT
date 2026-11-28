@@ -89,6 +89,26 @@ describe("editor core", () => {
     expect(editor.getSelection()).toEqual({ anchor: 7, head: 7 });
   });
 
+  it("tracks replacement typing and keeps insertions at intact edges outside the range", () => {
+    const editor = open("one two three");
+    const origin = editor.trackRange({ from: 0, to: editor.getText().length });
+    editor.setSelection({ anchor: 7 });
+    editor.execute("insertText", "!");
+    editor.setSelection({ anchor: 4 });
+    editor.execute("insertText", "[");
+
+    const tracked = origin.trackSubrange({ from: 4, to: 7 }, { followReplacedEdges: true });
+    const { from, to } = tracked.current();
+    expect(tracked.hasBoundaries()).toBe(true);
+    expect(editor.getText().slice(from, to)).toBe("two");
+
+    editor.setSelection({ anchor: from, head: to });
+    for (const character of "TWO") editor.execute("insertText", character);
+    const replacement = tracked.current();
+    expect(tracked.hasBoundaries()).toBe(true);
+    expect(editor.getText().slice(replacement.from, replacement.to)).toBe("TWO");
+  });
+
   it("preserves mixed line endings that the user did not touch", () => {
     const editor = open("a\nb\r\nc\rd");
     editor.setSelection({ anchor: 0 });

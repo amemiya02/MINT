@@ -254,6 +254,37 @@ test("section acceptance preserves prior decisions and can be undone in one edit
   expect(await readFile(page, path)).toBe(source);
 });
 
+test("a proposal returned to pending by section undo follows replacement typing", async ({
+  page,
+}) => {
+  const source = "# Methods\n\nOld opening.\n\nKeep this.\n\nOld result.";
+  const replacement = source.replaceAll("Old ", "New ");
+  const { assistant, editor } = await openProposals(page, source, replacement);
+  await assistant.getByRole("button", { name: "Review proposed edits" }).click();
+  const review = page.getByRole("dialog", { name: "Review proposed edits" });
+  await review.getByRole("combobox", { name: "Section" }).selectOption({
+    label: "Methods · 2 pending of 2 edits",
+  });
+  await review.getByRole("button", { name: "Accept remaining edits in Methods" }).click();
+  await expect(review.getByRole("status")).toHaveText("Accepted 2 edits.");
+  await page.keyboard.press("Escape");
+  await expect(editor).toBeFocused();
+  await editor.press("ControlOrMeta+Z");
+
+  const authored = "Author's result.";
+  await editor.getByText("Old result.", { exact: true }).click();
+  await editor.press("End");
+  await editor.press("Shift+Home");
+  await page.keyboard.type(authored);
+  await page.getByRole("button", { name: "Resume conversation", exact: true }).click();
+  const proposal = assistant.getByRole("group", { name: "Proposed edit 2 of 2" });
+  await expect(proposal.getByText(authored, { exact: true })).toBeVisible();
+  await proposal.getByRole("button", { name: "Apply to compared text" }).click();
+  await expect(editor).toBeFocused();
+  await editor.press("ControlOrMeta+S");
+  await expect.poll(() => readFile(page, path)).toBe(source.replace("Old result.", "New result."));
+});
+
 test("section acceptance leaves a proposal spanning two sections for individual review", async ({
   page,
 }) => {
