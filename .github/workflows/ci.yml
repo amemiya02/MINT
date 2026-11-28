@@ -122,7 +122,7 @@ jobs:
           MINT_PDF_PROOF: ${{ runner.temp }}/mint-webview2-proof
         run: node --test smoke/windows-pdf.smoke.ts
       - name: Upload WebView2 PDF and preview
-        if: '!cancelled()'
+        if: "!cancelled()"
         uses: actions/upload-artifact@v4
         with:
           name: windows-webview2-pdf
@@ -166,4 +166,4 @@ jobs:
           Xvfb :99 -screen 0 1280x1024x24 &
           tauri-driver &
           sleep 3
-          node --test smoke/open-edit-save.smoke.ts
+          node --test --test-reporter=tap smoke/open-edit-save.smoke.ts
