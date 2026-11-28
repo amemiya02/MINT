@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from "react";
+import { ModelConnections } from "../ai/ModelConnections.tsx";
 import { useT } from "../i18n/index.ts";
 import type { Platform } from "../platform/platform.ts";
 import { PluginSettings } from "../plugins/Plugins.tsx";
@@ -57,6 +58,7 @@ export function SettingsDialog({
         </button>
       </div>
       <div className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto px-5 py-4">
+        <ModelConnections platform={platform} />
         <PluginSettings platform={platform} />
         {(Object.keys(settingsSchema) as SettingKey[]).map((key) =>
           settingsSchema[key].kind === "shortcuts" ? (

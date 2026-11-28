@@ -1,3 +1,4 @@
+import { sendBrowserModelMessage } from "../ai/browser-model.ts";
 import { baseName, parentPath } from "../paths.ts";
 import { createIgnoreRules } from "./gitignore.ts";
 import { pickBrowserFile } from "./pick-file.ts";
@@ -288,6 +289,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
   }
 
   return {
+    sendModelMessage: sendBrowserModelMessage,
     async listZoteroItems(start) {
       if (!options.zoteroItems) throw new Error("unavailable");
       return {
