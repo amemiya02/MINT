@@ -1,6 +1,13 @@
 import { expect, test } from "@playwright/test";
 import type { MemoryPlatform } from "../src/platform/memory.ts";
-import { files, launch, readFile, runMenuItem, settingsPath } from "./memory-platform.ts";
+import {
+  externalWrite,
+  files,
+  launch,
+  readFile,
+  runMenuItem,
+  settingsPath,
+} from "./memory-platform.ts";
 
 test("reopen a saved document and compare any two versions without changing the draft", async ({
   page,
@@ -47,4 +54,72 @@ test("reopen a saved document and compare any two versions without changing the 
   await expect(next.getByRole("textbox")).toHaveText("Unpublished draft");
   await expect(next.getByText("Unsaved changes")).toBeVisible();
   expect(await readFile(next, path)).toBe("Final draft");
+});
+
+test("restore one change without disturbing newer paragraphs or mixed line endings, then undo", async ({
+  page,
+}) => {
+  const path = "/notes/report.md";
+  const earlier = "\uFEFFFirst\r\nLost paragraph  \nMiddle\rClosing";
+  const current = "\uFEFFFirst\r\nMiddle\rNew ending  \n";
+  await launch(page, {
+    files: { [path]: current },
+    appData: { [`history:${path}`]: "[1]", [`snapshot:1:${path}`]: earlier },
+    openDialogResults: [path],
+    locale: "en-US",
+  });
+  await page.keyboard.press("ControlOrMeta+O");
+  await runMenuItem(page, "file.history");
+  const dialog = page.getByRole("dialog", { name: "Version History" });
+  await dialog.getByLabel("To version").selectOption({ label: "Current draft" }, { timeout: 3000 });
+  await dialog.getByRole("button", { name: "Restore this change" }).first().click();
+  await expect
+    .poll(() => readFile(page, path))
+    .toBe("\uFEFFFirst\r\nLost paragraph  \nMiddle\rNew ending  \n");
+  await page.keyboard.press("ControlOrMeta+Z");
+  await expect.poll(() => readFile(page, path)).toBe(current);
+});
+
+test("whole restore preserves the current draft in history and autosaves a single undo", async ({
+  page,
+}) => {
+  const path = "/notes/report.md";
+  const earlier = "\uFEFFFirst\r\nEarlier ending  ";
+  const current = "Latest paragraph\nDo not lose this\r";
+  await launch(page, {
+    files: { [path]: current },
+    appData: { [`history:${path}`]: "[1]", [`snapshot:1:${path}`]: earlier },
+    openDialogResults: [path],
+    locale: "en-US",
+  });
+  await page.keyboard.press("ControlOrMeta+O");
+  await runMenuItem(page, "file.history");
+  const dialog = page.getByRole("dialog", { name: "Version History" });
+  await dialog.getByRole("button", { name: "Restore entire version" }).click({ timeout: 3000 });
+  await expect.poll(() => readFile(page, path)).toBe(earlier);
+  await runMenuItem(page, "file.history");
+  await expect(dialog.locator("del")).toContainText(["Latest paragraph", "Do not lose this"]);
+  await dialog.getByRole("button", { name: "Close" }).click();
+  await page.keyboard.press("ControlOrMeta+Z");
+  await expect.poll(() => readFile(page, path)).toBe(current);
+});
+
+test("autosave leaves an external change after a history restore for the author to resolve", async ({
+  page,
+}) => {
+  const path = "/notes/report.md";
+  await launch(page, {
+    files: { [path]: "Current draft" },
+    appData: { [`history:${path}`]: "[1]", [`snapshot:1:${path}`]: "Earlier draft" },
+    openDialogResults: [path],
+    locale: "en-US",
+  });
+  await page.keyboard.press("ControlOrMeta+O");
+  await runMenuItem(page, "file.history");
+  await page.getByRole("button", { name: "Restore entire version" }).click();
+  await externalWrite(page, path, "External revision");
+  await expect(page.getByText("was changed by another program")).toBeVisible();
+  await page.waitForTimeout(2000);
+  expect(await readFile(page, path)).toBe("External revision");
+  await expect(page.getByRole("textbox")).toHaveText("Earlier draft");
 });

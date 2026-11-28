@@ -293,8 +293,16 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       appData.set(`snapshot:${id}:${path}`, text);
       appData.set(key, JSON.stringify([...ids, id]));
     },
+    async writeBinaryFile(path, data) {
+      requireParent(path);
+      if (isDirectory(path)) throw new Error(`Is a directory: ${path}`);
+      files.delete(path);
+      binaryFiles.set(path, data.slice());
+      notify(path);
+    },
     async writeTextFile(path, text) {
       requireParent(path);
+      binaryFiles.delete(path);
       files.set(path, text);
       // Mirrors the backend's file watchers: every write is reported, MINT's own included.
       if (path === memorySettingsPath) notifySettings();

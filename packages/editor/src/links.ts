@@ -1,7 +1,11 @@
 import { syntaxTree } from "@codemirror/language";
 import { type EditorState, type Extension, Facet } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import type { SyntaxNode } from "@lezer/common";
+import type { SyntaxNode, Tree } from "@lezer/common";
+import { parser } from "@lezer/markdown";
+import { type Dialect, defaultDialect } from "@mint/markdown";
+import { dialectParserExtensions } from "./dialect.ts";
+import { parseFileText } from "./file-text.ts";
 import { linkClass, urlOwners } from "./live-preview/inline-spans.ts";
 
 /** Where a link the user activated points. */
@@ -34,18 +38,9 @@ function hrefOf(state: EditorState, node: SyntaxNode): string | null | undefined
   const text = (n: SyntaxNode) => state.sliceDoc(n.from, n.to);
   switch (node.name) {
     case "Link": {
-      const url = node.getChild("URL");
-      if (url) return text(url);
-      const label = node.getChild("LinkLabel");
-      const marks = node.getChildren("LinkMark");
-      // `[text][ref]` uses the label; `[ref]` and `[ref][]` use the text itself.
-      const name =
-        label && label.to - label.from > 2
-          ? text(label).slice(1, -1)
-          : marks[0] && marks[1]
-            ? state.sliceDoc(marks[0].to, marks[1].from)
-            : null;
-      return name === null ? null : referenceDefinition(state, name);
+      const slice = (from: number, to: number) => state.sliceDoc(from, to);
+      const destination = destinationOf(node, slice, () => definitions(syntaxTree(state), slice));
+      return destination ? text(destination) : null;
     }
     case "Autolink": {
       const url = node.getChild("URL");
@@ -65,24 +60,91 @@ function hrefOf(state: EditorState, node: SyntaxNode): string | null | undefined
   }
 }
 
-/** The destination of the `[label]: url` definition matching `name` (case-insensitive, whitespace-collapsed). */
-function referenceDefinition(state: EditorState, name: string): string | null {
-  const normalize = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
-  const wanted = normalize(name);
-  let found: string | null = null;
-  syntaxTree(state).iterate({
+type Slice = (from: number, to: number) => string;
+
+const normalizeLabel = (label: string) => label.trim().replace(/\s+/g, " ").toLowerCase();
+
+function definitions(tree: Tree, slice: Slice) {
+  const urls = new Map<string, SyntaxNode>();
+  tree.iterate({
     enter(ref) {
-      if (found !== null) return false;
-      if (ref.name !== "LinkReference") return ref.name === "Document" ? undefined : false;
+      if (ref.name !== "LinkReference") return;
       const label = ref.node.getChild("LinkLabel");
       const url = ref.node.getChild("URL");
-      if (label && url && normalize(state.sliceDoc(label.from + 1, label.to - 1)) === wanted) {
-        found = state.sliceDoc(url.from, url.to);
+      if (label && url) {
+        const name = normalizeLabel(slice(label.from + 1, label.to - 1));
+        if (!urls.has(name)) urls.set(name, url);
       }
       return false;
     },
   });
-  return found;
+  return urls;
+}
+
+function destinationOf(node: SyntaxNode, slice: Slice, lookup: () => Map<string, SyntaxNode>) {
+  const url = node.getChild("URL");
+  if (url) return url;
+  const label = node.getChild("LinkLabel");
+  const [start, end] = node.getChildren("LinkMark");
+  const name =
+    label && label.to - label.from > 2
+      ? slice(label.from + 1, label.to - 1)
+      : start && end
+        ? slice(start.to, end.from)
+        : "";
+  return lookup().get(normalizeLabel(name));
+}
+
+/** Offsets address the original source, including its BOM and line endings. A
+ * reference-style occurrence's destination range belongs to its definition. */
+export interface DocumentReference {
+  readonly from: number;
+  readonly to: number;
+  readonly destinationFrom: number;
+  readonly destinationTo: number;
+  readonly target: Extract<LinkTarget, { kind: "document" }>;
+  readonly line: number;
+  readonly column: number;
+  readonly context: string;
+}
+
+export function documentReferences(
+  source: string,
+  dialect: Dialect = defaultDialect,
+): DocumentReference[] {
+  const { doc } = parseFileText(source);
+  const text = doc.toString();
+  const tree = parser.configure(dialectParserExtensions(dialect)).parse(text);
+  const slice = (from: number, to: number) => text.slice(from, to);
+  const urls = definitions(tree, slice);
+  const starts = [source.startsWith("\uFEFF") ? 1 : 0];
+  for (const br of source.matchAll(/\r\n|\n|\r/g)) starts.push(br.index + br[0].length);
+  const offset = (pos: number) => {
+    const line = doc.lineAt(pos);
+    return (starts[line.number - 1] ?? 0) + pos - line.from;
+  };
+  const references: DocumentReference[] = [];
+  tree.iterate({
+    enter(ref) {
+      if (ref.name !== "Link") return;
+      const url = destinationOf(ref.node, slice, () => urls);
+      if (!url) return;
+      const target = classify(slice(url.from, url.to));
+      if (target?.kind !== "document") return;
+      const line = doc.lineAt(ref.from);
+      references.push({
+        from: offset(ref.from),
+        to: offset(ref.to),
+        destinationFrom: offset(url.from),
+        destinationTo: offset(url.to),
+        target,
+        line: line.number,
+        column: ref.from - line.from + 1,
+        context: line.text,
+      });
+    },
+  });
+  return references;
 }
 
 /** The target of a link destination as written (`<...>` allowed), or `null` if MINT cannot open it. */

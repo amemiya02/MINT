@@ -10,6 +10,7 @@ import {
   type PluginManifest,
   readStatistics,
   tagBrowser,
+  timingDiagrams,
   uninstall,
   writingStatistics,
   writingTemplates,
@@ -32,6 +33,7 @@ export function useInstallations() {
 
 const button = "rounded border border-(--mint-border) px-2 py-1 text-sm hover:bg-(--mint-hover)";
 export function pluginName(m: PluginManifest, t: Translate) {
+  if (m.id === timingDiagrams.id) return t("plugin.timing");
   if (m.id === writingTemplates.id) return t("plugin.templates");
   if (m.id === tagBrowser.id) return t("plugin.tags");
   return m.id === writingStatistics.id ? t("plugin.statistics") : m.name;
@@ -56,7 +58,7 @@ export function PluginSettings() {
       setFailed(true);
     }
   }
-  const available = [writingStatistics, writingTemplates, tagBrowser].filter(
+  const available = [writingStatistics, writingTemplates, tagBrowser, timingDiagrams].filter(
     (m) => !installed.some((i) => i.manifest.id === m.id),
   );
   return (
@@ -139,6 +141,14 @@ export function PluginSettings() {
         >
           <span>{pluginName(i.manifest, t)}</span>
           <small>{permission(i.manifest, t)}</small>
+          {"diagram" in i.manifest && (
+            <details className="text-sm">
+              <summary className="cursor-pointer">{t("plugin.exampleMarkdown")}</summary>
+              <pre className="select-all">
+                {["```timing", "CLK: 0101", "ACK: 0011", "```"].join("\n")}
+              </pre>
+            </details>
+          )}
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
