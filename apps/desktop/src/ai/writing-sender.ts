@@ -121,6 +121,7 @@ export interface WritingReply {
   readonly ignoredChanges?: boolean;
   readonly fileChanges?: readonly TaskCopyChange[];
   readonly finishReason?: string | null;
+  readonly usage?: { readonly inputTokens: number; readonly totalTokens: number };
 }
 
 export const replacementInstruction =
