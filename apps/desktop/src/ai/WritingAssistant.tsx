@@ -1891,6 +1891,14 @@ function Composer({
                   draft={turn.reply}
                   passages={turn.sourcePassages}
                   editor={turn.direct ? origin.editor : undefined}
+                  context={turn.context}
+                  platform={platform}
+                  recipients={recipients.map((recipient) => ({
+                    ...recipient,
+                    label: labelFor(recipient),
+                    agentAccess: recipient.kind === "agent" ? recipient.access : undefined,
+                  }))}
+                  originalRecipient={turn.recipientId}
                 />
               )}
               {!!turn.reply && renderReplyExcerpt(turn.reply, suggestions !== undefined)}

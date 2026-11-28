@@ -69,9 +69,27 @@ function canvasFor(width: number, height: number) {
 
 export const materialTextLimit = 2 * 1024 * 1024;
 
-export function usableMaterialText(text: string): boolean {
+interface MaterialTextOptions {
+  readonly allowBlank?: boolean;
+}
+
+export function usableMaterialText(
+  text: string,
+  { allowBlank = false }: MaterialTextOptions = {},
+): boolean {
   const bytes = new TextEncoder().encode(text).length;
-  return bytes <= materialTextLimit && !!text.trim() && !/[^\P{Cc}\t\n\r]/u.test(text);
+  return (
+    bytes <= materialTextLimit && (allowBlank || !!text.trim()) && !/[^\P{Cc}\t\n\r]/u.test(text)
+  );
+}
+
+export async function readMaterialText(file: File, options?: MaterialTextOptions): Promise<string> {
+  if (file.size > materialTextLimit) throw new Error("invalidMaterial");
+  const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
+    await file.arrayBuffer(),
+  );
+  if (!usableMaterialText(text, options)) throw new Error("invalidMaterial");
+  return text;
 }
 
 export async function prepareRangedMaterial(

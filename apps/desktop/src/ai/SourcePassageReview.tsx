@@ -1,8 +1,17 @@
 import type { MintEditor } from "@mint/editor";
-import { useId, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { type MessageKey, useT } from "../i18n/index.ts";
+import type { Platform } from "../platform/platform.ts";
 import { materialLabel } from "./material-display.ts";
-import type { SourcePassage } from "./source-passages.ts";
+import { usableMaterialText } from "./material-source.ts";
+import {
+  type AffectedStatement,
+  SourceVerification,
+  type VerificationRecipient,
+} from "./SourceVerification.tsx";
+import { compareSource, readSourceRevision, sentSource } from "./source-comparison.ts";
+import type { SourceExcerpt, SourcePassage } from "./source-passages.ts";
+import type { NamedMaterial, TaskContext } from "./writing-sender.ts";
 import { mapReviewRanges } from "./writing-tasks.ts";
 
 const button = "rounded px-1 text-left text-(--mint-accent) underline focus-visible:outline-2";
@@ -14,41 +23,150 @@ function citationText(text: string) {
     .replace(/[\\`*_[\]<>|~&$^=]/g, "\\$&");
 }
 
+function locate(passage: SourcePassage, live: string, mapper: ReturnType<typeof mapReviewRanges>) {
+  const range = mapper.range({
+    from: passage.from,
+    to: passage.from + passage.claim.length,
+    located: true,
+  });
+  if (range.located && live.slice(range.from, range.to) === passage.claim) return range;
+}
+
 export function SourcePassageReview({
   draft,
   passages,
   editor,
+  context,
+  platform,
+  recipients,
+  originalRecipient,
 }: {
   readonly draft: string;
   readonly passages: readonly SourcePassage[];
   readonly editor?: MintEditor | null;
+  readonly context?: TaskContext;
+  readonly platform: Platform;
+  readonly recipients: readonly VerificationRecipient[];
+  readonly originalRecipient: string;
 }) {
   const t = useT();
   const detailId = useId();
   const [selected, setSelected] = useState<SourcePassage | null>(null);
   const [citationStatus, setCitationStatus] = useState<MessageKey | null>(null);
-
-  function locate(passage: SourcePassage, live: string) {
-    const range = mapReviewRanges(draft, live).range({
-      from: passage.from,
-      to: passage.from + passage.claim.length,
-      located: true,
+  const [revisions, setRevisions] = useState<ReadonlyMap<NamedMaterial | SourceExcerpt, string>>(
+    () => new Map(),
+  );
+  const [reading, setReading] = useState<SourceExcerpt | null>(null);
+  const [readError, setReadError] = useState<SourceExcerpt | null>(null);
+  const [refresh, setRefresh] = useState(0);
+  const [disk, setDisk] = useState<{
+    generation: number;
+    files: ReadonlyMap<string, string | null>;
+  }>();
+  const sourcePaths = useMemo(
+    () =>
+      new Set(
+        passages.flatMap(({ excerpts }) =>
+          excerpts.flatMap(({ sourceFile }) => (sourceFile ? [sourceFile.path] : [])),
+        ),
+      ),
+    [passages],
+  );
+  useEffect(() => {
+    if (sourcePaths.size === 0) return;
+    let current = true;
+    void Promise.all(
+      [...sourcePaths].map(async (path) => {
+        try {
+          const text = await platform.readTextFile(path);
+          return [path, usableMaterialText(text, { allowBlank: true }) ? text : null] as const;
+        } catch {
+          return [path, null] as const;
+        }
+      }),
+    ).then((files) => {
+      if (current) setDisk({ generation: refresh, files: new Map(files) });
     });
-    if (range.located && live.slice(range.from, range.to) === passage.claim) return range;
+    return () => {
+      current = false;
+    };
+  }, [platform, refresh, sourcePaths]);
+  const [live, setLive] = useState(() => editor?.getText() ?? draft);
+  useEffect(() => {
+    setLive(editor?.getText() ?? draft);
+    return editor?.subscribe(({ type }) => {
+      if (type === "change") setLive(editor.getText());
+    });
+  }, [draft, editor]);
+
+  const comparisons = useMemo(() => {
+    const current = new Map<SourceExcerpt, string>();
+    const files = disk?.generation === refresh ? disk.files : undefined;
+    if (revisions.size === 0 && !files) return current;
+    for (const { excerpts } of passages) {
+      for (const excerpt of excerpts) {
+        const sent = sentSource(excerpt, context);
+        const revision =
+          revisions.get(sent ?? excerpt) ??
+          (excerpt.sourceFile ? files?.get(excerpt.sourceFile.path) : undefined);
+        if (revision != null) {
+          current.set(excerpt, compareSource(excerpt, revision, sent?.text));
+        }
+      }
+    }
+    return current;
+  }, [context, disk, passages, refresh, revisions]);
+  const statements = useMemo(() => {
+    const result: AffectedStatement[] = [];
+    if (!comparisons.size) return result;
+    const mapper = mapReviewRanges(draft, live);
+    for (const passage of passages) {
+      const evidence = passage.excerpts.flatMap((excerpt) => {
+        const revised = comparisons.get(excerpt);
+        return revised === undefined || revised === excerpt.quote
+          ? []
+          : [{ source: materialLabel(excerpt, t), original: excerpt.quote, revised }];
+      });
+      if (evidence.length && locate(passage, live, mapper))
+        result.push({ id: result.length + 1, claim: passage.claim, evidence });
+    }
+    return result;
+  }, [comparisons, draft, live, passages, t]);
+
+  async function chooseRevision(excerpt: SourceExcerpt) {
+    if (reading) return;
+    setReading(excerpt);
+    setReadError(null);
+    try {
+      const file = await platform.pickFile(
+        excerpt.range?.kind === "pdf" && excerpt.format === "extractedText"
+          ? ".pdf,application/pdf"
+          : ".md,.markdown,.txt,.csv,.tsv,.json,text/*",
+      );
+      if (!file) return;
+      const text = await readSourceRevision(file, excerpt);
+      const key = sentSource(excerpt, context) ?? excerpt;
+      setRevisions((previous) => new Map(previous).set(key, text));
+    } catch {
+      setReadError(excerpt);
+    } finally {
+      setReading(null);
+    }
   }
 
   function reveal(passage: SourcePassage) {
     setCitationStatus(null);
     setSelected(selected === passage ? null : passage);
     if (!editor || selected === passage) return;
-    const range = locate(passage, editor.getText());
+    const live = editor.getText();
+    const range = locate(passage, live, mapReviewRanges(draft, live));
     if (range) editor.setSelection({ anchor: range.from, head: range.to, scrollIntoView: true });
   }
 
   function cite(passage: SourcePassage) {
     if (!editor) return;
     const live = editor.getText();
-    const range = locate(passage, live);
+    const range = locate(passage, live, mapReviewRanges(draft, live));
     if (!range) {
       setCitationStatus("sources.claimChanged");
       return;
@@ -110,25 +228,87 @@ export function SourcePassageReview({
           aria-label={t("sources.excerpt")}
           className="space-y-2 rounded border border-(--mint-border) p-2"
         >
-          {selected.excerpts.map((excerpt, index) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: Excerpts stay in their original order.
-            <figure key={index} className="space-y-1 wrap-anywhere">
-              <figcaption>
-                <strong>{materialLabel(excerpt, t)}</strong> ·{" "}
-                {t("sources.line", { line: String(excerpt.line) })}
-              </figcaption>
-              <blockquote className="max-h-24 overflow-auto whitespace-pre-wrap rounded bg-(--mint-hover) p-2">
-                {excerpt.quote}
-              </blockquote>
-            </figure>
-          ))}
+          {selected.excerpts.map((excerpt, index) => {
+            const revised = comparisons.get(excerpt);
+            return (
+              // biome-ignore lint/suspicious/noArrayIndexKey: Excerpts stay in their original order.
+              <figure key={index} className="space-y-1 wrap-anywhere">
+                <figcaption>
+                  <strong>{materialLabel(excerpt, t)}</strong> ·{" "}
+                  {t("sources.line", { line: String(excerpt.line) })}
+                </figcaption>
+                <blockquote className="max-h-24 overflow-auto whitespace-pre-wrap rounded bg-(--mint-hover) p-2">
+                  {excerpt.quote}
+                </blockquote>
+                {excerpt.sourceFile && (
+                  <button
+                    type="button"
+                    className={button}
+                    disabled={reading !== null || disk?.generation !== refresh}
+                    onClick={() => {
+                      setRevisions((previous) => {
+                        const next = new Map(previous);
+                        next.delete(sentSource(excerpt, context) ?? excerpt);
+                        return next;
+                      });
+                      setRefresh((count) => count + 1);
+                    }}
+                  >
+                    {t("sources.readCurrent")}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className={button}
+                  disabled={reading !== null}
+                  onClick={() => void chooseRevision(excerpt)}
+                >
+                  {t("sources.chooseRevision")}
+                </button>
+                {readError === excerpt && <p role="alert">{t("sources.unreadable")}</p>}
+                {excerpt.sourceFile &&
+                  disk?.generation === refresh &&
+                  disk.files.get(excerpt.sourceFile.path) === null &&
+                  revised === undefined && <p>{t("sources.currentUnavailable")}</p>}
+                {revised !== undefined && (
+                  <section aria-label={t("sources.comparison")}>
+                    <p className="font-medium">{t("sources.revisedExcerpt")}</p>
+                    {revised === excerpt.quote ? (
+                      <p>{t("sources.unchanged")}</p>
+                    ) : revised ? (
+                      <blockquote className="max-h-24 overflow-auto whitespace-pre-wrap rounded bg-(--mint-hover) p-2">
+                        {revised}
+                      </blockquote>
+                    ) : (
+                      <p>{t("sources.removed")}</p>
+                    )}
+                  </section>
+                )}
+              </figure>
+            );
+          })}
           {editor && (
             <button type="button" className={button} onClick={() => cite(selected)}>
-              {t("sources.insertCitation")}
+              {t(
+                selected.excerpts.some((excerpt) => {
+                  const revised = comparisons.get(excerpt);
+                  return revised !== undefined && revised !== excerpt.quote;
+                })
+                  ? "sources.insertOriginalCitation"
+                  : "sources.insertCitation",
+              )}
             </button>
           )}
           {citationStatus && <p role="status">{t(citationStatus)}</p>}
         </section>
+      )}
+      {!!statements.length && (
+        <SourceVerification
+          key={JSON.stringify(statements)}
+          statements={statements}
+          recipients={recipients}
+          originalRecipient={originalRecipient}
+        />
       )}
     </section>
   );
