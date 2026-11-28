@@ -1,5 +1,6 @@
 import type { CodeBlockRenderer, DocumentLink, LinkTarget, WordCount } from "@mint/editor";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { WritingAssistant } from "../ai/WritingAssistant.tsx";
 import { createImageHost, type ImageSaveFailure } from "../assets/image-host.ts";
 import { EditorPane } from "../EditorPane.tsx";
 import { resolveDocumentLink } from "../folder/wikilinks.ts";
@@ -10,6 +11,7 @@ import { useDialect } from "../settings/useDialect.ts";
 import { useSettingsStore } from "../settings/useSettings.ts";
 import { useTabStore } from "../tabs/context.ts";
 import { ExternalChangeNotice } from "../tabs/ExternalChangeNotice.tsx";
+import { tabName } from "../tabs/tab-name.ts";
 import type { Tab, TabStore } from "../tabs/tab-store.ts";
 import { FormattingToolbar, type ToolbarPosition } from "./FormattingToolbar.tsx";
 
@@ -25,10 +27,15 @@ export function TabPanel({
   visible,
   toolbarPosition,
   platform,
+  askWriting,
+  settingsOpen,
+  onAskWriting,
+  onOpenSettings,
   onModeChange,
   onEditorChange,
   onEdited,
   onWordCount,
+  drafting,
 }: {
   readonly tab: Tab;
   readonly wikilinkFolder: string | null;
@@ -38,11 +45,16 @@ export function TabPanel({
   readonly visible: boolean;
   readonly toolbarPosition: ToolbarPosition;
   readonly platform: Platform;
+  readonly askWriting: number | null;
+  readonly settingsOpen: boolean;
+  readonly onAskWriting: () => void;
+  readonly onOpenSettings: () => void;
   readonly onModeChange: () => void;
   /** The tab's editor was created or destroyed. */
   readonly onEditorChange: () => void;
   readonly onEdited: (id: number) => void;
   readonly onWordCount: (count: WordCount) => void;
+  readonly drafting: ReactNode;
 }) {
   const store = useTabStore();
   const { id, path } = tab;
@@ -129,11 +141,24 @@ export function TabPanel({
       {imageFailure && (
         <ImageSaveNotice failure={imageFailure} onDismiss={() => setImageFailure(null)} />
       )}
+      {drafting}
       <div
         className={`flex min-h-0 min-w-0 flex-1 ${toolbarPosition === "side" ? "flex-row" : "flex-col"}`}
       >
         {toolbarPosition !== "hidden" && <FormattingToolbar tab={tab} position={toolbarPosition} />}
-        <div className="min-h-0 min-w-0 flex-1">
+        <WritingAssistant
+          editor={store.editor(id)}
+          name={tabName(t, tab)}
+          active={active}
+          platform={platform}
+          askRequest={askWriting}
+          settingsOpen={settingsOpen}
+          onAsk={onAskWriting}
+          onSettings={onOpenSettings}
+          canApply={() =>
+            store.getState().tabs.some((current) => current.id === id && !current.external)
+          }
+        >
           <EditorPane
             codeBlockRenderers={codeBlockRenderers}
             text={tab.text}
@@ -152,7 +177,7 @@ export function TabPanel({
             onWordCount={onWordCount}
             dialect={dialect}
           />
-        </div>
+        </WritingAssistant>
       </div>
     </div>
   );

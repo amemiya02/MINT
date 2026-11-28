@@ -60,6 +60,7 @@ export const commands = [
   },
 
   { id: "file.new", title: "command.file.new", accelerator: "CmdOrCtrl+N", menu: "file" },
+  { id: "file.draftWithAi", title: "command.file.draftWithAi", menu: "file" },
   { id: "file.open", title: "command.file.open", accelerator: "CmdOrCtrl+O", menu: "file" },
   { id: "file.openFolder", title: "command.file.openFolder", menu: "file" },
   {
@@ -103,6 +104,12 @@ export const commands = [
     group: "paste",
   },
   { id: "edit.find", title: "command.edit.find", accelerator: "CmdOrCtrl+F", menu: "edit" },
+  {
+    id: "edit.askAI",
+    title: "writing.ask",
+    menu: "edit",
+    group: "writing",
+  },
   {
     id: "edit.askExternalAgent",
     title: "command.edit.askExternalAgent",

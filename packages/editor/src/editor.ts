@@ -1,4 +1,11 @@
-import { defaultKeymap, history, historyKeymap, redo, undo } from "@codemirror/commands";
+import {
+  defaultKeymap,
+  history,
+  historyKeymap,
+  isolateHistory,
+  redo,
+  undo,
+} from "@codemirror/commands";
 import { syntaxTree } from "@codemirror/language";
 import { selectNextOccurrence } from "@codemirror/search";
 import {
@@ -6,6 +13,7 @@ import {
   EditorSelection,
   EditorState,
   type Extension,
+  Text,
   Transaction,
 } from "@codemirror/state";
 import {
@@ -155,6 +163,11 @@ export interface TextSelection {
   readonly head: number;
 }
 
+export interface TextRange {
+  readonly from: number;
+  readonly to: number;
+}
+
 /** Named commands and their arguments. */
 export interface EditorCommands extends FindCommands, FormattingCommands, TableCommands {
   undo: [];
@@ -197,6 +210,8 @@ export interface MintEditor {
    * disk. The selection stays next to the text around it; undo restores the old text.
    */
   replaceText(text: string): void;
+  /** Replace one range in its own undo step, preserving the surrounding file text. */
+  replaceRange(range: TextRange, text: string): void;
   /** The main selection range. */
   getSelection(): TextSelection;
   /** Capture the selected manuscript content for a new annotation. */
@@ -205,6 +220,8 @@ export interface MintEditor {
   revealAnnotation(annotation: Annotation): void;
   /** Every selection range (several when there are several cursors), in document order. */
   getSelections(): TextSelection[];
+  /** Follow a range through edits, including edits from a second view. Boundary insertions stay outside it. */
+  trackRange(range: TextRange): { current(): TextRange; release(): void };
   /** Put a cursor or selection at each range; there must be at least one. The last range is the main one. */
   setSelections(ranges: readonly { readonly anchor: number; readonly head?: number }[]): void;
   /** Replace the host-provided fenced block previews in this view. */
@@ -275,6 +292,7 @@ function dialectExtensions(dialect: EditorDialect): Extension {
 
 export function createEditor(options: EditorOptions): MintEditor {
   const listeners = new Set<(event: EditorEvent) => void>();
+  const trackedRanges = new Set<{ from: number; to: number }>();
   const parsed = options.document?.currentDocument() ?? parseFileText(options.text);
   const host = options.host ?? {};
   const fences = new Compartment();
@@ -339,6 +357,12 @@ export function createEditor(options: EditorOptions): MintEditor {
         EditorView.lineWrapping,
         EditorView.domEventObservers({ scroll: () => emit({ type: "scroll" }) }),
         EditorView.updateListener.of((update) => {
+          if (update.docChanged) {
+            for (const range of trackedRanges) {
+              range.from = update.changes.mapPos(range.from, 1);
+              range.to = Math.max(range.from, update.changes.mapPos(range.to, -1));
+            }
+          }
           if (update.docChanged || update.transactions.some((t) => sharedFileEffects(t).length > 0))
             emit(
               update.transactions.some((tr) => tr.annotation(Transaction.remote))
@@ -409,6 +433,21 @@ export function createEditor(options: EditorOptions): MintEditor {
     replaceText(text) {
       view.dispatch(replaceFileText(view.state, text));
     },
+    replaceRange(range, text) {
+      const state = view.state;
+      const from = fromFileOffset(state, range.from);
+      const to = fromFileOffset(state, range.to);
+      const insert = Text.of(text.split(/\r\n|\r|\n/));
+      const { main, ranges } = state.selection;
+      view.dispatch({
+        changes: { from, to, insert },
+        selection:
+          ranges.length === 1 && main.from === from && main.to === to
+            ? { anchor: from + insert.length }
+            : undefined,
+        annotations: isolateHistory.of("full"),
+      });
+    },
     getSelection() {
       const { anchor, head } = view.state.selection.main;
       return { anchor: toFileOffset(view.state, anchor), head: toFileOffset(view.state, head) };
@@ -441,6 +480,20 @@ export function createEditor(options: EditorOptions): MintEditor {
         anchor: toFileOffset(view.state, anchor),
         head: toFileOffset(view.state, head),
       }));
+    },
+    trackRange({ from, to }) {
+      const range = {
+        from: fromFileOffset(view.state, from),
+        to: fromFileOffset(view.state, to),
+      };
+      trackedRanges.add(range);
+      return {
+        current: () => ({
+          from: toFileOffset(view.state, range.from),
+          to: toFileOffset(view.state, range.to),
+        }),
+        release: () => trackedRanges.delete(range),
+      };
     },
     setSelections(ranges) {
       const selection = EditorSelection.create(
@@ -528,6 +581,7 @@ export function createEditor(options: EditorOptions): MintEditor {
     destroy: () => {
       options.document?.detach(view);
       listeners.clear();
+      trackedRanges.clear();
       view.destroy();
     },
   };

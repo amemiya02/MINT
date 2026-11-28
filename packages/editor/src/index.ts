@@ -9,6 +9,7 @@ export type {
   EditorSettings,
   HostAdapter,
   MintEditor,
+  TextRange,
   TextSelection,
 } from "./editor.ts";
 export { createEditor } from "./editor.ts";

@@ -5,6 +5,8 @@ import { baseName } from "../paths.ts";
 /** What a window without documents shows: open buttons and the recently opened list. */
 export function Welcome(props: {
   readonly recent: RecentList;
+  readonly onNewDocument: () => void;
+  readonly onDraft: () => void;
   readonly onPickDocument: () => void;
   readonly onPickFolder: () => void;
   readonly onOpenDocument: (path: string) => void;
@@ -22,7 +24,13 @@ export function Welcome(props: {
     <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
       <h1 className="text-lg font-medium">{t("welcome.title")}</h1>
       <p className="text-sm text-(--mint-muted)">{t("welcome.body")}</p>
-      <div className="mt-2 flex gap-2">
+      <div className="mt-2 flex flex-wrap justify-center gap-2">
+        <button type="button" onClick={props.onNewDocument} className={button}>
+          {t("welcome.write")}
+        </button>
+        <button type="button" onClick={props.onDraft} className={button}>
+          {t("command.file.draftWithAi")}
+        </button>
         <button type="button" onClick={props.onPickDocument} className={button}>
           {t("welcome.open")}
         </button>

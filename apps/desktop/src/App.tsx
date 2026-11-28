@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { DraftComposer } from "./ai/DraftComposer.tsx";
 import { ExternalAgentDialog } from "./ai/ExternalAgentPanel.tsx";
 import { inlineCompletionSender } from "./ai/inline-completion.ts";
 import { AnnotationDialog, AnnotationPanel } from "./annotations/Annotations.tsx";
@@ -138,6 +139,10 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   } = useOverlays();
   const { shortcuts, wikilinkFolders, inlineCompletionModel } = useSettings().settings;
   const active = tabs.find((tab) => tab.id === activeId) ?? null;
+  const [draftTabs, setDraftTabs] = useState<ReadonlySet<number>>(() => new Set());
+  const [writingRequest, setWritingRequest] = useState<{ tabId: number; sequence: number } | null>(
+    null,
+  );
   const [agentSelection, setAgentSelection] = useState<{ tabId: number; text: string } | null>(
     null,
   );
@@ -390,6 +395,13 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     if (activeId !== null) setFind((f) => ({ mode, request: (f?.request ?? 0) + 1 }));
   };
 
+  function emptyDraftEditor(id: number) {
+    const tab = store.getState().tabs.find((tab) => tab.id === id);
+    if (tab?.path !== null) return null;
+    const editor = store.editor(id);
+    return editor?.getText() === "" ? editor : null;
+  }
+
   const handlers = useRef<Record<ShellCommandId, () => void>>(
     {} as Record<ShellCommandId, () => void>,
   );
@@ -398,6 +410,10 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     "file.openFolder": () => void pickFolder(),
     "file.quickOpen": () => setQuickOpenVisible(true),
     "file.new": () => void store.newDocument(),
+    "file.draftWithAi": () => {
+      const id = active && emptyDraftEditor(active.id) ? active.id : store.newDocument();
+      setDraftTabs((previous) => new Set([...previous, id]));
+    },
     "file.save": () => {
       if (activeId !== null) void store.save(activeId);
     },
@@ -418,6 +434,18 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     "edit.find": () => showFind("find"),
     "edit.replace": () => showFind("replace"),
     "edit.searchFolder": () => setFolderSearch((request) => (request ?? 0) + 1),
+    "edit.askAI": () => {
+      const selection = activeId === null ? undefined : store.editor(activeId)?.getSelection();
+      if (activeId === null || !selection || selection.anchor === selection.head) {
+        setShellError(t("writing.needSelection"));
+        return;
+      }
+      setShellError(null);
+      setWritingRequest((previous) => ({
+        tabId: activeId,
+        sequence: (previous?.sequence ?? 0) + 1,
+      }));
+    },
     "edit.addAnnotation": addAnnotation,
     "view.annotations": () => {
       if (active) setAnnotationsOpen((open) => !open);
@@ -678,15 +706,52 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
                   visible={selected[tab.pane] === tab.id}
                   toolbarPosition={toolbarPositions[tab.pane]}
                   platform={platform}
+                  askWriting={writingRequest?.tabId === tab.id ? writingRequest.sequence : null}
+                  settingsOpen={settingsOpen}
+                  onAskWriting={() => run.current("edit.askAI")}
+                  onOpenSettings={() => run.current("app.settings")}
                   onModeChange={modeChanged}
                   onEditorChange={editorsChanged}
                   onEdited={onEdited}
                   onWordCount={setWordCount}
+                  drafting={
+                    draftTabs.has(tab.id) ? (
+                      <DraftComposer
+                        platform={platform}
+                        settingsOpen={settingsOpen}
+                        canApplyDraft={() => emptyDraftEditor(tab.id) !== null}
+                        onDraft={(text) => {
+                          const editor = emptyDraftEditor(tab.id);
+                          if (!editor) return false;
+                          editor.replaceText(text);
+                          return true;
+                        }}
+                        onClose={() => {
+                          setDraftTabs((previous) => {
+                            const next = new Set(previous);
+                            next.delete(tab.id);
+                            return next;
+                          });
+                          if (store.getState().activeId === tab.id) store.editor(tab.id)?.focus();
+                        }}
+                      />
+                    ) : activeId === tab.id && tab.path === null && !tab.dirty ? (
+                      <button
+                        type="button"
+                        className="self-start px-4 py-2 text-sm text-(--mint-accent) underline focus-visible:outline-2"
+                        onClick={() => run.current("file.draftWithAi")}
+                      >
+                        {t("command.file.draftWithAi")}
+                      </button>
+                    ) : null
+                  }
                 />
               ))}
               {tabs.length === 0 && (
                 <Welcome
                   recent={recent}
+                  onNewDocument={() => run.current("file.new")}
+                  onDraft={() => run.current("file.draftWithAi")}
                   onPickDocument={() => void open()}
                   onPickFolder={() => void pickFolder()}
                   onOpenDocument={(path) => void store.openDocument(path)}

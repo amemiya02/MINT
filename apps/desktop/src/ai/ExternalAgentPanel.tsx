@@ -20,6 +20,20 @@ interface Props {
   readonly selection?: string;
 }
 
+export function ExternalAgentAccessNotice({ access }: { readonly access: AgentAccess }) {
+  const t = useT();
+  return (
+    <>
+      <p>
+        {t("agent.processAccess")}{" "}
+        {t(access === "readOnly" ? "agent.readOnlyAccess" : "agent.configuredAccess")}
+      </p>
+      <p>{t("agent.tools")}</p>
+      <p>{t("agent.usesLogin")}</p>
+    </>
+  );
+}
+
 export function ExternalAgentSettings({ platform }: { readonly platform: ExternalAgentPlatform }) {
   const t = useT();
   return (
@@ -256,12 +270,7 @@ function ExternalAgentPanel({ platform, selection }: Props) {
                 <option value="configured">{t("agent.configured")}</option>
               </select>
             </label>
-            <p>
-              {t("agent.processAccess")}{" "}
-              {t(access === "readOnly" ? "agent.readOnlyAccess" : "agent.configuredAccess")}
-            </p>
-            <p>{t("agent.tools")}</p>
-            <p>{t("agent.usesLogin")}</p>
+            <ExternalAgentAccessNotice access={access} />
             <p className="font-medium">{t("agent.material")}</p>
             <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-words rounded bg-(--mint-hover) p-2 text-sm">
               {material}
