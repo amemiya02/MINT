@@ -276,6 +276,23 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
       if (text === undefined) throw new Error(`No such file: ${path}`);
       return text;
     },
+    async listVersions(path) {
+      return JSON.parse(appData.get(`history:${path}`) ?? "[]") as number[];
+    },
+    async readVersion(path, id) {
+      const text = appData.get(`snapshot:${id}:${path}`);
+      if (text === undefined) throw new Error("Missing version");
+      return text;
+    },
+    async recordVersion(path, text) {
+      const key = `history:${path}`;
+      const ids = JSON.parse(appData.get(key) ?? "[]") as number[];
+      const last = ids.at(-1) ?? 0;
+      if (appData.get(`snapshot:${last}:${path}`) === text) return;
+      const id = Math.max(Date.now(), last + 1);
+      appData.set(`snapshot:${id}:${path}`, text);
+      appData.set(key, JSON.stringify([...ids, id]));
+    },
     async writeTextFile(path, text) {
       requireParent(path);
       files.set(path, text);
