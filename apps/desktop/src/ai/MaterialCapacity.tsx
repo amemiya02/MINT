@@ -1,7 +1,15 @@
 import { markdownHeadings } from "@mint/markdown";
 import { useMemo, useState } from "react";
 import { useT } from "../i18n/index.ts";
-import type { NamedMaterial, TaskContext, WritingRequest } from "./writing-sender.ts";
+import { materialLabel } from "./material-display.ts";
+import { sourceLines } from "./material-source.ts";
+import { type MaterialEntry, MaterialPreview } from "./TaskContext.tsx";
+import {
+  contextMaterials,
+  type NamedMaterial,
+  type TaskContext,
+  type WritingRequest,
+} from "./writing-sender.ts";
 
 const encoder = new TextEncoder();
 
@@ -11,23 +19,11 @@ export function materialBytes({
 }: Pick<WritingRequest, "selectedText" | "taskContext">) {
   return (
     encoder.encode(selectedText ?? "").length +
-    encoder.encode(taskContext?.currentDraft?.text ?? "").length +
-    (taskContext?.materials ?? []).reduce(
-      (total, { text }) => total + encoder.encode(text).length,
-      0,
-    ) +
-    (taskContext?.materialDecisions ?? []).reduce(
-      (total, decision) =>
-        total +
-        (decision.outcome === "allowed" ? encoder.encode(decision.material.text).length : 0),
+    contextMaterials(taskContext).reduce(
+      (total, { text, image }) => total + encoder.encode(text).length + (image?.length ?? 0),
       0,
     )
   );
-}
-
-interface Source {
-  readonly id: string | number;
-  readonly material: NamedMaterial;
 }
 
 interface LineRange {
@@ -48,11 +44,6 @@ const initialRange: LineRange = { first: "1", last: "" };
 const maxBatches = 100;
 const fieldClass = "rounded border border-(--mint-border) bg-(--mint-bg) p-1";
 
-export function sourceLines(text: string) {
-  // Keep line endings, including the final newline, in outbound excerpts.
-  return text.match(/[^\r\n]*(?:\r\n|\r|\n)|[^\r\n]+$/g) ?? [];
-}
-
 function passageLabel(
   t: ReturnType<typeof useT>,
   name: string,
@@ -68,7 +59,9 @@ function passageLabel(
     .join(" · ");
 }
 
-function batchSource(t: ReturnType<typeof useT>, { name, text }: NamedMaterial, room: number) {
+function batchSource(t: ReturnType<typeof useT>, material: NamedMaterial, room: number) {
+  const { name, text, image } = material;
+  if (image) return image.length <= room ? [material] : undefined;
   const batches: NamedMaterial[] = [];
   const headings = markdownHeadings(text);
   let first = 1;
@@ -77,7 +70,11 @@ function batchSource(t: ReturnType<typeof useT>, { name, text }: NamedMaterial, 
 
   function flush(last: number) {
     if (!current.length) return;
-    batches.push({ name: passageLabel(t, name, headings, first, last), text: current.join("") });
+    batches.push({
+      ...material,
+      name: passageLabel(t, name, headings, first, last),
+      text: current.join(""),
+    });
     current = [];
     bytes = 0;
   }
@@ -105,6 +102,7 @@ function batchSource(t: ReturnType<typeof useT>, { name, text }: NamedMaterial, 
         last: String(end),
       });
       batches.push({
+        ...material,
         name: passageLabel(t, name, headings, index + 1, index + 1, location),
         text: segment.join(""),
       });
@@ -138,20 +136,20 @@ export function useMaterialCapacity({
   readonly recipient?: string;
   readonly selectedText?: string;
   readonly draft?: NamedMaterial;
-  readonly entries: readonly Source[];
+  readonly entries: readonly MaterialEntry[];
   readonly folderSearch: boolean;
   readonly editing?: boolean;
 }) {
   const t = useT();
   const [chosenMethod, setMethod] = useState<MaterialHandling>("full");
   const [limitInput, setLimit] = useState("");
-  const [ranges, setRanges] = useState<ReadonlyMap<Source["id"], LineRange>>(new Map());
-  const [summaries, setSummaries] = useState<ReadonlyMap<Source["id"], string>>(new Map());
+  const [ranges, setRanges] = useState<ReadonlyMap<MaterialEntry["id"], LineRange>>(new Map());
+  const [summaries, setSummaries] = useState<ReadonlyMap<MaterialEntry["id"], string>>(new Map());
   const [rejected, setRejected] = useState<ReadonlySet<string>>(new Set());
   const draftName = draft?.name;
   const draftText = draft?.text;
   const selectionName = t("writing.scope.selection");
-  const sources = useMemo(
+  const sources = useMemo<readonly MaterialEntry[]>(
     () =>
       [
         ...(!editing && selectedText
@@ -161,10 +159,13 @@ export function useMaterialCapacity({
           ? [{ id: "currentDraft", material: { name: draftName, text: draftText } }]
           : []),
         ...entries,
-      ].filter(({ material }) => material.text.length > 0),
+      ].filter(({ material }) => material.text.length > 0 || !!material.image),
     [editing, selectedText, draftName, draftText, entries, selectionName],
   );
-  const method = sources.length ? chosenMethod : "full";
+  const textSources = sources.filter(({ material }) => !material.image);
+  const canChooseTextHandling = textSources.length > 0;
+  const method =
+    (chosenMethod === "batch" && sources.length) || canChooseTextHandling ? chosenMethod : "full";
   const hasMaterial = sources.length > 0 || selectedText !== undefined;
   const limit = (hasMaterial || folderSearch) && limitInput ? Number(limitInput) : undefined;
   const invalidLimit = limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1);
@@ -199,13 +200,19 @@ export function useMaterialCapacity({
     }
 
     const materials: NamedMaterial[] = [];
-    for (const { id, material } of sources) {
+    for (const { id, revision, material } of sources) {
+      if (material.image) {
+        materials.push(material);
+        continue;
+      }
       const lines = sourceLines(material.text);
       if (method === "summary") {
-        const summary = summaries.get(id);
+        const summary = summaries.get(revision ?? id);
         if (!summary?.trim()) return;
         const location = t("materials.capacity.summaryOf", { count: String(lines.length) });
         materials.push({
+          ...material,
+          ...(material.range ? { format: "summary" } : {}),
           name: passageLabel(
             t,
             material.name,
@@ -217,7 +224,7 @@ export function useMaterialCapacity({
           text: summary,
         });
       } else {
-        const range = ranges.get(id) ?? initialRange;
+        const range = ranges.get(revision ?? id) ?? initialRange;
         const first = Number(range.first);
         const last = Number(range.last);
         if (
@@ -229,6 +236,7 @@ export function useMaterialCapacity({
         )
           return;
         materials.push({
+          ...material,
           name: passageLabel(t, material.name, markdownHeadings(material.text), first, last),
           text: lines.slice(first - 1, last).join(""),
         });
@@ -302,13 +310,13 @@ export function useMaterialCapacity({
               onChange={(event) => setMethod(event.target.value as MaterialHandling)}
             >
               <option value="full">{t("materials.capacity.full")}</option>
-              <option value="excerpt" disabled={!sources.length}>
+              <option value="excerpt" disabled={!canChooseTextHandling}>
                 {t("materials.capacity.excerpt")}
               </option>
               <option value="batch" disabled={!sources.length}>
                 {t("materials.capacity.batch")}
               </option>
-              <option value="summary" disabled={!sources.length}>
+              <option value="summary" disabled={!canChooseTextHandling}>
                 {t("materials.capacity.summary")}
               </option>
             </select>
@@ -316,15 +324,15 @@ export function useMaterialCapacity({
         </div>
         <p>{t("materials.capacity.limitHelp")}</p>
         {method === "excerpt" &&
-          sources.map(({ id, material }) => {
-            const range = ranges.get(id) ?? initialRange;
+          textSources.map(({ id, revision, material }) => {
+            const range = ranges.get(revision ?? id) ?? initialRange;
             const lineCount = sourceLines(material.text).length;
             const updateRange = (next: LineRange) =>
-              setRanges((ranges) => new Map(ranges).set(id, next));
+              setRanges((ranges) => new Map(ranges).set(revision ?? id, next));
             return (
               <fieldset key={id} className="flex flex-wrap gap-2">
                 <legend>
-                  {material.name} ·{" "}
+                  {materialLabel(material, t)} ·{" "}
                   {t("materials.capacity.lineCount", { count: String(lineCount) })}
                 </legend>
                 <label className="grid gap-1">
@@ -355,10 +363,10 @@ export function useMaterialCapacity({
         {method === "summary" && (
           <>
             <p>{t("materials.capacity.summaryHelp")}</p>
-            {sources.map(({ id, material }) => (
+            {textSources.map(({ id, revision, material }) => (
               <fieldset key={id}>
                 <legend>
-                  {material.name} ·{" "}
+                  {materialLabel(material, t)} ·{" "}
                   {t("materials.capacity.lineCount", {
                     count: String(sourceLines(material.text).length),
                   })}
@@ -368,10 +376,10 @@ export function useMaterialCapacity({
                   <textarea
                     rows={2}
                     className={fieldClass}
-                    value={summaries.get(id) ?? ""}
+                    value={summaries.get(revision ?? id) ?? ""}
                     onChange={(event) => {
                       const value = event.target.value;
-                      setSummaries((previous) => new Map(previous).set(id, value));
+                      setSummaries((previous) => new Map(previous).set(revision ?? id, value));
                     }}
                   />
                 </label>
@@ -447,11 +455,11 @@ export function MaterialPlanPreview({
           {[
             ...(context?.currentDraft ? [context.currentDraft] : []),
             ...(context?.materials ?? []),
-          ].map(({ name, text }, position) => (
+          ].map((material, position) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: Named sources may repeat.
             <details key={position}>
-              <summary>{name}</summary>
-              <pre className="max-h-24 overflow-auto whitespace-pre-wrap">{text}</pre>
+              <summary>{materialLabel(material, t)}</summary>
+              <MaterialPreview material={material} />
             </details>
           ))}
         </div>
