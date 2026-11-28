@@ -77,7 +77,7 @@ test("Ask AI comments inline and continues from the original selection", async (
   await expect(sidebar.getByText(first, { exact: true })).toBeVisible();
   await sidebar.getByLabel("Scope").selectOption({ label: "Instruction only" });
   await sidebar.getByRole("textbox", { name: "Instruction" }).fill(followUp);
-  await sidebar.getByRole("button", { name: "Send", exact: true }).click();
+  await sidebar.getByRole("button", { name: /^Comment only · Instruction only · Codex/ }).click();
   const approval = { name: "Additional material requested" };
   await expect(
     sidebar.getByRole("group", approval).getByText(requestMaterial.purpose),

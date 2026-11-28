@@ -1,7 +1,7 @@
 import { compareLines, rawLines } from "../tabs/line-diff.ts";
 import type { TaskContext, WritingTurn } from "./writing-sender.ts";
 
-export type EditStatus = "preview" | "applied" | "discarded";
+export type EditStatus = "preview" | "applied" | "discarded" | "reverted";
 
 export interface ReviewRange {
   readonly from: number;
@@ -14,6 +14,7 @@ export interface SavedSuggestion {
   readonly before: string;
   readonly after: string;
   readonly status: EditStatus;
+  readonly appliedText?: string;
   readonly comments?: readonly (WritingTurn & { readonly id: number })[];
   readonly range: ReviewRange;
 }
@@ -23,7 +24,7 @@ export interface SavedTurn extends WritingTurn {
   readonly context?: TaskContext;
   readonly recipient: string;
   readonly recipientId: string;
-  readonly appliedDirectly?: boolean;
+  readonly direct: boolean;
   readonly suggestions?: readonly SavedSuggestion[];
 }
 
@@ -39,7 +40,7 @@ export interface SavedWritingTask {
   readonly reviewScroll: number;
   readonly showSource: boolean;
   readonly turns: readonly SavedTurn[];
-  readonly pending?: Omit<SavedTurn, "reply" | "suggestions" | "appliedDirectly">;
+  readonly pending?: Omit<SavedTurn, "reply" | "suggestions" | "direct">;
 }
 
 export interface WritingTasksPlatform {

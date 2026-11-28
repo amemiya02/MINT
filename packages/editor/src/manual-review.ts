@@ -63,28 +63,36 @@ export class ManualReview {
     if (this.rejecting) {
       const { from, before: restored, after: replaced } = this.rejecting;
       inverse.push({ from, to: from + restored.length, insert: replaced });
-    } else if (sharedFileEffects(tr).length) {
-      // Reload and history transactions can change file metadata outside their editor range.
-      let from = 0;
-      while (from < before.length && before[from] === after[from]) from++;
-      let endA = before.length;
-      let endB = after.length;
-      while (endA > from && endB > from && before[endA - 1] === after[endB - 1]) {
-        endA--;
-        endB--;
-      }
-      inverse.push({ from, to: endB, insert: before.slice(from, endA) });
     } else {
+      const hasFileEffects = sharedFileEffects(tr).length > 0;
+      let oldEnd = 0;
+      let newEnd = 0;
+      let changedGap = false;
       tr.changes.iterChangedRanges((fromA, toA, fromB, toB) => {
+        const oldStart = toFileOffset(tr.startState, fromA);
+        const newStart = toFileOffset(tr.state, fromB);
+        changedGap ||=
+          hasFileEffects && before.slice(oldEnd, oldStart) !== after.slice(newEnd, newStart);
+        oldEnd = toFileOffset(tr.startState, toA);
+        newEnd = toFileOffset(tr.state, toB);
         inverse.push({
-          from: toFileOffset(tr.state, fromB),
-          to: toFileOffset(tr.state, toB),
-          insert: before.slice(
-            toFileOffset(tr.startState, fromA),
-            toFileOffset(tr.startState, toA),
-          ),
+          from: newStart,
+          to: newEnd,
+          insert: before.slice(oldStart, oldEnd),
         });
       });
+      // Reload and history can also change the BOM or terminators outside the edited ranges.
+      if (hasFileEffects && (changedGap || before.slice(oldEnd) !== after.slice(newEnd))) {
+        let from = 0;
+        while (from < before.length && before[from] === after[from]) from++;
+        let endA = before.length;
+        let endB = after.length;
+        while (endA > from && endB > from && before[endA - 1] === after[endB - 1]) {
+          endA--;
+          endB--;
+        }
+        inverse.splice(0, inverse.length, { from, to: endB, insert: before.slice(from, endA) });
+      }
     }
     // Use LF explicitly so literal CR and CRLF occupy their original number of file offsets.
     const previous = ChangeSet.of(
