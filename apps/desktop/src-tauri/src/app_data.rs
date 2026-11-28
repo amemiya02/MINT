@@ -5,6 +5,9 @@
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+
+static WRITES: Mutex<()> = Mutex::new(());
 
 /// Resolve a name inside the app data directory. Only plain file names are
 /// accepted, so a caller cannot reach outside it.
@@ -34,6 +37,29 @@ pub fn read(dir: &Path, name: &str) -> io::Result<Option<String>> {
 
 /// Write a named file atomically, creating the app data directory if needed.
 pub fn write(dir: &Path, name: &str, text: &str) -> io::Result<()> {
+    let _write = WRITES
+        .lock()
+        .map_err(|_| io::Error::other("app data lock poisoned"))?;
+    write_locked(dir, name, text)
+}
+
+pub fn compare_and_write(
+    dir: &Path,
+    name: &str,
+    expected: Option<&str>,
+    text: &str,
+) -> io::Result<bool> {
+    let _write = WRITES
+        .lock()
+        .map_err(|_| io::Error::other("app data lock poisoned"))?;
+    if read(dir, name)?.as_deref() != expected {
+        return Ok(false);
+    }
+    write_locked(dir, name, text)?;
+    Ok(true)
+}
+
+fn write_locked(dir: &Path, name: &str, text: &str) -> io::Result<()> {
     let path = resolve(dir, name)?;
     fs::create_dir_all(dir)?;
     crate::fs::write_atomic(&path, text.as_bytes())

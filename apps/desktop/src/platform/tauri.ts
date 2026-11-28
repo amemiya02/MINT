@@ -261,6 +261,8 @@ export function createTauriPlatform(): Platform {
     },
     readAppData: (name) => invoke<string | null>("read_app_data", { name }),
     writeAppData: (name, text) => invoke<void>("write_app_data", { name, text }),
+    compareAndWriteAppData: (name, expected, text) =>
+      invoke<boolean>("compare_and_write_app_data", { name, expected, text }),
     // Rejects when the clipboard cannot be read, or holds no text (an image, say).
     readClipboardText: () => readText(),
     writeClipboardText: (text) => writeText(text),

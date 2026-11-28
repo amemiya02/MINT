@@ -701,6 +701,20 @@ async fn write_app_data(app: AppHandle, name: String, text: String) -> Result<()
         .await
 }
 
+#[tauri::command]
+async fn compare_and_write_app_data(
+    app: AppHandle,
+    name: String,
+    expected: Option<String>,
+    text: String,
+) -> Result<bool, String> {
+    blocking(move || {
+        app_data::compare_and_write(&app_data_dir(&app)?, &name, expected.as_deref(), &text)
+            .map_err(|error| error.to_string())
+    })
+    .await
+}
+
 /// The theme folder, created if missing.
 #[tauri::command]
 async fn themes_path(app: AppHandle) -> Result<PathBuf, String> {
@@ -848,6 +862,7 @@ pub fn run() {
             unwatch_folder,
             read_app_data,
             write_app_data,
+            compare_and_write_app_data,
             take_recovery_snapshots,
             write_recovery_snapshot,
             delete_recovery_snapshot,

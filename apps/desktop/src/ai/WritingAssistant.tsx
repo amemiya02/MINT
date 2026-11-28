@@ -36,7 +36,24 @@ import { materialLabel } from "./material-display.ts";
 import { isLocalModelOffline } from "./model.ts";
 import { ProposedSelectionEdit } from "./ProposedSelectionEdit.tsx";
 import { ReplyExcerpt } from "./ReplyExcerpt.tsx";
+import {
+  ExportWritingSkillButton,
+  useSavedWritingSkills,
+  WritingSkillChoices,
+  WritingSkillEditor,
+} from "./SavedWritingSkills.tsx";
 import { SourcePassageReview } from "./SourcePassageReview.tsx";
+import {
+  makeWritingSkillDraft,
+  type SavedWritingSkill,
+  savedSkillInstruction,
+  saveWritingSkill,
+  validWritingSkillDraft,
+  type WritingMethod,
+  type WritingSkillDraft,
+  type WritingSkillTool,
+  writingSkillMaterials,
+} from "./saved-writing-skills.ts";
 import { type SelectionEdit, selectionEdits } from "./selection-edits.ts";
 import {
   MaterialPreview,
@@ -90,12 +107,12 @@ import {
   replacementFromReply,
   splitWritingProgress,
   type TaskContext,
+  type WritingReply,
   type WritingRequest,
 } from "./writing-sender.ts";
 import {
   readWritingSkill,
   type WritingAction,
-  type WritingSkillId,
   writingActions,
   writingSkillInstruction,
 } from "./writing-skills.ts";
@@ -146,6 +163,8 @@ interface Origin extends WritingSelection {
 interface Task {
   readonly request: WritingRequest;
   readonly authorInstruction?: string;
+  readonly method?: WritingMethod;
+  readonly trial?: true;
   readonly folderPaths?: readonly string[];
   readonly folderDiskBaselines?: ReadonlyMap<string, string>;
   readonly documentBaseline?: string;
@@ -567,6 +586,22 @@ function Composer({
     recipientId: string;
   } | null>(null);
   const named = useNamedMaterials();
+  const savedSkills = useSavedWritingSkills(platform);
+  const [skillDraft, setSkillDraft] = useState<WritingSkillDraft | null>(null);
+  const beforeSkillTrial = useRef<{
+    scope: Scope;
+    actionOverride: WritingAction | null;
+    recipientId: string | null;
+    includeHistory: boolean;
+  }>(null);
+  const [savingSkill, setSavingSkill] = useState(false);
+  const [skillSaveFailed, setSkillSaveFailed] = useState(false);
+  const [lastSavedSkill, setLastSavedSkill] = useState<SavedWritingSkill>();
+  const [trialResult, setTrialResult] = useState<{
+    status: AttemptStatus;
+    text: string;
+    files?: WritingReply["fileChanges"];
+  }>();
   const materialRequests = useMaterialRequests(platform.sendMcpRequest);
   const callLimit = useWritingCallLimit();
   const comparisonLimit = useWritingCallLimit();
@@ -634,6 +669,7 @@ function Composer({
   const returnTab = useRef(tabId);
   const reading = useRef<ReturnType<MintEditor["captureReadingPosition"]> | null>(null);
   const [draft, setDraft] = useState(() => origin.editor.getText());
+  const [liveSelection, setLiveSelection] = useState(() => origin.editor.getSelection());
   const connectionChoice = writingConnectionChoice(settings, connectionSettingForScope(scope));
   const recipient = recipientId
     ? (recipients.find(({ id }) => id === recipientId) ??
@@ -659,12 +695,18 @@ function Composer({
     );
   const vision = visionFor(recipient);
   const labelFor = (candidate: WritingRecipient) => writingRecipientLabel(t, candidate);
-  const selectedText = scope === "selection" ? origin.text : undefined;
+  const selectionText = skillDraft
+    ? draft.slice(
+        Math.min(liveSelection.anchor, liveSelection.head),
+        Math.max(liveSelection.anchor, liveSelection.head),
+      )
+    : origin.text;
+  const selectedText = scope === "selection" ? selectionText : undefined;
   const sendDraft = scope === "document" || (scope === "selection" && includeDraft);
   const canEditDocument = scope === "document" && isTaskCopyRecipient(recipient);
   const canEditFolder = scope === "folder" && isTaskCopyRecipient(recipient);
-  const canEdit = (scope === "selection" && !!origin.text) || canEditDocument || canEditFolder;
-  const skill = readWritingSkill(instruction);
+  const canEdit = (scope === "selection" && !!selectionText) || canEditDocument || canEditFolder;
+  const skill = readWritingSkill(instruction, savedSkills.skills);
   const explicitDirect = /(?:^|[,，]\s*)(?:apply directly|直接改)[.!。！]?\s*$/i.test(
     skill.id ? skill.instruction : instruction,
   );
@@ -673,15 +715,25 @@ function Composer({
       ? folder
       : null;
   const skillAction = useWritingSkillAction(platform, skillFolder, skill.id);
-  const canSendInstruction =
-    !!instruction.trim() && !skill.suggestions?.length && !skillAction.loading;
+  const canSendInstruction = skillDraft
+    ? validWritingSkillDraft({ ...skillDraft, name: skillDraft.name || "trial" }) &&
+      (scope !== "selection" || !!selectionText) &&
+      !savingSkill
+    : !!instruction.trim() && !skill.suggestions?.length && !skillAction.loading;
+  const preferredAction =
+    actionOverride ??
+    (skillDraft
+      ? skillDraft.action
+      : ((explicitDirect ? "direct" : skillAction.action) ??
+        skill.custom?.action ??
+        (turns.length && !canEditFolder ? "comment" : "preview")));
   const action = !canEdit
     ? "comment"
-    : (actionOverride ??
-      (explicitDirect ? "direct" : skillAction.action) ??
-      (turns.length && !canEditFolder ? "comment" : "preview"));
+    : skillDraft && canEditFolder && preferredAction === "direct"
+      ? "preview"
+      : preferredAction;
   const folderCopy = canEditFolder && action !== "comment" ? origin.folder : undefined;
-  const folderBatch = !!folderCopy && action === "direct";
+  const folderBatch = !skillDraft && !!folderCopy && action === "direct";
   const writeTargetInput =
     folderAuthorization?.recipient === recipient?.id ? (folderAuthorization?.text ?? "") : "";
   const writeTargets = [...new Set(writeTargetInput.split("\n").filter((path) => path.trim()))];
@@ -907,6 +959,14 @@ function Composer({
       if (event.type === "rangeHistory") onBatchHistory(event);
     });
   }, [origin]);
+
+  const buildingSkill = !!skillDraft;
+  useEffect(() => {
+    if (!buildingSkill) return;
+    return origin.editor.subscribe(({ type }) => {
+      if (type === "selection") setLiveSelection(origin.editor.getSelection());
+    });
+  }, [buildingSkill, origin]);
 
   useEffect(() => {
     if (settingsOpen) return;
@@ -1369,13 +1429,93 @@ function Composer({
   }
 
   function updateInstruction(value: string) {
-    if (skill.id && skill.id !== readWritingSkill(value).id) setActionOverride(null);
+    const next = readWritingSkill(value, savedSkills.skills);
+    if (skill.id && skill.id !== next.id) setActionOverride(null);
+    if (next.custom && next.id !== skill.id) {
+      setScope(
+        origin.folder
+          ? "folder"
+          : next.custom.scope === "folder" || (next.custom.scope === "selection" && !origin.text)
+            ? origin.text
+              ? "selection"
+              : "instruction"
+            : next.custom.scope,
+      );
+      setAllowedFolder(null);
+      setIncludeDraft(false);
+      setFolderSelection(undefined);
+      setFolderAuthorization(undefined);
+      toolPicker.changeAddress("");
+      if (turns.length) named.clear();
+    }
     setInstruction(value);
   }
 
-  function chooseSkill(id: WritingSkillId) {
+  function chooseSkill(id: string) {
     updateInstruction(`/${id} `);
     input.current?.focus();
+  }
+
+  function clearSkillInputs() {
+    setAllowedFolder(null);
+    setIncludeDraft(false);
+    setFolderSelection(undefined);
+    setFolderAuthorization(undefined);
+    named.clear();
+    toolPicker.changeAddress("");
+    callLimit.setValue("");
+  }
+
+  function startSkillDraft(turn: Turn) {
+    const draft = makeWritingSkillDraft(t, turn);
+    const selection = origin.editor.getSelection();
+    beforeSkillTrial.current = { scope, actionOverride, recipientId, includeHistory };
+    setSkillDraft(draft);
+    setTrialResult(undefined);
+    setLiveSelection(selection);
+    setScope(
+      origin.folder
+        ? "folder"
+        : draft.scope === "folder" ||
+            (draft.scope === "selection" && selection.anchor === selection.head)
+          ? "instruction"
+          : draft.scope,
+    );
+    setActionOverride(null);
+    clearSkillInputs();
+    setSkillSaveFailed(false);
+    setLastSavedSkill(undefined);
+  }
+
+  function finishSkillDraft() {
+    const previous = beforeSkillTrial.current;
+    if (previous) {
+      setScope(previous.scope);
+      setActionOverride(previous.actionOverride);
+      setRecipientId(previous.recipientId);
+      setIncludeHistory(previous.includeHistory);
+      beforeSkillTrial.current = null;
+    }
+    clearSkillInputs();
+    setSkillDraft(null);
+    setTrialResult(undefined);
+    setSkillSaveFailed(false);
+    setError(null);
+  }
+
+  async function saveSkill() {
+    if (!skillDraft || savingSkill) return;
+    setSavingSkill(true);
+    setSkillSaveFailed(false);
+    try {
+      const saved = await saveWritingSkill(platform, skillDraft);
+      setLastSavedSkill(saved);
+      finishSkillDraft();
+    } catch {
+      setSkillSaveFailed(true);
+    } finally {
+      setSavingSkill(false);
+    }
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -1434,7 +1574,7 @@ function Composer({
       }
       if (!mounted.current) return;
     }
-    if (restored && action !== "comment" && scope === "selection") {
+    if (!skillDraft && restored && action !== "comment" && scope === "selection") {
       const { from, to } = origin.range.current();
       if (
         !origin.range.hasBoundaries() ||
@@ -1444,32 +1584,70 @@ function Composer({
         return;
       }
     }
-    const history = includeHistory
-      ? turns
-          .filter(({ alternativeTo }) => !alternativeTo)
-          .flatMap(({ status, instruction, skillInstruction, reply, suggestions }) => [
-            ...((status ?? "complete") === "complete" && reply
-              ? [{ instruction: skillInstruction ?? instruction, reply }]
-              : []),
-            ...(suggestions?.flatMap(
-              ({ comments }) =>
-                comments?.map(({ instruction, reply }) => ({ instruction, reply })) ?? [],
-            ) ?? []),
-          ])
+    const history =
+      includeHistory && !skill.custom && !skillDraft
+        ? turns
+            .filter(({ alternativeTo }) => !alternativeTo)
+            .flatMap(({ status, instruction, skillInstruction, reply, suggestions }) => [
+              ...((status ?? "complete") === "complete" && reply
+                ? [{ instruction: skillInstruction ?? instruction, reply }]
+                : []),
+              ...(suggestions?.flatMap(
+                ({ comments }) =>
+                  comments?.map(({ instruction, reply }) => ({ instruction, reply })) ?? [],
+              ) ?? []),
+            ])
+        : [];
+    const tools: WritingSkillTool[] = named.entries.some(({ tool }) => tool === "zotero")
+      ? [{ kind: "zotero" }]
       : [];
+    const chosenTool = toolPicker.plan;
+    if (chosenTool)
+      tools.push({ kind: "mcp", name: chosenTool.tool.name, effect: chosenTool.effect });
     const task: Task = {
+      trial: skillDraft ? true : undefined,
+      method: {
+        action,
+        scope,
+        tools,
+        materials: writingSkillMaterials(named.entries.map(({ material }) => material)),
+        includeDraft: scope === "selection" && includeDraft ? true : undefined,
+        folderSearch: searchFolder ? true : undefined,
+        format: skill.custom?.format,
+        ...(skill.custom && {
+          steps: skill.custom.steps + (skill.instruction ? `\n${skill.instruction}` : ""),
+          result: skill.custom.result,
+        }),
+      },
       authorInstruction: skill.id ? instruction.trim() : undefined,
       plan: capacity.plan,
       folderPaths: folderDocuments && folderPaths,
       folderDiskBaselines,
       documentBaseline: canEditDocument && action !== "comment" ? draft : undefined,
       request: {
-        instruction: skill.id ? writingSkillInstruction(t, skill, action) : instruction.trim(),
+        instruction: skillDraft
+          ? savedSkillInstruction(t, skillDraft, action)
+          : skill.custom
+            ? savedSkillInstruction(t, skill.custom, action, skill.instruction)
+            : skill.builtin
+              ? writingSkillInstruction(
+                  t,
+                  { id: skill.builtin, instruction: skill.instruction },
+                  action,
+                )
+              : instruction.trim(),
         preferences: preferences.request,
         selectedText: capacity.plan.selectedText,
         taskContext: capacity.plan.contexts[0],
         history: history.length ? history : undefined,
-        responseFormat: action === "comment" || folderDocuments ? undefined : "replacement",
+        responseFormat:
+          (skillDraft?.format === "draft" ||
+            (action === "comment" && skill.custom?.format === "draft")) &&
+          !folderDocuments
+            ? "draft"
+            : action === "comment" || folderDocuments
+              ? undefined
+              : "replacement",
         folderDocuments,
         folderWriteTargets: folderBatch ? writeTargets : undefined,
       },
@@ -1483,13 +1661,15 @@ function Composer({
     await runTask(
       task,
       recipient,
-      () => {
-        setInstruction("");
-        setActionOverride(null);
-        setAllowedFolder(null);
-        setFolderAuthorization(undefined);
-        callLimit.setValue("");
-      },
+      skillDraft
+        ? undefined
+        : () => {
+            setInstruction("");
+            setActionOverride(null);
+            setAllowedFolder(null);
+            setFolderAuthorization(undefined);
+            callLimit.setValue("");
+          },
       toolPicker.plan,
     );
   }
@@ -1533,7 +1713,8 @@ function Composer({
       recipientId: connection.id,
     };
     const editing = task.action !== "comment";
-    const fileEdit = editing && connection.kind === "agent" && connection.access === "taskCopy";
+    const fileEdit =
+      (editing || task.request.responseFormat === "draft") && isTaskCopyRecipient(connection);
     let text = "";
     let approved: NamedMaterial[] =
       task.fixedRequests?.flatMap(({ taskContext }) =>
@@ -1542,6 +1723,7 @@ function Composer({
         ),
       ) ?? [];
     let status: AttemptStatus;
+    let trialReply: WritingReply | undefined;
     let finalReplacement: string | undefined;
     let folderChanges: Turn["folderChanges"];
     let ignoredChanges: boolean | undefined;
@@ -1554,11 +1736,16 @@ function Composer({
     setAttempt({ ...entry, approved, status: "working", partial: "" });
 
     const taskTitle = title || submitted.instruction;
-    pending.current = submitted;
-    if (temporary) {
+    if (task.trial) {
+      setTrialResult(undefined);
+    } else if (temporary) {
+      pending.current = submitted;
       setTitle(taskTitle);
-    } else if (title) persist();
-    else {
+    } else if (title) {
+      pending.current = submitted;
+      persist();
+    } else {
+      pending.current = submitted;
       try {
         const record = snapshot(taskTitle);
         await writeTaskCheckpoint(platform.writingTasks, () =>
@@ -1582,7 +1769,7 @@ function Composer({
     }
     let sentContext = submitted.context;
     try {
-      if (temporary && connection.kind === "agent") {
+      if (!task.trial && temporary && connection.kind === "agent") {
         temporaryAgentCopy.current = true;
         await platform.writingTasks.createTemporary(origin.id);
       }
@@ -1601,7 +1788,7 @@ function Composer({
         recipient,
         task.searchFolder,
         {
-          taskId: origin.id,
+          taskId: task.trial ? undefined : origin.id,
           signal,
           plan: task.plan,
           callLimit: task.callLimit,
@@ -1611,6 +1798,7 @@ function Composer({
             dispatched[batch] = request;
           },
           onContext: (context) => {
+            if (task.trial) return;
             sentContext = context;
             pending.current = { ...submitted, ...pending.current, context };
             persist(taskTitle);
@@ -1621,13 +1809,15 @@ function Composer({
           },
           onPause: (completed) => {
             text = completed;
-            pending.current = {
-              ...submitted,
-              context: sentContext,
-              partial: completed,
-              toolOutcome: toolApproval.result(),
-            };
-            persist(taskTitle);
+            if (!task.trial) {
+              pending.current = {
+                ...submitted,
+                context: sentContext,
+                partial: completed,
+                toolOutcome: toolApproval.result(),
+              };
+              persist(taskTitle);
+            }
             setAttempt({ ...entry, approved, status: "paused", partial: completed });
           },
           onResume: (decision, completed) => {
@@ -1643,10 +1833,12 @@ function Composer({
           },
         },
       );
-      text = result.text;
+      text =
+        task.request.responseFormat === "draft" ? (result.taskCopy ?? result.text) : result.text;
       ignoredChanges = result.ignoredChanges;
       status = signal.aborted ? "stopped" : replyStatus(result);
       if (
+        !task.trial &&
         status === "complete" &&
         origin.folder &&
         task.request.folderDocuments &&
@@ -1677,6 +1869,7 @@ function Composer({
           }
         }
       }
+      if (task.trial) trialReply = result;
       if (editing && status === "complete" && !task.request.folderDocuments)
         finalReplacement = replacementFromReply(result);
     } catch (problem) {
@@ -1692,6 +1885,18 @@ function Composer({
       }
     }
     if (!mounted.current) return false;
+
+    if (task.trial) {
+      setTrialResult({
+        status: signal.aborted ? "stopped" : status,
+        text: trialReply?.taskCopy ?? finalReplacement ?? text,
+        files: trialReply?.fileChanges,
+      });
+      setAttempt(attempt);
+      controller.current = null;
+      taskRunning.current = false;
+      return status === "complete" && !signal.aborted;
+    }
 
     if (!capacityRejected && !localOffline) onSavedRequest?.();
     else if (onSavedRequest) setActionOverride(task.action);
@@ -1771,6 +1976,7 @@ function Composer({
               : undefined,
           context: sentContext,
           toolOutcome: toolApproval.result(),
+          method: task.method,
           reply: rewrite ? "" : hasFinishedReply ? (replacement ?? text) : (replacement ?? ""),
           direct: task.action === "direct",
           ignoredChanges,
@@ -1851,7 +2057,7 @@ function Composer({
     : "";
   const report = useMemo(
     () =>
-      status && sendingTo
+      status && sendingTo && !attempt.task.trial
         ? {
             id: origin.id,
             tabId,
@@ -2635,6 +2841,17 @@ function Composer({
               )}
               {renderTurnContent(turn, index)}
               {renderBaselineRetry(turn)}
+              {(turn.status === "complete" || !turn.status) &&
+                (turn.reply || turn.suggestions?.length || turn.folderChanges?.length) && (
+                  <button
+                    type="button"
+                    className={buttonClass}
+                    disabled={busy || !!skillDraft}
+                    onClick={() => startSkillDraft(turn)}
+                  >
+                    {t("writing.skill.saveAs")}
+                  </button>
+                )}
               {turn.alternativeTo && turn.id && turn.status === "complete" && (
                 <button
                   type="button"
@@ -2794,7 +3011,30 @@ function Composer({
         </p>
       )}
       {saveFailed && <p role="alert">{t("writing.tasks.saveFailed")}</p>}
-      {!sidebar && turns.length > 0 && !attempt?.capacityRejected && !attempt?.localOffline ? (
+      {lastSavedSkill && (
+        <div className="flex flex-wrap items-center gap-2">
+          <p role="status">{t("writing.skill.saved", { id: lastSavedSkill.id })}</p>
+          <ExportWritingSkillButton platform={platform} skill={lastSavedSkill} />
+        </div>
+      )}
+      {skillSaveFailed && <p role="alert">{t("writing.skill.saveFailed")}</p>}
+      {skillDraft && (
+        <WritingSkillEditor
+          draft={skillDraft}
+          onChange={(draft) => {
+            setSkillDraft(draft);
+            setTrialResult(undefined);
+          }}
+          onSave={() => void saveSkill()}
+          onCancel={finishSkillDraft}
+          saving={savingSkill || busy}
+        />
+      )}
+      {!sidebar &&
+      turns.length > 0 &&
+      !skillDraft &&
+      !attempt?.capacityRejected &&
+      !attempt?.localOffline ? (
         <button
           type="button"
           className={`${buttonClass} self-start`}
@@ -2814,37 +3054,34 @@ function Composer({
               pendingApproval || materialRequests.paused ? "hidden" : "flex min-w-0 flex-col gap-2"
             }
           >
-            <label className="grid gap-1">
-              {t("agent.instruction")}
-              <input
-                ref={input}
-                className={fieldClass}
-                placeholder={t("writing.skill.placeholder")}
-                value={instruction}
-                onChange={(event) => updateInstruction(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
-                  const suggestion = skill.suggestions?.length === 1 && skill.suggestions[0];
-                  if (suggestion) {
-                    event.preventDefault();
-                    chooseSkill(suggestion);
-                  }
-                }}
+            {!skillDraft && (
+              <label className="grid gap-1">
+                {t("agent.instruction")}
+                <input
+                  ref={input}
+                  className={fieldClass}
+                  placeholder={t("writing.skill.placeholder")}
+                  value={instruction}
+                  onChange={(event) => updateInstruction(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+                    const suggestion = skill.suggestions?.length === 1 && skill.suggestions[0];
+                    if (suggestion) {
+                      event.preventDefault();
+                      chooseSkill(suggestion);
+                    }
+                  }}
+                />
+              </label>
+            )}
+            {!skillDraft && (skill.suggestions?.length || instruction.trim() === "/") && (
+              <WritingSkillChoices
+                platform={platform}
+                skills={savedSkills.skills}
+                suggestions={skill.suggestions ?? []}
+                onChoose={chooseSkill}
+                showImport={instruction.trim() === "/"}
               />
-            </label>
-            {!!skill.suggestions?.length && (
-              <fieldset aria-label={t("writing.skill.list")} className="flex flex-wrap gap-2">
-                {skill.suggestions.map((id) => (
-                  <button
-                    key={id}
-                    type="button"
-                    className={buttonClass}
-                    onClick={() => chooseSkill(id)}
-                  >
-                    /{id} · {t(`writing.skill.${id}`)}
-                  </button>
-                ))}
-              </fieldset>
             )}
             <div className="flex flex-wrap items-end gap-2">
               <label className="grid gap-1">
@@ -2884,7 +3121,7 @@ function Composer({
                   }}
                 >
                   {(origin.folder ? (["folder"] as const) : scopes).map((id) => (
-                    <option key={id} value={id} disabled={id === "selection" && !origin.text}>
+                    <option key={id} value={id} disabled={id === "selection" && !selectionText}>
                       {t(`writing.scope.${id}`)}
                     </option>
                   ))}
@@ -2927,12 +3164,18 @@ function Composer({
                 </select>
               </label>
             </div>
-            {skill.id && (
+            {!skillDraft && skill.id && (
               <WritingSkillPlan
-                id={skill.id}
+                builtin={skill.builtin}
+                custom={skill.custom}
                 folder={skillFolder}
                 action={action}
                 preference={skillAction}
+                controls={
+                  skill.custom && (
+                    <ExportWritingSkillButton platform={platform} skill={skill.custom} />
+                  )
+                }
               />
             )}
             {recipient && renderAgentAccess(recipient)}
@@ -3034,7 +3277,8 @@ function Composer({
                 folderFileCount={folderCopy ? (folderTargets?.size ?? 0) : undefined}
               />
             )}
-            {turns.length > 0 && (
+            {savedSkills.failed && <p role="alert">{t("writing.skill.loadFailed")}</p>}
+            {turns.length > 0 && !skill.custom && !skillDraft && (
               <label className="flex items-start gap-2 text-xs">
                 <input
                   type="checkbox"
@@ -3065,10 +3309,12 @@ function Composer({
               >
                 {toolPicker.plan?.exact
                   ? t("mcp.send", {
-                      send: sendLabel,
+                      send: skillDraft ? t("writing.skill.trial", { send: sendLabel }) : sendLabel,
                       effect: t(`mcp.effect.${toolPicker.plan.effect}`),
                     })
-                  : sendLabel}
+                  : skillDraft
+                    ? t("writing.skill.trial", { send: sendLabel })
+                    : sendLabel}
               </button>
               <button type="button" className={buttonClass} onClick={onSettings}>
                 {t("writing.manage")}
@@ -3076,6 +3322,22 @@ function Composer({
             </div>
           </fieldset>
         </form>
+      )}
+      {skillDraft && trialResult && (
+        <fieldset className="min-w-0 space-y-2 rounded border border-(--mint-border) p-2">
+          <legend>{t("writing.skill.trialResult")}</legend>
+          <p role="status">{t(`writing.task.${trialResult.status}`)}</p>
+          <pre className="max-h-40 overflow-auto whitespace-pre-wrap wrap-anywhere">
+            {trialResult.text}
+          </pre>
+          {trialResult.files?.map(({ path, text }) => (
+            <details key={path}>
+              <summary>{path}</summary>
+              <pre className="max-h-40 overflow-auto whitespace-pre-wrap wrap-anywhere">{text}</pre>
+            </details>
+          ))}
+          <WritingToolOutcome outcome={toolApproval.outcome} />
+        </fieldset>
       )}
       {pause && <WritingCallPause pause={pause} usage={materialRequests.usage} />}
       {toolApproval.pending && (

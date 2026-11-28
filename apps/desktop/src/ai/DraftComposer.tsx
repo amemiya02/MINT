@@ -14,7 +14,18 @@ import { MaterialRequestNotice, useMaterialRequests } from "./MaterialRequest.ts
 import { useModelVision, VisionControl, type VisionTarget } from "./ModelVision.tsx";
 import { isLocalModelOffline, modelEndpoint, modelWritingSender } from "./model.ts";
 import { recordWritingResult } from "./record-writing-result.ts";
+import {
+  ExportWritingSkillButton,
+  useSavedWritingSkills,
+  WritingSkillChoices,
+} from "./SavedWritingSkills.tsx";
 import { SourcePassageReview } from "./SourcePassageReview.tsx";
+import {
+  savedSkillInstruction,
+  type WritingMethod,
+  type WritingSkillTool,
+  writingSkillMaterials,
+} from "./saved-writing-skills.ts";
 import {
   draftText,
   hasSourceMaterials,
@@ -34,6 +45,7 @@ import {
   useWritingPreferences,
   WritingPreferences,
 } from "./WritingPreferences.tsx";
+import { WritingSkillDetails } from "./WritingSkillPlan.tsx";
 import { useWritingTask, WritingTaskMaterials } from "./WritingTasks.tsx";
 import {
   useWritingToolPicker,
@@ -64,6 +76,7 @@ import {
   type WritingRequest,
   type WritingSender,
 } from "./writing-sender.ts";
+import { readWritingSkill } from "./writing-skills.ts";
 
 const field =
   "w-full rounded-md border border-(--mint-border) bg-(--mint-bg) px-2 py-1 focus-visible:outline-2 focus-visible:outline-(--mint-accent)";
@@ -82,6 +95,7 @@ interface DraftConnection {
 interface DraftTask {
   readonly id: string;
   readonly title: string;
+  readonly method: WritingMethod;
   readonly request: WritingRequest;
   readonly plan: MaterialPlan;
   readonly folder: string | null;
@@ -154,6 +168,21 @@ export function DraftComposer({
   const [showAppliedReply, setShowAppliedReply] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
   const named = useNamedMaterials();
+  const library = useSavedWritingSkills(platform);
+  const draftSkills = library.skills.filter(
+    ({ format, scope, action }) =>
+      format === "draft" && scope === "instruction" && action === "direct",
+  );
+  const skill = readWritingSkill(instruction, draftSkills, false);
+
+  function chooseSkill(value: string) {
+    const next = readWritingSkill(value, draftSkills, false);
+    if (next.custom && skill.id !== next.id) {
+      setAllowedFolder(null);
+      toolPicker.changeAddress("");
+    }
+    setInstruction(value);
+  }
   const [allowedFolder, setAllowedFolder] = useState<string | null>(null);
   const searchFolder = allowedFolder === folder ? folder : null;
   const materialRequests = useMaterialRequests(platform.sendMcpRequest);
@@ -235,6 +264,8 @@ export function DraftComposer({
     recipients !== null &&
     preferences.available &&
     !!instruction.trim() &&
+    !skill.suggestions?.length &&
+    instruction.trim() !== "/" &&
     !toolPicker.incomplete &&
     (!showCallPlan || !callLimit.invalid) &&
     !named.loading &&
@@ -271,13 +302,34 @@ export function DraftComposer({
         }
       : connections.find(({ id }) => id === selected);
     if (!connection) return;
+    const tools: WritingSkillTool[] = named.entries.some(({ tool }) => tool === "zotero")
+      ? [{ kind: "zotero" }]
+      : [];
+    const chosenTool = toolPicker.plan;
+    if (chosenTool)
+      tools.push({ kind: "mcp", name: chosenTool.tool.name, effect: chosenTool.effect });
+    const prompt = skill.custom
+      ? savedSkillInstruction(t, skill.custom, "direct", skill.instruction)
+      : instruction.trim();
     await runDraft(
       {
         id: crypto.randomUUID(),
         title: instruction.trim(),
+        method: {
+          scope: "instruction",
+          action: "direct",
+          format: "draft",
+          tools,
+          materials: writingSkillMaterials(named.entries.map(({ material }) => material)),
+          folderSearch: searchFolder ? true : undefined,
+          steps: skill.custom
+            ? [skill.custom.steps, skill.instruction].filter(Boolean).join("\n")
+            : undefined,
+          result: skill.custom?.result,
+        },
         plan: capacity.plan,
         request: {
-          instruction: t("draft.prompt", { instruction: instruction.trim() }),
+          instruction: t("draft.prompt", { instruction: prompt }),
           preferences: preferences.request,
           taskContext: capacity.plan.contexts[0],
           responseFormat: "draft",
@@ -323,6 +375,7 @@ export function DraftComposer({
         id: task.id,
         turn: {
           instruction: task.title,
+          method: task.method,
           preferences: task.request.preferences,
           reply: text,
           context: sentContext,
@@ -626,9 +679,29 @@ export function DraftComposer({
             ref={input}
             className={field}
             value={instruction}
-            onChange={(event) => setInstruction(event.target.value)}
+            onChange={(event) => chooseSkill(event.target.value)}
+            placeholder={draftSkills.length ? t("writing.skill.placeholder") : undefined}
           />
         </label>
+        {!!skill.suggestions?.length && (
+          <WritingSkillChoices
+            platform={platform}
+            skills={draftSkills}
+            suggestions={skill.suggestions}
+            onChoose={(id) => {
+              chooseSkill(`/${id} `);
+              input.current?.focus();
+            }}
+            showImport={false}
+          />
+        )}
+        {skill.custom && (
+          <fieldset className="min-w-0 space-y-1 rounded border border-(--mint-border) p-2">
+            <legend>{t("writing.skill.plan")}</legend>
+            <WritingSkillDetails draft={skill.custom} />
+            <ExportWritingSkillButton platform={platform} skill={skill.custom} />
+          </fieldset>
+        )}
         {(!!recipients?.length || unavailable) && (
           <label className="block">
             {t("draft.connection")}

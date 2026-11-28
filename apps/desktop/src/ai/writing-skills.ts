@@ -1,4 +1,5 @@
 import type { Translate } from "../i18n/index.ts";
+import type { SavedWritingSkill } from "./saved-writing-skills.ts";
 
 const skillIds = ["copyedit", "clarify"] as const;
 export type WritingSkillId = (typeof skillIds)[number];
@@ -6,13 +7,30 @@ export type WritingSkillId = (typeof skillIds)[number];
 export const writingActions = ["comment", "preview", "direct"] as const;
 export type WritingAction = (typeof writingActions)[number];
 
-export function readWritingSkill(instruction: string) {
+export function readWritingSkill(
+  instruction: string,
+  saved: readonly SavedWritingSkill[] = [],
+  includeBuiltIns = true,
+) {
   const text = instruction.trim();
   const [command = "", ...rest] = text.split(/\s+/);
-  const id = skillIds.find((id) => command === `/${id}`);
-  if (id) return { id, instruction: text.slice(id.length + 1).trim() };
-  const suggestions = rest.length ? [] : skillIds.filter((id) => `/${id}`.startsWith(command));
-  return { suggestions: command.startsWith("/") ? suggestions : [] };
+  const builtIns = includeBuiltIns ? skillIds : [];
+  const builtin = builtIns.find((id) => command === `/${id}`);
+  const custom = saved.find(({ id }) => command === `/${id}`);
+  const id = builtin ?? custom?.id;
+  if (id) return { id, builtin, custom, instruction: text.slice(id.length + 1).trim() };
+  const suggestions =
+    rest.length || !command.startsWith("/")
+      ? []
+      : [...builtIns, ...saved.map(({ id }) => id)].filter((id) => `/${id}`.startsWith(command));
+  return { suggestions };
+}
+
+export function writingSkillName(t: Translate, id: string, saved: readonly SavedWritingSkill[]) {
+  const builtin = skillIds.find((candidate) => candidate === id);
+  return builtin
+    ? t(`writing.skill.${builtin}`)
+    : (saved.find((skill) => skill.id === id)?.name ?? id);
 }
 
 export function writingSkillSteps(t: Translate, id: WritingSkillId) {
