@@ -156,6 +156,19 @@ export async function applyFolderChange(
   return "applied";
 }
 
+export interface FolderMutation {
+  readonly index: number;
+  readonly from: string;
+  readonly to: string;
+  readonly before?: string;
+  readonly after?: string;
+}
+
+export type FolderCheckpoint = (
+  changes: readonly FolderChange[],
+  mutation: FolderMutation,
+) => Promise<void>;
+
 /** Execute only pending authorized changes, in dependency order. */
 export async function writeFolderBatch(
   platform: Platform,
@@ -163,6 +176,7 @@ export async function writeFolderBatch(
   root: string,
   proposals: readonly FolderChange[],
   signal?: AbortSignal,
+  checkpoint?: FolderCheckpoint,
 ): Promise<FolderChange[]> {
   const changes = [...proposals];
   const applied = new Set(
@@ -207,15 +221,14 @@ export async function writeFolderBatch(
         continue;
       }
       if (signal?.aborted) break;
-      const written = await store.writeFolderEdit(
-        root,
-        { from: source, to: joinPath(root, path), before: disk, after: text },
-        (editor) => {
-          if (before === undefined || editor.getText() !== before) return false;
-          replaceFolderText(editor, before, text);
-          return true;
-        },
-      );
+      const edit = { from: source, to: joinPath(root, path), before: disk, after: text };
+      await checkpoint?.(changes, { ...edit, index });
+      if (signal?.aborted) break;
+      const written = await store.writeFolderEdit(root, edit, (editor) => {
+        if (before === undefined || editor.getText() !== before) return false;
+        replaceFolderText(editor, before, text);
+        return true;
+      });
       changes[index] = written
         ? { ...change, status: "applied", result: undefined, current: undefined }
         : { ...change, result: "conflict" };
@@ -241,6 +254,7 @@ export async function revertFolderBatch(
   root: string,
   proposals: readonly FolderChange[],
   position?: number,
+  checkpoint?: FolderCheckpoint,
 ): Promise<FolderChange[]> {
   const changes = [...proposals];
   const pending = changes.flatMap(({ status }, index) =>
@@ -266,7 +280,10 @@ export async function revertFolderBatch(
     const [index] = pending.splice(ready, 1);
     if (index === undefined) break;
     const change = changes[index];
-    if (change) changes[index] = await revertFolderChange(platform, store, root, change);
+    if (change)
+      changes[index] = await revertFolderChange(platform, store, root, change, (edit) =>
+        checkpoint?.(changes, { ...edit, index }),
+      );
   }
   return changes;
 }
@@ -276,6 +293,7 @@ async function revertFolderChange(
   store: TabStore,
   root: string,
   change: FolderChange,
+  checkpoint: (edit: Omit<FolderMutation, "index">) => Promise<void> | undefined,
 ): Promise<FolderChange> {
   const { path, from, before, text } = change;
   const source = joinPath(root, path);
@@ -299,15 +317,13 @@ async function revertFolderChange(
           : reverseDocumentEdit(text, before, current);
     if (diskAfter === null || liveAfter === null)
       return { ...change, undoResult: "conflict", current: diskAfter === null ? disk : current };
-    const reverted = await store.writeFolderEdit(
-      root,
-      { from: source, to: joinPath(root, from ?? path), before: disk, after: diskAfter },
-      (editor) => {
-        if (editor.getText() !== current) return false;
-        if (liveAfter !== undefined) replaceFolderText(editor, current, liveAfter);
-        return true;
-      },
-    );
+    const edit = { from: source, to: joinPath(root, from ?? path), before: disk, after: diskAfter };
+    await checkpoint(edit);
+    const reverted = await store.writeFolderEdit(root, edit, (editor) => {
+      if (editor.getText() !== current) return false;
+      if (liveAfter !== undefined) replaceFolderText(editor, current, liveAfter);
+      return true;
+    });
     return reverted
       ? { ...change, status: "reverted", undoResult: undefined, current: undefined }
       : { ...change, undoResult: "conflict", current };

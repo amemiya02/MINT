@@ -175,3 +175,108 @@ test("a draft request stays local if the author saves the empty tab first", asyn
   expect(requests).toEqual([]);
   expect(await readFile(page, path)).toBe("");
 });
+
+test("closing a temporary draft keeps the saved manuscript and clears its writing task", async ({
+  page,
+}) => {
+  const address = "https://private-draft.example.test/v1";
+  const manuscript = "A private draft.";
+  const instruction = "Draft from the private interview.";
+  const path = "/notes/private.md";
+  await page.route(`${address}/chat/completions`, (route) =>
+    route.fulfill({
+      json: { choices: [{ message: { content: manuscript }, finish_reason: "stop" }] },
+    }),
+  );
+  await launch(page, { locale: "en-US", directories: ["/notes"], saveDialogResults: [path] });
+  await page.getByRole("button", { name: "Draft with AI" }).click();
+  const composer = page.getByRole("form", { name: "Draft with AI" });
+  await composer.getByLabel("API address").fill(address);
+  await composer.getByLabel("Model name").fill("fixture");
+  await composer.getByLabel("Temporary session").check({ timeout: 3000 });
+  await composer.getByLabel("Drafting instruction").fill(instruction);
+  await composer.getByRole("button", { name: "Generate draft" }).click();
+  await expect(page.locator(".cm-content")).toHaveText(manuscript);
+  await runMenuItem(page, "file.save");
+  await expect.poll(() => readFile(page, path)).toBe(manuscript);
+  await page.getByRole("button", { name: "Close temporary session" }).click();
+  const close = page.getByRole("dialog", { name: "Close temporary session" });
+  await close.getByRole("button", { name: "Close temporary session" }).click();
+  await expect(close).toBeHidden();
+  await runMenuItem(page, "edit.allWritingTasks");
+  await expect(page.getByRole("dialog", { name: "All writing tasks" })).toBeVisible();
+  await expect(page.getByRole("button", { name: instruction, exact: true })).toHaveCount(0);
+  expect(await readFile(page, path)).toBe(manuscript);
+});
+
+test("retry previews and reuses the approved follow-up excerpt after a disconnect", async ({
+  page,
+}) => {
+  const first = "https://first-draft.example.test/v1/chat/completions";
+  const second = "https://second-draft.example.test/v1/chat/completions";
+  const excerpt = "An approved excerpt from the interview transcript.";
+  const received: unknown[] = [];
+  let firstCalls = 0;
+  await page.route(first, async (route) => {
+    const body = route.request().postDataJSON();
+    firstCalls++;
+    if (firstCalls === 1) {
+      await route.fulfill({
+        json: {
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  requestMaterial: { name: "Interview", purpose: "Verify the quotation" },
+                }),
+              },
+              finish_reason: "stop",
+            },
+          ],
+        },
+      });
+    } else {
+      received.push(JSON.parse(body.messages.at(-1).content));
+      await route.abort();
+    }
+  });
+  await page.route(second, (route) => {
+    received.push(JSON.parse(route.request().postDataJSON().messages.at(-1).content));
+    return route.fulfill({ json: { choices: [{ message: { content: "A sourced draft." } }] } });
+  });
+  await launch(page, { locale: "en-US" });
+  await page.keyboard.press("ControlOrMeta+,");
+  const settings = page.getByRole("dialog", { name: "Settings" });
+  await settings.getByRole("button", { name: "Model connections" }).click();
+  for (const [name, address] of [
+    ["First model", first],
+    ["Second model", second],
+  ] as const) {
+    await settings.getByLabel("Connection name").fill(name);
+    await settings.getByLabel("API address").fill(address);
+    await settings.getByLabel("Model name").fill("fixture");
+    await settings.getByRole("button", { name: "Use for this launch" }).click();
+    await expect(settings.getByRole("region", { name })).toBeVisible();
+  }
+  await settings.getByRole("button", { name: "Close", exact: true }).click();
+  await page.getByRole("button", { name: "Draft with AI" }).click();
+  const draft = page.getByRole("form", { name: "Draft with AI" });
+  await draft.getByLabel("Writing connection").selectOption({ label: "First model" });
+  await draft.getByLabel("Drafting instruction").fill("Write from the interview.");
+  await draft.getByRole("button", { name: "Generate draft" }).click();
+  const approval = draft.getByRole("group", { name: "Additional material requested" });
+  await approval.getByText("Add files or paste text").click();
+  await approval.getByRole("textbox", { name: "Pasted material" }).fill(excerpt);
+  await approval.getByRole("button", { name: "Add pasted text" }).click();
+  await approval.getByRole("radio", { name: "Pasted text" }).check();
+  await approval.getByRole("button", { name: "Allow once" }).click();
+  await draft.getByLabel("Retry connection").selectOption({ label: `Second model · ${second}` });
+  const retry = draft.getByRole("region", { name: "Material send plan" });
+  await retry.getByText("Pasted text", { exact: true }).click();
+  await expect(retry.getByText(excerpt, { exact: true })).toBeVisible();
+  expect(received).toHaveLength(1);
+  await draft.getByRole("button", { name: "Retry with selected connection" }).click();
+  await expect(page.locator(".cm-content")).toHaveText("A sourced draft.");
+  expect(received).toHaveLength(2);
+  expect(received[1]).toEqual(received[0]);
+});

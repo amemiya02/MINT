@@ -104,6 +104,7 @@ export function useMaterialRequests(sendMcpRequest?: McpTransport) {
         readonly tool?: WritingToolPlan;
         readonly callLimit?: number;
         readonly fixedRequests?: readonly WritingRequest[];
+        readonly replayRequests?: readonly (WritingRequest | undefined)[];
         readonly onDispatch?: (request: WritingRequest, batch: number) => void;
         readonly onContext?: (context: TaskContext | undefined) => void;
         readonly onApproval?: (text: string) => void;
@@ -119,6 +120,7 @@ export function useMaterialRequests(sendMcpRequest?: McpTransport) {
         taskId,
         plan,
         fixedRequests,
+        replayRequests,
         onDispatch,
         onContext,
         onApproval,
@@ -186,7 +188,8 @@ export function useMaterialRequests(sendMcpRequest?: McpTransport) {
           contexts.length === 1
             ? request.instruction
             : `${request.instruction}\n\nThis is material batch ${index + 1} of ${contexts.length}. Answer using this batch as source. Write only the part supported by this batch, without a repeated introduction or conclusion. MINT combines the parts in order.`;
-        let outbound = fixedRequests?.[index] ?? { ...request, instruction, taskContext };
+        const replay = fixedRequests?.[index] ?? replayRequests?.[index];
+        let outbound = replay ?? { ...request, instruction, taskContext };
         const initial = outbound;
         while (true) {
           if (signal?.aborted || id !== sequence.current) throw "stopped";
@@ -216,7 +219,7 @@ export function useMaterialRequests(sendMcpRequest?: McpTransport) {
             }
             return options?.mapBatchReply?.(reply, outbound.taskContext) ?? reply;
           }
-          if (fixedRequests) throw "unresolvedMaterialRequest";
+          if (replay) throw "unresolvedMaterialRequest";
           if (signal?.aborted) throw "stopped";
           const previous = outbound.taskContext?.materialDecisions ?? [];
           if (id !== sequence.current || previous.some(({ name }) => name === extra.name))

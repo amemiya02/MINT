@@ -137,7 +137,7 @@ printf verified > check-inside &&
     if stopped.load(Ordering::Relaxed) {
         return Err("stopped".to_owned());
     }
-    let mut child = command.spawn().map_err(|_| unavailable())?;
+    let mut child = super::AgentProcess::spawn(&mut command).map_err(|_| unavailable())?;
     let started = Instant::now();
     loop {
         match child.try_wait() {
@@ -155,7 +155,6 @@ printf verified > check-inside &&
                 std::thread::sleep(Duration::from_millis(40));
             }
             _ => {
-                super::stop_child(&mut child, true);
                 return Err(if stopped.load(Ordering::Relaxed) {
                     "stopped".to_owned()
                 } else {

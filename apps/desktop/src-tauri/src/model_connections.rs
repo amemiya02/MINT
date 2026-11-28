@@ -11,7 +11,7 @@ use tauri::{Manager, WebviewWindow};
 use uuid::Uuid;
 
 use crate::app_data;
-use crate::model::{completion_url, require_document_window, ModelError};
+use crate::model::{completion_path, completion_url, require_document_window, ModelError};
 
 const REGISTRY: &str = "connections.json";
 const SERVICE: &str = "io.github.amemiya02.mint.model";
@@ -49,6 +49,8 @@ struct Connection {
     #[serde(flatten)]
     summary: Summary,
     model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    retired_address_hash: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -80,10 +82,27 @@ impl Connections {
 
     fn read_registry(&self) -> Result<Vec<Connection>, ModelError> {
         let text = app_data::read(&self.directory, REGISTRY).map_err(|_| UNAVAILABLE)?;
-        match text {
-            Some(text) => serde_json::from_str(&text).map_err(|_| UNAVAILABLE),
-            None => Ok(Vec::new()),
+        let Some(text) = text else {
+            return Ok(Vec::new());
+        };
+        let mut entries: Vec<Connection> = serde_json::from_str(&text).map_err(|_| UNAVAILABLE)?;
+        let mut changed = false;
+        for entry in &mut entries {
+            let Some(mut address) = Url::parse(&entry.summary.address)
+                .ok()
+                .filter(|address| address.query().is_some())
+            else {
+                continue;
+            };
+            entry.retired_address_hash = Some(address_hash(&completion_path(address.clone())));
+            address.set_query(None);
+            entry.summary.address = address.into();
+            changed = true;
         }
+        if changed {
+            self.write_registry(&entries)?;
+        }
+        Ok(entries)
     }
 
     fn write_registry(&self, entries: &[Connection]) -> Result<(), ModelError> {
@@ -137,6 +156,7 @@ impl Connections {
                 }),
             },
             model: model.to_owned(),
+            retired_address_hash: None,
         };
         let summary = metadata.summary.clone();
         let mut session = self.session.lock().map_err(|_| UNAVAILABLE)?;
@@ -183,8 +203,12 @@ impl Connections {
         };
         let entry = entries.remove(index);
         if entry.summary.key_suffix.is_some() {
-            let endpoint = completion_url(&entry.summary.address)?;
-            remove_credential(&credential(id, &endpoint)?)?;
+            let credential = if let Some(hash) = &entry.retired_address_hash {
+                credential_by_hash(id, hash)?
+            } else {
+                credential(id, &completion_url(&entry.summary.address)?)?
+            };
+            remove_credential(&credential)?;
         }
         // Delete the credential first. A failed metadata write can be retried,
         // and any send from a stale card fails rather than sending anonymously.
@@ -202,6 +226,9 @@ impl Connections {
             .into_iter()
             .find(|entry| entry.summary.id == id)
             .ok_or(ModelError::Request("connectionMissing"))?;
+        if entry.retired_address_hash.is_some() {
+            return Err(ModelError::Request("invalidAddress"));
+        }
         let url = completion_url(&entry.summary.address)?;
         let key = if entry.summary.key_suffix.is_some() {
             Some(
@@ -219,10 +246,16 @@ impl Connections {
     }
 }
 
+fn address_hash(endpoint: &Url) -> String {
+    format!("{:x}", Sha256::digest(endpoint.as_str()))
+}
+
 fn credential(id: &str, endpoint: &Url) -> Result<keyring::Entry, ModelError> {
-    // Bind the credential to the recipient even if its metadata changes on disk.
-    let address_hash = Sha256::digest(endpoint.as_str());
-    keyring::Entry::new(SERVICE, &format!("{id}-{address_hash:x}")).map_err(|_| CREDENTIAL_STORE)
+    credential_by_hash(id, &address_hash(endpoint))
+}
+
+fn credential_by_hash(id: &str, hash: &str) -> Result<keyring::Entry, ModelError> {
+    keyring::Entry::new(SERVICE, &format!("{id}-{hash}")).map_err(|_| CREDENTIAL_STORE)
 }
 
 fn remove_credential(entry: &keyring::Entry) -> Result<(), ModelError> {

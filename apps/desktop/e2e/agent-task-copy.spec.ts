@@ -208,3 +208,35 @@ test("a task-copy draft preserves its Markdown and keeps approved source provena
   await expect(review.getByRole("region", { name: "Source comparison" })).toContainText(revised);
   expect(requests).toHaveLength(3);
 });
+
+test("an interrupted Agent copy remains a proposal even in direct mode", async ({ page }) => {
+  const executable = "/fixtures/codex";
+  const path = "/notes/interrupted.md";
+  const original = "Original sentence.";
+  const revised = "Short sentence.";
+  let calls = 0;
+  await page.route("**/__test/task-copy", (route) => {
+    calls++;
+    return route.fulfill({
+      json:
+        calls === 1
+          ? { text: "", taskCopy: "We are reviewing the draft." }
+          : { text: "More work was interrupted.", taskCopy: revised, finishReason: "interrupted" },
+    });
+  });
+  await launch(page, {
+    locale: "en-US",
+    files: { [path]: original, [settingsPath]: '{"autosave":false}' },
+    openedPaths: [{ path, kind: "file" }],
+    externalAgent: { executables: [executable], endpoint: "/__test/task-copy" },
+  });
+  await configureTaskCopy(page, executable);
+  const composer = await sendDocumentEdit(page, "Apply directly");
+  await expect(composer.getByText("More work was interrupted.", { exact: true })).toBeVisible();
+  await expect(page.locator(".cm-content")).toHaveText(original);
+  expect(await readFile(page, path)).toBe(original);
+  await composer.getByRole("button", { name: "Apply proposed edit" }).click();
+  await expect(page.locator(".cm-content")).toHaveText(revised);
+  await runMenuItem(page, "file.save");
+  await expect.poll(() => readFile(page, path)).toBe(revised);
+});

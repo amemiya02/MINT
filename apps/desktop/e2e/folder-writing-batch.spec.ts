@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import type { SavedWritingTask } from "../src/ai/writing-tasks.ts";
 import type { MemoryPlatform } from "../src/platform/memory.ts";
 import {
   externalRemove,
@@ -98,6 +99,19 @@ test("an authorized folder batch continues after a collision and retries only un
   await expect(writeList.getByRole("listitem")).toHaveText(targets);
   expect(requestPaths).toEqual([]);
   await expect(send).toBeEnabled();
+  // Capture what a restarted app has after the native Platform has committed
+  // the first successful file and before its result reaches the composer.
+  const checkpoint = await page.evaluateHandle(() => {
+    const platform = (window as unknown as { __MINT_MEMORY_PLATFORM__: MemoryPlatform })
+      .__MINT_MEMORY_PLATFORM__;
+    const original = platform.applyFolderDocumentEdit.bind(platform);
+    const snapshot: { tasks?: SavedWritingTask[] } = {};
+    platform.applyFolderDocumentEdit = async (root, edit) => {
+      await original(root, edit);
+      if (!snapshot.tasks) snapshot.tasks = await platform.writingTasks.list(null, true);
+    };
+    return snapshot;
+  });
   await send.click();
 
   const result = assistant.getByRole("region", { name: "Folder changes" });
@@ -132,6 +146,43 @@ test("an authorized folder batch continues after a collision and retries only un
   expect(await readFile(page, "/book/private.md")).toBe("Read-only material\n");
   expect(await readFile(page, "/outside.md")).toBe("Outside original\n");
 
+  const interrupted = (await checkpoint.jsonValue()).tasks?.find(
+    ({ title }) => title === instruction,
+  );
+  expect(interrupted).toBeDefined();
+  if (!interrupted) throw new Error("The first write had no task checkpoint");
+  const crashContext = await browser.newContext();
+  try {
+    await crashContext.route(endpoint, (route) => {
+      requestPaths.push(undefined);
+      return route.abort();
+    });
+    const recovered = await crashContext.newPage();
+    await launch(recovered, {
+      locale: "en-US",
+      appData: { [`ai/tasks/${interrupted.id}/review.json`]: JSON.stringify(interrupted) },
+      files: await files(page),
+      openedPaths: [
+        { path: "/book", kind: "directory" },
+        { path: "/book/draft.md", kind: "file" },
+      ],
+    });
+    await runMenuItem(recovered, "edit.allWritingTasks");
+    await recovered.getByRole("button", { name: instruction, exact: true }).click();
+    const changes = recovered.getByRole("region", { name: "Folder changes" });
+    await expect(changes.getByRole("group", { name: "Modify draft.md" })).toContainText("Written");
+    await changes.getByRole("button", { name: "Revert all task edits" }).click();
+    await expect(changes.getByRole("group", { name: "Modify draft.md" })).toContainText(
+      "Edit reverted",
+    );
+    expect(await readFile(recovered, "/book/draft.md")).toBe(
+      draft.replace("End.", "End. My draft note."),
+    );
+    expect(requestPaths).toEqual([targets]);
+  } finally {
+    await crashContext.close();
+  }
+
   const later = revised.replace("Revised.", "Revised. Independent author note.");
   await externalWrite(page, "/book/draft.md", later);
   await externalRemove(page, "/book/notes.md");
@@ -144,11 +195,13 @@ test("an authorized folder batch continues after a collision and retries only un
 
   await runMenuItem(page, "edit.allWritingTasks");
   await expect(page.getByRole("button", { name: instruction, exact: true })).toBeVisible();
-  const appData = await page.evaluate(() =>
-    Object.fromEntries(
-      (window as unknown as { __MINT_MEMORY_PLATFORM__: MemoryPlatform }).__MINT_MEMORY_PLATFORM__
-        .appData,
-    ),
+  const savedTasks = await page.evaluate(() =>
+    (
+      window as unknown as { __MINT_MEMORY_PLATFORM__: MemoryPlatform }
+    ).__MINT_MEMORY_PLATFORM__.writingTasks.list(null, true),
+  );
+  const appData = Object.fromEntries(
+    savedTasks.map((task) => [`ai/tasks/${task.id}/review.json`, JSON.stringify(task)]),
   );
   const restarted = await browser.newContext();
   try {

@@ -196,6 +196,7 @@ export function modelEndpoint(address: string): string {
     url.username ||
     url.password ||
     url.hash ||
+    url.href.includes("?") ||
     (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopbackHost(url.hostname)))
   ) {
     throw "invalidAddress";

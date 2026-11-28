@@ -1,3 +1,5 @@
+export { rawLines as sourceLines } from "../tabs/line-diff.ts";
+
 import { type MaterialRange, materialImageLimit, type NamedMaterial } from "./writing-sender.ts";
 
 type Pdf = Awaited<ReturnType<typeof import("unpdf").getDocumentProxy>>;
@@ -141,10 +143,5 @@ function imageMaterial(
   if (!image.startsWith("data:image/png;base64,") || image.length > materialImageLimit) {
     throw new Error("materialTooLarge");
   }
-  return { name, range, format: "image", text: "", image };
-}
-
-export function sourceLines(text: string) {
-  // Keep line endings, including the final newline, in outbound excerpts.
-  return text.match(/[^\r\n]*(?:\r\n|\r|\n)|[^\r\n]+$/g) ?? [];
+  return { name, range, format: "image", text: "", image, imageId: crypto.randomUUID() };
 }

@@ -11,6 +11,7 @@ import {
 } from "./SourceVerification.tsx";
 import { compareSource, readSourceRevision, sentSource } from "./source-comparison.ts";
 import type { SourceExcerpt, SourcePassage } from "./source-passages.ts";
+import { MaterialPreview } from "./TaskContext.tsx";
 import type { NamedMaterial, TaskContext } from "./writing-sender.ts";
 import { mapReviewRanges } from "./writing-tasks.ts";
 
@@ -105,6 +106,7 @@ export function SourcePassageReview({
     if (revisions.size === 0 && !files) return current;
     for (const { excerpts } of passages) {
       for (const excerpt of excerpts) {
+        if (excerpt.imageId) continue;
         const sent = sentSource(excerpt, context);
         const revision =
           revisions.get(sent ?? excerpt) ??
@@ -180,11 +182,13 @@ export function SourcePassageReview({
     while (ids.has(String(number))) number++;
     const reference = `[^mint-source-${number}]`;
     const notes = passage.excerpts.map((excerpt) =>
-      t("sources.citationEntry", {
-        name: citationText(materialLabel(excerpt, t)),
-        line: String(excerpt.line),
-        quote: citationText(excerpt.quote),
-      }),
+      excerpt.imageId
+        ? citationText(materialLabel(excerpt, t))
+        : t("sources.citationEntry", {
+            name: citationText(materialLabel(excerpt, t)),
+            line: String(excerpt.line),
+            quote: citationText(excerpt.quote),
+          }),
     );
     const eol = /\r\n|\n|\r/.exec(live)?.[0] ?? "\n";
     const definition = `${eol}${eol}${reference}: ${notes.join(" ")}${eol}`;
@@ -230,6 +234,14 @@ export function SourcePassageReview({
         >
           {selected.excerpts.map((excerpt, index) => {
             const revised = comparisons.get(excerpt);
+            const image = excerpt.imageId ? sentSource(excerpt, context) : undefined;
+            if (image)
+              return (
+                <figure key={excerpt.imageId} className="space-y-1 wrap-anywhere">
+                  <figcaption className="font-medium">{materialLabel(excerpt, t)}</figcaption>
+                  <MaterialPreview material={image} />
+                </figure>
+              );
             return (
               // biome-ignore lint/suspicious/noArrayIndexKey: Excerpts stay in their original order.
               <figure key={index} className="space-y-1 wrap-anywhere">

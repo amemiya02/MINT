@@ -56,7 +56,7 @@ test("each writing action can try its effective connection with sample text", as
   await settings.getByRole("button", { name: "External Agents" }).click();
   await settings.getByLabel("Codex executable").fill(agent);
   await settings.getByRole("button", { name: "Inspect Agent" }).click();
-  await settings.getByRole("button", { name: "Try example" }).click();
+  await settings.getByRole("button", { name: "Try example", exact: true }).click();
   await settings.getByRole("button", { name: "Allow and send" }).click();
   await expect(settings.getByText("Sample Agent response.", { exact: true })).toBeVisible();
   await settings.getByRole("button", { name: "External Agents" }).click();
@@ -274,4 +274,78 @@ test("inline completion retries the same excerpt once with an explicitly chosen 
   await expect(recovery.getByRole("status")).toContainText("Local model is unreachable");
   expect(receivedLocal).toHaveLength(2);
   expect(receivedCloud).toHaveLength(1);
+});
+
+test("alternate retry previews the earlier conversation that it sends", async ({ page }) => {
+  const draft = "/notes/conversation.md";
+  const question = "What is the theme of the opening?";
+  const answer = "The opening introduces the ridge.";
+  const followUp = "Where should the next paragraph go?";
+  let localRequests = 0;
+  const cloudRequests: { messages: { role: string; content: string }[] }[] = [];
+  await page.route(`${local}/chat/completions`, (route) => {
+    localRequests++;
+    return localRequests === 1
+      ? route.fulfill({ json: { choices: [{ message: { content: answer } }] } })
+      : route.abort("connectionrefused");
+  });
+  const endpoint = `${cloud}/chat/completions`;
+  await page.route(endpoint, (route) => {
+    cloudRequests.push(route.request().postDataJSON());
+    return route.fulfill({
+      json: { choices: [{ message: { content: "Continue with the trail." } }] },
+    });
+  });
+  await launch(page, {
+    locale: "en-US",
+    files: { [draft]: "Notes from the ridge." },
+    openedPaths: [{ path: draft, kind: "file" }],
+  });
+  const settings = await openSettings(page);
+  await addModels(settings);
+  await settings.getByLabel(defaults).selectOption({ label: "Local writer" });
+  await settings.getByRole("button", { name: "Close", exact: true }).click();
+  await runMenuItem(page, "edit.askAI");
+  const inline = page.getByRole("region", { name: "Ask AI", exact: true });
+  await inline.getByRole("textbox", { name: "Instruction" }).fill(question);
+  await inline.getByRole("textbox", { name: "Instruction" }).press("Enter");
+  await expect(inline.getByRole("textbox", { name: "AI reply" })).toHaveValue(answer);
+  await inline.getByRole("button", { name: "Continue in sidebar" }).click();
+  const assistant = page.getByRole("complementary", { name: "Writing Assistant" });
+  const instruction = assistant.getByRole("textbox", { name: "Instruction", exact: true });
+  await instruction.fill(followUp);
+  await instruction.press("Enter");
+  await assistant
+    .getByLabel("Retry connection")
+    .selectOption({ label: `Cloud writer · ${endpoint}` });
+  const earlier = assistant.getByText("Earlier messages to send", { exact: true });
+  await earlier.click({ timeout: 3000 });
+  const payload = assistant.locator("details").filter({
+    has: page.getByText("Earlier messages to send", { exact: true }),
+  });
+  await expect(payload.getByText(question, { exact: true })).toBeVisible();
+  await expect(payload.getByText(answer, { exact: true })).toBeVisible();
+  expect(cloudRequests).toHaveLength(0);
+  await assistant.getByRole("button", { name: "Retry with selected connection" }).click();
+  await expect.poll(() => cloudRequests.length).toBe(1);
+  expect(cloudRequests[0]?.messages).toEqual(
+    expect.arrayContaining([
+      { role: "user", content: question },
+      { role: "assistant", content: answer },
+    ]),
+  );
+});
+
+test("a model address with a query credential cannot be saved or sampled", async ({ page }) => {
+  await launch(page, { locale: "en-US" });
+  const settings = await openSettings(page);
+  await settings.getByRole("button", { name: "Model connections" }).click();
+  await settings.getByLabel("Connection name").fill("Query key fixture");
+  await settings.getByLabel("Model name").fill("fixture");
+  await settings.getByLabel("API address").fill(`${cloud}?api-key=private-fixture-key`);
+  await expect(settings.getByRole("button", { name: "Use for this launch" })).toBeDisabled();
+  await expect(settings.getByRole("button", { name: "Run sample", exact: true })).toBeDisabled();
+  await expect(settings.getByRole("region", { name: "Query key fixture" })).toHaveCount(0);
+  await settings.getByLabel("API address").fill(cloud);
+  await expect(settings.getByRole("button", { name: "Use for this launch" })).toBeEnabled();
 });

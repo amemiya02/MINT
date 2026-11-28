@@ -10,6 +10,8 @@ import type { TaskContext } from "./writing-sender.ts";
 import { mapReviewRanges } from "./writing-tasks.ts";
 
 export function sentSource(excerpt: SourceExcerpt, context?: TaskContext) {
+  if (excerpt.imageId)
+    return sourceMaterials(context).find(({ imageId }) => imageId === excerpt.imageId);
   const count = sourceLines(excerpt.quote).length;
   const matching = sourceMaterials(context).filter(
     (material) =>

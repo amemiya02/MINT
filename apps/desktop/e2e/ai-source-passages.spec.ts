@@ -256,3 +256,35 @@ test("a working-folder source can be reread locally without sending another requ
   await expect(review.getByRole("region", { name: "Affected statements" })).toContainText(original);
   expect(requests).toHaveLength(2);
 });
+
+test("draft source review skips YAML front matter", async ({ page }) => {
+  const endpoint = "https://front-matter.example.test/v1/chat/completions";
+  const claim = "The bridge opened.";
+  const metadata = "Editorial metadata.";
+  await page.route(endpoint, (route) =>
+    route.fulfill({
+      json: {
+        choices: [
+          {
+            message: {
+              content: `---\ntitle: ${metadata}\n\nauthor: Test fixture\n---\n\n${claim}\n\n<source-passages>[{"claim":"${claim}","material":1,"quote":"${claim}"}]</source-passages>`,
+            },
+          },
+        ],
+      },
+    }),
+  );
+  await launch(page, { locale: "en-US" });
+  await page.getByRole("button", { name: "Draft with AI" }).click();
+  const draft = page.getByRole("form", { name: "Draft with AI" });
+  await draft.getByLabel("API address").fill(endpoint);
+  await draft.getByLabel("Model name").fill("fixture");
+  await draft.getByLabel("Drafting instruction").fill("Draft the bridge report.");
+  await draft.getByText("Add files or paste text", { exact: true }).click();
+  await draft.getByRole("textbox", { name: "Pasted material" }).fill(claim);
+  await draft.getByRole("button", { name: "Add pasted text" }).click();
+  await draft.getByRole("button", { name: "Generate draft" }).click();
+  const review = page.getByRole("region", { name: "Source passages" });
+  await expect(review.getByRole("button", { name: claim })).toBeVisible();
+  await expect(review).not.toContainText(metadata);
+});
