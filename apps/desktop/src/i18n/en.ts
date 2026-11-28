@@ -222,6 +222,8 @@ export const en = {
   "export.title": "Export",
   "export.format": "Format",
   "export.html.title": "Export as HTML",
+  "export.docx.saveTitle": "Export as DOCX",
+  "export.docx.chooseAnotherFile": "Choose a file different from the manuscript.",
   "export.html.saveTitle": "Export as HTML",
   "export.html.embedImages": "Embed images",
   "export.html.export": "Export",

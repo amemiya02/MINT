@@ -9,8 +9,7 @@ import { useTheme } from "../theme/useTheme.ts";
 import { useModalDialog } from "../window/useModalDialog.ts";
 import { documentHtml, type HtmlExportChoice } from "./html-export.ts";
 
-/** What a document exports to: an HTML file, or a PDF through the print dialog. */
-export type ExportFormat = "html" | "pdf";
+export type ExportFormat = "html" | "pdf" | "docx";
 
 interface ExportDialogProps {
   readonly platform: Platform;
@@ -33,8 +32,7 @@ function stem(path: string): string {
 }
 
 /**
- * Export a document: pick the theme and appearance, then either save a single
- * HTML file (optionally embedding images) or print it, to save as a PDF.
+ * Export the current document as editable Word content, styled HTML or a printed PDF.
  */
 export function ExportDialog({
   platform,
@@ -54,7 +52,7 @@ export function ExportDialog({
   const appearanceId = useId();
   const imagesId = useId();
   const [appearances, setAppearances] = useState<
-    Record<ExportFormat, HtmlExportChoice["appearance"]>
+    Record<"html" | "pdf", HtmlExportChoice["appearance"]>
   >(() => ({
     html: document.documentElement.dataset.appearance === "dark" ? "dark" : "light",
     pdf: "light",
@@ -67,7 +65,7 @@ export function ExportDialog({
     // The print window has no folder to resolve images against: PDFs always embed them.
     embedImages: true,
   }));
-  const choice = { ...options, appearance: appearances[format] };
+  const choice = { ...options, appearance: appearances[format === "docx" ? "html" : format] };
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -85,12 +83,24 @@ export function ExportDialog({
         close();
         return;
       }
+      const word = format === "docx";
       const target = await platform.showSaveDialog({
-        title: t("export.html.saveTitle"),
-        defaultPath: `${path.slice(0, path.length - baseName(path).length)}${name}.html`,
-        filters: [{ name: "HTML", extensions: ["html", "htm"] }],
+        title: t(word ? "export.docx.saveTitle" : "export.html.saveTitle"),
+        defaultPath: `${path.slice(0, path.length - baseName(path).length)}${name}.${format}`,
+        filters: [
+          word
+            ? { name: "DOCX", extensions: ["docx"] }
+            : { name: "HTML", extensions: ["html", "htm"] },
+        ],
       });
-      if (target) {
+      if (target && word) {
+        if (target === path) throw new Error(t("export.docx.chooseAnotherFile"));
+        const { documentDocx } = await import("./docx-export.ts");
+        await platform.writeBinaryFile(
+          target,
+          await documentDocx(platform, path, getText(), settings),
+        );
+      } else if (target) {
         const html = await documentHtml(
           { platform, path, text: getText(), settings, themeFolder: folder, title: name },
           choice,
@@ -142,41 +152,46 @@ export function ExportDialog({
                 value={format}
                 disabled={busy}
                 className={fieldClass}
-                onChange={(event) => setFormat(event.target.value === "pdf" ? "pdf" : "html")}
+                onChange={(event) => setFormat(event.target.value as ExportFormat)}
               >
                 <option value="html">HTML</option>
                 <option value="pdf">PDF</option>
+                <option value="docx">DOCX</option>
               </select>
             </div>
           )}
-          <div className="flex items-center justify-between gap-4">
-            <label htmlFor={themeId}>{t("settings.theme")}</label>
-            <select
-              id={themeId}
-              value={choice.theme}
-              onChange={(e) => setOptions({ ...options, theme: e.target.value })}
-              className={fieldClass}
-            >
-              <ThemeOptions customThemes={themes} />
-            </select>
-          </div>
-          <div className="flex items-center justify-between gap-4">
-            <label htmlFor={appearanceId}>{t("settings.appearance")}</label>
-            <select
-              id={appearanceId}
-              value={choice.appearance}
-              onChange={(e) =>
-                setAppearances({
-                  ...appearances,
-                  [format]: e.target.value === "dark" ? "dark" : "light",
-                })
-              }
-              className={fieldClass}
-            >
-              <option value="light">{t("settings.appearance.light")}</option>
-              <option value="dark">{t("settings.appearance.dark")}</option>
-            </select>
-          </div>
+          {format !== "docx" && (
+            <>
+              <div className="flex items-center justify-between gap-4">
+                <label htmlFor={themeId}>{t("settings.theme")}</label>
+                <select
+                  id={themeId}
+                  value={choice.theme}
+                  onChange={(e) => setOptions({ ...options, theme: e.target.value })}
+                  className={fieldClass}
+                >
+                  <ThemeOptions customThemes={themes} />
+                </select>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <label htmlFor={appearanceId}>{t("settings.appearance")}</label>
+                <select
+                  id={appearanceId}
+                  value={choice.appearance}
+                  onChange={(e) =>
+                    setAppearances({
+                      ...appearances,
+                      [format]: e.target.value === "dark" ? "dark" : "light",
+                    })
+                  }
+                  className={fieldClass}
+                >
+                  <option value="light">{t("settings.appearance.light")}</option>
+                  <option value="dark">{t("settings.appearance.dark")}</option>
+                </select>
+              </div>
+            </>
+          )}
           {format === "html" && (
             <div className="flex items-center justify-between gap-4">
               <label htmlFor={imagesId}>{t("export.html.embedImages")}</label>
