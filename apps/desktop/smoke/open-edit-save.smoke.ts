@@ -520,9 +520,19 @@ async function clickPath(xpath: string) {
 const click = (label: string, by: "text" | "aria-label" = "text") =>
   clickPath(`//button[${by === "text" ? "normalize-space(.)" : "@aria-label"}='${label}']`);
 const clickSettingsButton = (label: string) =>
-  clickPath(
-    `//dialog[@open][.//h2[normalize-space(.)='Settings']]//button[normalize-space(.)='${label}' and not(@disabled) and not(ancestor::fieldset[@disabled])]`,
-  );
+  until(`the ${label} button in Settings to be clickable`, async () => {
+    const button = await command<Record<string, string>>("POST", `/session/${session}/element`, {
+      using: "xpath",
+      value: `//dialog[@open][.//h2[normalize-space(.)='Settings']]//button[normalize-space(.)='${label}' and not(@disabled) and not(ancestor::*[@hidden] or ancestor::fieldset[@disabled])]`,
+    });
+    // WebKitWebDriver can find an enabled button while it is still clipped by the Settings scroller.
+    await command("POST", `/session/${session}/execute/sync`, {
+      script: "arguments[0].scrollIntoView({ block: 'center' })",
+      args: [button],
+    });
+    await command("POST", `/session/${session}/element/${button[elementKey]}/click`, {});
+    return true;
+  }).catch(explain);
 const shows = (text: string) =>
   until(text, () =>
     command<boolean>("POST", `/session/${session}/execute/sync`, {
@@ -1120,9 +1130,11 @@ test("a native model receives only the sample or live selection and edits throug
   await restart([draft]);
   const requests: { url?: string; method?: string; authorization?: string; body: unknown }[] = [];
   let pendingReply: ServerResponse | undefined;
+  let pendingDirect: ServerResponse | undefined;
   let pendingPreview: ServerResponse | undefined;
   let stopped = false;
   const stopInstruction = "Start another preview for the background task.";
+  const directInstruction = "Shorten these lines, apply directly";
   const previewInstruction = "Revise the opening and closing.";
   const endpoint = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
@@ -1140,6 +1152,14 @@ test("a native model receives only the sample or live selection and edits throug
     }
     const payload = JSON.parse(body);
     const instruction = payload.messages.at(-1)?.content ?? "";
+    if (instruction.includes(directInstruction)) {
+      pendingDirect = response;
+      return;
+    }
+    if (instruction.includes(previewInstruction)) {
+      pendingPreview = response;
+      return;
+    }
     if (instruction.includes(stopInstruction) && stopped) {
       response.writeHead(200, { "Content-Type": "text/event-stream" });
       response.end(
@@ -1163,10 +1183,6 @@ test("a native model receives only the sample or live selection and edits throug
           ],
         })}\n\n`,
       );
-      return;
-    }
-    if (instruction.includes(previewInstruction)) {
-      pendingPreview = response;
       return;
     }
     if (instruction.includes("apply directly")) {
@@ -1380,23 +1396,88 @@ test("a native model receives only the sample or live selection and edits throug
     await openSettings();
     await setAutosave(true);
     await click("Close");
+    const concurrentSource =
+      "\uFEFFOpening line.\r\nExtra opening detail.\r\n\r\nMiddle line.\r\n\r\nKeep café spaces.  \r\n\r\nClosing line.\r\nClosing detail.\r\n";
+    const authorSource = concurrentSource.replace("Middle line.", "Author's middle line.");
+    const mergedSource = authorSource
+      .replace("Opening line.\r\nExtra opening detail.", "Short opening.")
+      .replace("Closing line.\r\nClosing detail.", "Short close.\r\nShort detail.");
+    const authorBytes = Buffer.from(authorSource);
+    const mergedBytes = Buffer.from(mergedSource);
+    await writeFile(draft, concurrentSource);
     await waitForView(
-      "the remaining view to regain focus",
-      "return document.querySelectorAll('.cm-content').length === 1 && document.activeElement?.matches('.cm-content');",
+      "the remaining view to show the CRLF manuscript",
+      `return document.querySelectorAll('.cm-content').length === 1 &&
+        document.activeElement?.matches('.cm-content') &&
+        document.activeElement.textContent.includes('Closing detail.');`,
     );
-    await keyActions([...chord(keys.control, keys.end), ...chord(keys.shift, keys.home)]);
-    await askSelection(instruction, authorization);
+    await keyActions(chord(keys.control, "a"));
+    await askSelection(directInstruction, authorization);
+    const directReply = await until(
+      "the native direct edit request",
+      async () => pendingDirect ?? null,
+    );
+    assert.deepEqual(requests[2], {
+      ...sent,
+      body: {
+        ...payload,
+        messages: [
+          payload.messages[0],
+          {
+            role: "user",
+            content: JSON.stringify({
+              instruction: directInstruction,
+              selectedText: concurrentSource.slice(1),
+            }),
+          },
+        ],
+      },
+    });
+    await clickPath("//div[contains(@class, 'cm-line') and normalize-space(.)='Middle line.']");
+    await keyActions([
+      ...typing(keys.home),
+      ...chord(keys.shift, keys.end),
+      ...typing("Author's middle line."),
+    ]);
     await until(
-      "the direct edit to autosave the exact native file",
-      async () => (await readFile(draft)).equals(Buffer.from(edited)) || null,
+      "the author's concurrent edit to autosave while the model is still responding",
+      async () => (await readFile(draft)).equals(authorBytes) || null,
     ).catch(explain);
-    assert.deepEqual(requests[2], sent);
+    directReply.writeHead(200, { "Content-Type": "application/json" }).end(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content:
+                "<replacement>Short opening.\n\nModel's middle line.\n\nKeep café spaces.  \n\nShort close.\nShort detail.\n</replacement>",
+            },
+            finish_reason: "stop",
+          },
+        ],
+      }),
+    );
+    await until(
+      "only the independent direct edits to autosave with the original BOM and CRLF",
+      async () => (await readFile(draft)).equals(mergedBytes) || null,
+    ).catch(explain);
+    await click("View changes");
+    await waitForView(
+      "the author's middle line to remain available for comparison",
+      `const conflict = document.querySelector('[aria-label="Proposed edit 2 of 3"]');
+       return conflict?.innerText.includes("Author's middle line.") &&
+         [...conflict.querySelectorAll('button')].some((button) => button.textContent.trim() === 'Apply to compared text');`,
+    );
+    await clickPath("//aside[@aria-label='Writing Assistant']//button[normalize-space(.)='Close']");
     await keyActions(chord(keys.control, "z"));
     await until(
-      "one undo to autosave the selected baseline",
-      async () => (await readFile(draft)).equals(Buffer.from(liveManuscript)) || null,
+      "one undo to autosave the precise author-edited baseline",
+      async () => (await readFile(draft)).equals(authorBytes) || null,
     ).catch(explain);
-    await clickPath("//section[@aria-label='Ask AI']//button[normalize-space(.)='Close']");
+    await keyActions(chord(keys.control, "y"));
+    await until(
+      "redo to autosave the precise merged bytes",
+      async () => (await readFile(draft)).equals(mergedBytes) || null,
+    ).catch(explain);
 
     const reviewSource = "**Opening line.**\r\n\r\nKeep this.  \n\nClosing line.";
     await writeFile(draft, `\uFEFF${reviewSource}`);
@@ -2428,6 +2509,7 @@ test("external Agent consent gates a real CLI process and keeps the manuscript o
   const cancelInstruction = "Generate a reply I can stop.";
   const writeTarget = join(fixture, "agent-write.txt");
   const initial = "Unsent paragraph.\n\nOn-disk sentence.";
+  const configuredAccessNotice = "Configured file access may include writes across your account.";
   await writeFile(draft, initial);
   await writeFile(
     executable,
@@ -2654,18 +2736,22 @@ if (prompt.instruction === ${JSON.stringify(cancelInstruction)}) {
   ).catch(explain);
 
   await openSettings();
-  await click("External Agents");
+  await clickSettingsButton("External Agents");
 
-  await command("POST", `/session/${session}/execute/sync`, {
-    script: `const select = Array.from(document.querySelectorAll('dialog[open] select'))
-      .find((control) => control.querySelector('option[value="configured"]'));
+  await waitForView(
+    "the saved Agent's permissions control in Settings",
+    `const select = Array.from(document.querySelectorAll('dialog[open] select:enabled'))
+      .find((control) => !control.closest('[hidden]') && control.querySelector('option[value="configured"]'));
+      if (!select) return false;
       select.value = 'configured';
-      select.dispatchEvent(new Event('change', { bubbles: true }));`,
-    args: [],
-  });
-  await shows("Configured file access may include writes across your account.");
-  await click("Try example");
-  await click("Decline");
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;`,
+  );
+  await shows(configuredAccessNotice);
+  await clickSettingsButton("Try example");
+  await shows("Change this Agent’s approved permissions?");
+  await clickSettingsButton("Decline");
+  await shows("Agent access declined.");
   await assert.rejects(
     invokeNative("send_external_agent", { path, revision, access: "configured", request }),
     /agentAccessRequired/,
@@ -2673,8 +2759,8 @@ if (prompt.instruction === ${JSON.stringify(cancelInstruction)}) {
   assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, 4);
   await assert.rejects(readFile(writeTarget), { code: "ENOENT" });
 
-  await click("Try example");
-  await click("Allow and send");
+  await clickSettingsButton("Try example");
+  await clickSettingsButton("Allow and send");
   await shows("Fixture Agent reply.");
   const callsBeforeRestart = (await readFile(calls, "utf8")).trim().split("\n").length;
   assert.equal(callsBeforeRestart, 5);
@@ -2682,7 +2768,7 @@ if (prompt.instruction === ${JSON.stringify(cancelInstruction)}) {
   assert.equal(await readFile(draft, "utf8"), initial);
 
   // Reopening the task after a native restart makes no CLI call. Deleting it clears its copies.
-  await click("Close");
+  await clickSettingsButton("Close");
   const history = await invokeNative<number[]>("list_versions", { path: draft });
   assert.ok(history.length);
   await restart([draft]);
@@ -2706,12 +2792,13 @@ if (prompt.instruction === ${JSON.stringify(cancelInstruction)}) {
   await clickPath("//dialog[@aria-label='Writing tasks']//button[normalize-space(.)='Close']");
   // The Agent connection and the granted scope are still available.
   await openSettings();
-  await click("External Agents");
+  await clickSettingsButton("External Agents");
   await shows(executable);
-  await click("Try example");
+  await shows(configuredAccessNotice);
+  await clickSettingsButton("Try example");
   await shows("Fixture Agent reply.");
   assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, callsBeforeRestart + 1);
-  await click("Close");
+  await clickSettingsButton("Close");
   await nativeShortcut("ctrl+n");
   await click("Draft with AI");
   await until("the approved Agent to appear as a draft recipient", () =>
@@ -2770,6 +2857,8 @@ if (prompt.instruction === ${JSON.stringify(cancelInstruction)}) {
   await shows("Partial Agent reply.");
   const runningCall = JSON.parse((await readFile(calls, "utf8")).trim().split("\n").at(-1) ?? "");
   assert.equal(runningCall.prompt.instruction, cancelInstruction);
+  const callsBeforeReplacement = (await readFile(calls, "utf8")).trim().split("\n").length;
+  assert.equal(callsBeforeReplacement, callsBeforeRestart + 3);
   process.kill(runningCall.pid, 0);
   await clickPath("//section[@aria-label='Ask AI']//button[normalize-space(.)='Stop generation']");
   await until("the stopped CLI process to be reaped", async () => {
@@ -2792,20 +2881,23 @@ if (prompt.instruction === ${JSON.stringify(cancelInstruction)}) {
   assert.equal(await readFile(draft, "utf8"), initial);
 
   await openSettings();
-  await click("External Agents");
+  await clickSettingsButton("External Agents");
+  // Load the saved revision before replacing the executable so the send rechecks it.
+  await shows(configuredAccessNotice);
   await writeFile(
     executable,
     `${await readFile(executable, "utf8")}
 // replacement
 `,
   );
-  await click("Try example");
-  await shows("Agent access changed. Review its permissions before sending.");
-  assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, callsBeforeRestart + 3);
-  // The warning can render before reinspection finishes and enables the retry.
   await clickSettingsButton("Try example");
-  await click("Decline");
+  await shows("Agent access changed. Review its permissions before sending.");
+  assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, callsBeforeReplacement);
+  await clickSettingsButton("Try example");
+  await shows("Use Codex’s configured permissions and send the task shown above.");
+  await clickSettingsButton("Decline");
   await shows("Agent access declined.");
-  await click("Forget Agent");
-  await click("Close");
+  assert.equal((await readFile(calls, "utf8")).trim().split("\n").length, callsBeforeReplacement);
+  await clickSettingsButton("Forget Agent");
+  await clickSettingsButton("Close");
 });

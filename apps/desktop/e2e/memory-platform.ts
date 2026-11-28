@@ -93,6 +93,14 @@ export function externalRemove(page: Page, path: string): Promise<void> {
   );
 }
 
+/** Remove an Agent's approval while the Settings window still has it selected. */
+export function forgetExternalAgent(page: Page, path: string): Promise<void> {
+  return page.evaluate(
+    (p) => (window as unknown as MintWindow).__MINT_MEMORY_PLATFORM__.externalAgent.forget(p),
+    path,
+  );
+}
+
 /** URLs the shell asked the in-memory platform to open externally. */
 export function openedUrls(page: Page): Promise<readonly string[]> {
   return page.evaluate(() => [

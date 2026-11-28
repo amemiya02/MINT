@@ -28,7 +28,9 @@ test("renders Mermaid diagrams, reports syntax errors and shows the source on cl
   const path = "/notes/diagrams.md";
   const mermaidRequests: string[] = [];
   page.on("request", (request) => {
-    if (/node_modules\/.*mermaid|\/deps\/mermaid/.test(request.url()))
+    const pathname = new URL(request.url()).pathname;
+    // The dev server serves dependencies directly. The built frontend loads a hashed chunk.
+    if (/\/node_modules\/.*mermaid|\/deps\/mermaid|\/assets\/mermaid[.-][^/]+\.js$/.test(pathname))
       mermaidRequests.push(request.url());
   });
   await launch(page, { files: { [path]: doc }, openDialogResults: [path], locale: "en-US" });

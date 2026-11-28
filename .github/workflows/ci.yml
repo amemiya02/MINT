@@ -73,10 +73,15 @@ jobs:
       - name: Unit tests
         run: pnpm test
 
+      # Use the same frontend for Playwright and tauri::generate_context! below.
+      - name: Build frontend
+        run: pnpm --filter @mint/desktop build:web
       - name: Install Playwright browser
         run: pnpm --filter @mint/desktop exec playwright install --with-deps chromium
       - name: E2E tests
         run: pnpm test:e2e
+        env:
+          MINT_E2E_PREVIEW: "1"
       - name: Upload Playwright report
         if: failure()
         uses: actions/upload-artifact@v4
@@ -87,9 +92,6 @@ jobs:
             apps/desktop/test-results/
           if-no-files-found: ignore
 
-      # tauri::generate_context! embeds the frontend, so it must be built first.
-      - name: Build frontend
-        run: pnpm --filter @mint/desktop build:web
       - name: Clippy
         run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets -- -D warnings
       - name: Rust tests
