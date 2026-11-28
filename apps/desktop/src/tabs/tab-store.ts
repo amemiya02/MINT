@@ -2,7 +2,7 @@ import { type MintEditor, SharedDocument } from "@mint/editor";
 import { matchingHeadings } from "@mint/markdown";
 import { type FolderReference, locateCitation } from "../backlinks/references.ts";
 import { isWithin, rebasePath } from "../paths.ts";
-import type { Platform } from "../platform/platform.ts";
+import type { FolderDocumentEdit, Platform } from "../platform/platform.ts";
 
 export type Pane = "primary" | "reference";
 
@@ -114,6 +114,12 @@ export interface TabStore {
 
   /** Refresh the on-disk state of the open document before applying a proposed edit. */
   refreshDisk(id: number): Promise<boolean>;
+  /** Commit an authorized disk write and update any open panes of the same document. */
+  writeFolderEdit(
+    root: string,
+    edit: FolderDocumentEdit,
+    changeEditor: (editor: MintEditor) => boolean,
+  ): Promise<boolean>;
 
   /** Once the document shows, select a line range or move to a linked heading. */
   openDocument(path: string, select?: DocumentLocation): Promise<void>;
@@ -147,6 +153,8 @@ export interface TabStore {
   saveAs(id: number): Promise<boolean>;
   /** The tab's live text, or `null` if its editor is not mounted. */
   getText(id: number): string | null;
+  /** Last disk text the tab synchronized with or explicitly accepted as its save baseline. */
+  getDiskBaseline(id: number): string | undefined;
   /** Settle a conflict with the document on disk. */
   resolveConflict(id: number, choice: ConflictChoice): void;
   /** Hide the notice about a document that was deleted or moved (the tab stays unsaved). */
@@ -187,6 +195,7 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
   const saveEpochs = new Map<number, number>();
   /** Tail of each tab’s save queue, including any outstanding Save As dialog. */
   const savesInFlight = new Map<number, Promise<boolean>>();
+  const folderWrites = new Set<number>();
   /** Tabs whose document changed while they were saving: check again afterwards. */
   const recheck = new Set<number>();
   const unwatchers = new Map<number, Promise<() => void>>();
@@ -458,6 +467,8 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
 
   /** Snapshot this request now. A queued Save follows the path established by the preceding Save As. */
   function save(id: number, choosePath: boolean): Promise<boolean> {
+    const folderWrite = folderWrites.has(id) && savesInFlight.get(id);
+    if (folderWrite) return folderWrite.then(() => save(id, choosePath));
     const editor = documentEditor(id);
     if (!editor) return Promise.resolve(false);
     const text = editor.getText();
@@ -724,7 +735,67 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
     save: (id) => save(documentId(id), false),
     saveAs: (id) => save(documentId(id), true),
 
+    async writeFolderEdit(root, edit, changeEditor) {
+      const id = state.tabs.find(({ path }) => path === edit.from)?.documentId;
+      if (id !== undefined && savesInFlight.has(id)) return false;
+      if (
+        (edit.from !== edit.to || edit.before === undefined) &&
+        state.tabs.some(({ path }) => path === edit.to)
+      )
+        return false;
+      const write = async () => {
+        await platform.applyFolderDocumentEdit(root, edit);
+        if (id !== undefined && documentTab(id)?.path === edit.from) {
+          const editor = documentEditor(id);
+          if (editor) {
+            const synchronized = changeEditor(editor);
+            const live = editor.getText();
+            if (edit.after === undefined) {
+              if (synchronized) {
+                markClean(id, live);
+                recheck.delete(id);
+                store.pathTrashed(edit.from);
+              }
+            } else if (live === edit.after) {
+              markClean(id, edit.after);
+            } else if (synchronized) {
+              diskTexts.set(id, edit.after);
+              updateTab(id, { dirty: true, external: null });
+            } else {
+              updateTab(id, { dirty: true, external: { kind: "conflict", diskText: edit.after } });
+            }
+          }
+        }
+        if (edit.from !== edit.to) store.pathRenamed(edit.from, edit.to);
+        if (edit.after !== undefined) {
+          try {
+            await platform.recordVersion(edit.to, edit.after);
+          } catch (e) {
+            set({ error: { kind: "history", path: edit.to, reason: reasonOf(e) } });
+          }
+        }
+        return true;
+      };
+      if (id === undefined) return write();
+      folderWrites.add(id);
+      saveEpochs.set(id, (saveEpochs.get(id) ?? 0) + 1);
+      recheck.add(id);
+      const pending = Promise.resolve()
+        .then(write)
+        .finally(() => {
+          folderWrites.delete(id);
+          savesInFlight.delete(id);
+          void runRecheck(id);
+        });
+      savesInFlight.set(
+        id,
+        pending.catch(() => false),
+      );
+      return pending;
+    },
+
     getText: (id) => documentEditor(documentId(id))?.getText() ?? null,
+    getDiskBaseline: (id) => diskTexts.get(documentId(id)),
 
     resolveConflict(id, choice) {
       const tab = state.tabs.find((t) => t.id === id);

@@ -333,7 +333,21 @@ export const en = {
   "writing.folder.include": "Documents to include in the task copy",
   "writing.folder.copyDetails":
     "Selected documents include unsaved edits. Review proposed file changes before applying them.",
+  "writing.folder.copyBatchDetails": "Selected documents include unsaved edits.",
   "writing.folder.changes": "Folder changes",
+  "writing.folder.writeTargets": "Write targets (one relative Markdown path per line)",
+  "writing.folder.authorizedFiles": "Files authorized for writing",
+  "writing.folder.writeDetails":
+    "Sending authorizes changes to the listed files on disk. Include existing documents in the task copy, and list both paths for a move or rename.",
+  "writing.folder.invalidTargets": "Use relative Markdown paths within the working folder.",
+  "writing.folder.written": "Written to disk.",
+  "writing.folder.deferred": "Waiting for required file changes.",
+  "writing.folder.retry": "Retry unfinished file changes",
+  "writing.folder.revert": "Revert this file change",
+  "writing.folder.undo.conflict": "This file contains newer edits that overlap the task change.",
+  "writing.folder.undo.failed":
+    "Could not revert this file change. Check the file and destination.",
+  "writing.folder.undo.deferred": "Revert dependent file changes first.",
   "writing.folder.create": "Create {path}",
   "writing.folder.modify": "Modify {path}",
   "writing.folder.move": "Move {from} → {path}",

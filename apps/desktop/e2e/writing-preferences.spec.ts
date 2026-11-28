@@ -93,7 +93,9 @@ test("remember an interview correction at the chosen scope and review what will 
     ).toBe(true);
   }
 
-  await openSelection();
+  await page.locator(".cm-content:visible").press("ControlOrMeta+A");
+  await runMenuItem(page, "edit.rememberWritingPreference");
+  await expect(preferences(inline).getByLabel("Remember for")).toBeVisible();
   await remember("Personal default", defaults);
   await remember("Working folder", folderRule);
   await expect(preferences(inline)).toContainText(folderRule);

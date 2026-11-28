@@ -99,6 +99,7 @@ export interface WritingRequest {
   readonly responseFormat?: "replacement" | "draft";
   readonly sourcePassages?: true;
   readonly folderDocuments?: readonly TaskCopyDocument[];
+  readonly folderWriteTargets?: readonly string[];
 }
 
 export interface TaskCopyDocument {

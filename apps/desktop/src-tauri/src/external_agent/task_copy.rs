@@ -208,6 +208,9 @@ impl<'a> TaskCopy<'a> {
             Baseline::Manuscript(_) => "Work on draft.md in the current directory. Write the resulting Markdown to draft.md. Use the listed material files as references. If asking MINT for more material, leave draft.md unchanged. Do not write the revised Markdown in your reply.",
             Baseline::Folder(_) => r#"Use only the listed document files and reference materials. Edit Markdown files under documents/ in place, and create new Markdown files under documents/ as needed. For each move or rename, move the file and record the operation in moves.json in the current directory, as an array such as [{"from":"old.md","to":"chapter/new.md"}]. Paths in moves.json are relative to documents/. Record moves even when you also edit the moved file. Use folder-relative filenames and update affected links in the included documents. Do not delete documents, edit reference material, or modify any files outside the task copy. If asking MINT for additional material, leave all files unchanged. Briefly describe the result in your reply."#,
         };
+        if request.folder_write_targets.is_some() {
+            payload["writeTargetInstructions"] = json!("Only the relative paths listed in folderWriteTargets are authorized for writing to the working folder. Edit only these paths under documents/. Both paths of a move must be listed.");
+        }
         let mut copy = Self {
             workspace,
             baseline,

@@ -235,6 +235,7 @@ export function mapReviewRanges(before: string, after: string) {
   }
 
   return {
+    changes,
     point: (offset: number) => point(offset, true).offset,
     range({ from, to, located }: ReviewRange): ReviewRange {
       const start = point(from, from !== to);
