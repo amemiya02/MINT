@@ -263,7 +263,14 @@ export const en = {
   "models.addressHint":
     "Enter an OpenAI-compatible API base or chat completions URL. Use HTTPS or a loopback address.",
   "models.model": "Model name",
-  "models.key": "API key (this trial only)",
+  "models.key": "API key",
+  "models.keyHint": "Run sample uses this key once.",
+  "models.reenterKey": "Re-enter the API key to save this connection.",
+  "models.name": "Connection name",
+  "models.remember": "Remember connection",
+  "models.remembered": "Remembered on this device",
+  "models.session": "Use for this launch",
+  "models.disconnect": "Disconnect",
   "models.prompt": "Sample prompt",
   "models.sample":
     'Shorten this sentence to at most six words: "The research team met again to discuss the results." Reply with only the new sentence, enclosed in <replacement> and </replacement>.',
@@ -283,6 +290,14 @@ export const en = {
   "models.unavailable": "Unavailable",
   "models.error.address": "Enter an HTTPS or loopback API address without embedded credentials.",
   "models.error.key": "The service rejected authorization. Check the API key and try again.",
+  "models.error.credentialStore":
+    "System credential store is unavailable. Try again when it is accessible.",
+  "models.error.remember":
+    "System credential store is unavailable. You can use the connection for this launch.",
+  "models.error.credentialMissing":
+    "The system credential is missing. Disconnect and add the connection again.",
+  "models.error.connectionMissing": "This connection is no longer available.",
+  "models.error.connections": "MINT could not access the saved model connections. Try again.",
   "models.error.notFound":
     "The service could not find the endpoint or model. Check the API address and model name.",
   "models.error.rateLimit":

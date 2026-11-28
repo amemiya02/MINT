@@ -1,6 +1,14 @@
-import { createModelSender, modelResponseLimit, modelTimeoutMs } from "./model.ts";
+import {
+  type ModelRequest,
+  type ModelResponseEvent,
+  modelResponseLimit,
+  modelTimeoutMs,
+} from "./model.ts";
 
-export const sendBrowserModelMessage = createModelSender(async ({ url, apiKey, body }, receive) => {
+export async function sendBrowserModelRequest(
+  { url, apiKey, body }: ModelRequest,
+  receive: (event: ModelResponseEvent) => void,
+) {
   try {
     const response = await fetch(url, {
       method: "POST",
@@ -40,4 +48,4 @@ export const sendBrowserModelMessage = createModelSender(async ({ url, apiKey, b
     if (error instanceof DOMException && error.name === "TimeoutError") throw "timeout";
     throw "network";
   }
-});
+}

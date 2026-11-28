@@ -1,5 +1,5 @@
 import type { ExternalAgentPlatform } from "../ai/external-agent.ts";
-import type { SendModelMessage } from "../ai/model.ts";
+import type { NewModelConnection, SavedModelConnection, SendModelMessage } from "../ai/model.ts";
 import type { PrintJob } from "../print/protocol.ts";
 
 export type StoredAnnotations = Readonly<Record<string, unknown>>;
@@ -14,6 +14,9 @@ export type StoredAnnotations = Readonly<Record<string, unknown>>;
 export interface Platform {
   readonly externalAgent: ExternalAgentPlatform;
   readonly sendModelMessage: SendModelMessage;
+  listModelConnections(): Promise<readonly SavedModelConnection[]>;
+  saveModelConnection(connection: NewModelConnection): Promise<SavedModelConnection>;
+  disconnectModelConnection(id: string): Promise<void>;
   listZoteroItems(start: number): Promise<ZoteroPage>;
   /** The user's preferred UI language as a BCP 47 tag, e.g. `zh-CN` or `en-US`. */
   readonly locale: string;
