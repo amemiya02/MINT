@@ -103,6 +103,12 @@ export const commands = [
     group: "paste",
   },
   { id: "edit.find", title: "command.edit.find", accelerator: "CmdOrCtrl+F", menu: "edit" },
+  {
+    id: "edit.askExternalAgent",
+    title: "command.edit.askExternalAgent",
+    menu: "edit",
+    group: "writing",
+  },
   // Typora's replace shortcut: ⌘⌥F on macOS, Ctrl+H elsewhere (Ctrl+Alt is AltGr on Windows).
   {
     id: "edit.replace",

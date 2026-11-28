@@ -5,6 +5,7 @@
 mod app_data;
 mod assets;
 mod document_edit;
+mod external_agent;
 mod folder;
 mod fs;
 mod grants;
@@ -738,6 +739,12 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            external_agent::discover_external_agents,
+            external_agent::saved_external_agents,
+            external_agent::inspect_external_agent,
+            external_agent::approve_external_agent,
+            external_agent::forget_external_agent,
+            external_agent::send_external_agent,
             model::send_model_request,
             zotero::list_zotero_items,
             printing::print_pages,

@@ -66,6 +66,16 @@ const sendTauriModelMessage = createModelSender(async (request, receive) => {
 export function createTauriPlatform(): Platform {
   return {
     locale: navigator.language,
+    externalAgent: {
+      discover: () => invoke("discover_external_agents"),
+      saved: () => invoke("saved_external_agents"),
+      inspect: (path) => invoke("inspect_external_agent", { path }),
+      approve: ({ path, revision }, access) =>
+        invoke("approve_external_agent", { path, revision, access }),
+      forget: (path) => invoke("forget_external_agent", { path }),
+      send: ({ path, revision }, access, request) =>
+        invoke("send_external_agent", { path, revision, access, request }),
+    },
     sendModelMessage: sendTauriModelMessage,
     listZoteroItems: (start) => invoke("list_zotero_items", { start }),
     savesPdfDirectly: /Windows/.test(navigator.userAgent),
