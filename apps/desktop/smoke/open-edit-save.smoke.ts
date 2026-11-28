@@ -129,15 +129,16 @@ async function nativeShortcut(chord: string) {
   await exec("xdotool", ["key", "--clearmodifiers", chord], { timeout: 5000 });
 }
 
-async function openSettings() {
-  // Wait for the real GTK menu item, which is installed after the webview starts.
+async function nativeSettingsMenu(mode: "wait" | "activate") {
   await exec(
     "/usr/bin/python3",
-    ["smoke/activate-gtk-menu.py", await instancePid(), "MINT", "Settings…"],
-    {
-      timeout: 35_000,
-    },
+    ["smoke/activate-gtk-menu.py", mode, await instancePid(), "MINT", "Settings…"],
+    { timeout: 20_000 },
   ).catch(explain);
+}
+
+async function openSettings() {
+  await nativeSettingsMenu("activate");
   await waitForView(
     "the native Settings menu command to open Settings",
     "return document.querySelector('dialog[open] h2')?.textContent === 'Settings'",
@@ -316,6 +317,8 @@ async function restart(args: string[]) {
   assert.ok(created.sessionId, "WebDriver did not create a native session");
   session = created.sessionId;
   await busCall("GetNameOwner", instanceName);
+  // A live window and D-Bus owner can precede registration of GTK accelerators.
+  await nativeSettingsMenu("wait");
 }
 
 test("saved versions survive a native restart outside the working folder", async () => {
@@ -927,6 +930,31 @@ async function tabToView(what: string, script: string) {
   }
   assert.fail(`could not reach ${what} by keyboard`);
 }
+
+const waitForActiveDocument = (path: string) =>
+  waitForView(
+    `${basename(path)} to open and receive focus`,
+    `const tab = document.querySelector('[role=tab][aria-selected=true]');
+     return tab?.textContent === ${JSON.stringify(basename(path))} &&
+       document.activeElement?.matches('.cm-content') &&
+       document.activeElement.closest('[role=tabpanel]')?.id === tab.getAttribute('aria-controls');`,
+  );
+
+const chooseCustomDraftConnection = () =>
+  waitForView(
+    "the custom compatible service in Draft with AI",
+    `const form = document.querySelector('[role="tabpanel"]:not([hidden]) form[aria-labelledby]');
+     if (!form) return false;
+     const control = name => [...form.querySelectorAll('label')]
+       .find(label => label.firstChild?.textContent.trim() === name)?.control;
+     const select = control('Writing connection');
+     if (!select) return !!control('API address');
+     const option = [...select.options].find(option => option.label === 'Custom compatible service');
+     if (!option) return false;
+     select.value = option.value;
+     select.dispatchEvent(new Event('change', { bubbles: true }));
+     return true;`,
+  );
 
 test("the task summary reads only granted folder documents and preserves their bytes", async () => {
   const folder = await mkdtemp(join(dir, "tasks-"));
@@ -1714,7 +1742,9 @@ test("a native model receives only the sample or live selection and edits throug
     await writeFile(draft, `\uFEFF${reviewSource}`);
     await waitForView(
       "the replacement draft from disk",
-      "return document.querySelector('.cm-content')?.textContent.includes('Closing line.');",
+      `const editor = document.activeElement;
+       return editor?.matches('.cm-content') && editor.textContent.includes('Keep this.') &&
+         editor.textContent.includes('Closing line.');`,
     );
     await keyActions(chord(keys.control, "a"));
     await askSelection(previewInstruction);
@@ -2029,6 +2059,8 @@ test("a saved writing review resumes after a native restart without contacting i
       },
     ).catch(explain);
     const review = await savedReviewWithPending(4);
+    assert.equal(review.reading.anchor, accepted.length, "the stored anchor stays at Last draft.");
+    assert.equal(review.reading.head, accepted.length, "the stored caret stays at Last draft.");
     const links = await invokeNative<{ id: string; path: string; title: string }[]>(
       "list_writing_reviews_in_folder",
       { folder: dirname(draft) },
@@ -2127,7 +2159,10 @@ test("a saved writing review resumes after a native restart without contacting i
     await writeFile(renamedDraft, overlapping);
     await waitForView(
       "the later author edit to load from disk",
-      `return document.querySelector('.cm-content')?.textContent.includes("Author's first edit.");`,
+      `const tab = document.querySelector('[role=tab][aria-selected=true]');
+       const panel = document.getElementById(tab?.getAttribute('aria-controls'));
+       return tab?.textContent === 'renamed-writing-review.md' &&
+         panel?.querySelector('.cm-content')?.textContent.includes("Author's first edit.");`,
     );
     await click("Open renamed-writing-review.md in other pane", "aria-label");
     await click("Writing tasks");
@@ -2136,7 +2171,7 @@ test("a saved writing review resumes after a native restart without contacting i
     await clickPath(`${first}//button[normalize-space(.)='Revert to selected text']`);
     await waitForView(
       "both native panes to show the chosen reversion and preserve the external edit",
-      `const panes = [...document.querySelectorAll('.cm-content')];
+      `const panes = [...document.querySelectorAll('[role=tabpanel]:not([hidden]) .cm-content')];
       return panes.length === 2 && panes.every(pane =>
         pane.textContent.includes('First draft.') && pane.textContent.includes('External third.'));`,
     );
@@ -2166,6 +2201,7 @@ test("inline completion sends the live manuscript excerpt through the native mod
   const continuation = " leads to the ridge.";
   const name = "Completion fixture";
   let endpointOffline = false;
+  let previousSettings: Record<string, unknown> | undefined;
   await writeFile(draft, initial);
   const requests: {
     method?: string;
@@ -2201,6 +2237,9 @@ test("inline completion sends the live manuscript excerpt through the native mod
     const address = endpoint.address();
     assert.ok(address && typeof address !== "string");
     await restart([draft]);
+    await waitForActiveDocument(draft);
+    const settings = await invokeNative<{ values?: Record<string, unknown> }>("read_settings", {});
+    previousSettings = settings.values ?? {};
     await openSettings();
     await click("Model connections");
     for (const [label, value] of [
@@ -2228,6 +2267,10 @@ test("inline completion sends the live manuscript excerpt through the native mod
     await click("Close");
     await clickPath("//main//div[@role='textbox']");
     await keyActions([...chord(keys.control, keys.end), ...typing(" trail")]);
+    await until(
+      "the live excerpt to reach the model receiver",
+      async () => requests[0] ?? null,
+    ).catch(explain);
     await until("the inline suggestion at the focused editor", () =>
       command<string>("POST", `/session/${session}/execute/sync`, {
         script:
@@ -2290,13 +2333,13 @@ test("inline completion sends the live manuscript excerpt through the native mod
         (await readFile(draft, "utf8")) ===
           `${initial} trail${continuation} Today. Still writing.` || null,
     ).catch(explain);
-    await openSettings();
-    await chooseSettingsOption("Inline completion", "Off");
-    await chooseSettingsOption("Default writing connection", "First available connection");
-    await click("Close");
   } finally {
-    endpoint.closeAllConnections();
-    await new Promise<void>((resolve) => endpoint.close(() => resolve()));
+    try {
+      if (previousSettings) await invokeNative("write_settings", { values: previousSettings });
+    } finally {
+      endpoint.closeAllConnections();
+      await new Promise<void>((resolve) => endpoint.close(() => resolve()));
+    }
   }
 });
 
@@ -2337,8 +2380,7 @@ test("automatic proofreading sends only the active passage and undo restores the
 
   try {
     await restart([path]);
-    await clickPath("//div[contains(@class,'cm-content') and contains(.,'A speeling error.')]");
-    await keyActions(chord(keys.control, keys.home));
+    await waitForActiveDocument(path);
     await openSettings();
     await click("Model connections");
     await shows("Sample prompt");
@@ -2358,14 +2400,15 @@ test("automatic proofreading sends only the active passage and undo restores the
     }
     await clickPath("//button[not(@disabled) and normalize-space(.)='Use for this launch']");
     await chooseSettingsOption("Proofreading model", "Native proofreading fixture");
-    assert.deepEqual(requests, [], "setting up a model does not send the manuscript");
+    assert.equal(requests.length, 0, "setting up a model does not send the manuscript");
     await clickPath(checkbox);
     await click("Close");
-    await clickPath(
-      "//section[@aria-label='Proofreading suggestion']//button[normalize-space(.)='Apply correction']",
-    );
-    assert.ok(requests[0], "the correction arrived from the fixture endpoint");
-    const { url, authorization, body } = requests[0];
+    await clickPath("//div[contains(@class,'cm-line') and normalize-space(.)='A speeling error.']");
+    await keyActions(typing(keys.home));
+    const { url, authorization, body } = await until(
+      "the active passage to reach the native proofreading model",
+      async () => requests[0] ?? null,
+    ).catch(explain);
     assert.equal(url, "/v1/chat/completions");
     assert.equal(authorization, `Bearer ${secret}`);
     const { model, messages } = body as { model: string; messages: { content: string }[] };
@@ -2374,6 +2417,9 @@ test("automatic proofreading sends only the active passage and undo restores the
     const [message] = messages;
     assert.ok(message);
     assert.equal(JSON.parse(message.content).selectedText, "A speeling error.");
+    await clickPath(
+      "//section[@aria-label='Proofreading suggestion']//button[normalize-space(.)='Apply correction']",
+    );
     await nativeShortcut("ctrl+s");
     await until(
       "only the corrected fragment to reach disk",
@@ -2585,14 +2631,10 @@ test("a native model reply stays editable and untitled until the author chooses 
     const address = endpoint.address();
     assert.ok(address && typeof address !== "string");
     await restart([sources, document]);
-    await until("the original manuscript to open", () =>
-      command<boolean>("POST", `/session/${session}/execute/sync`, {
-        script: "return !!document.querySelector('.cm-content')",
-        args: [],
-      }).then((ready) => ready || null),
-    ).catch(explain);
+    await waitForActiveDocument(document);
     await nativeShortcut("ctrl+n");
     await click("Draft with AI");
+    await chooseCustomDraftConnection();
 
     for (const [label, value] of [
       ["API address", `http://127.0.0.1:${address.port}/v1`],
@@ -2754,6 +2796,7 @@ test("a native model reply stays editable and untitled until the author chooses 
 
     await writeFile(source, `${unapproved}\n${revision}\n`);
     await restart([sources, path]);
+    await waitForActiveDocument(path);
     await invokeNative("save_model_connection", {
       connection: {
         name: "Source check fixture",
@@ -3215,8 +3258,10 @@ test("native writing sends only the approved excerpt after a model capacity erro
     assert.ok(address && typeof address !== "string");
     const model = `http://127.0.0.1:${address.port}/v1`;
     await restart([document]);
+    await waitForActiveDocument(document);
     await nativeShortcut("ctrl+n");
     await click("Draft with AI");
+    await chooseCustomDraftConnection();
     for (const [label, value] of [
       ["API address", model],
       ["Model name", "bounded-native-fixture"],
@@ -3344,8 +3389,10 @@ test("a native first model receives the selected PDF page and image crop as inli
     const address = endpoint.address();
     assert.ok(address && typeof address !== "string");
     await restart([document]);
+    await waitForActiveDocument(document);
     await nativeShortcut("ctrl+n");
     await click("Draft with AI");
+    await chooseCustomDraftConnection();
     for (const [label, value] of [
       ["API address", `http://127.0.0.1:${address.port}/v1`],
       ["Model name", "native-vision-fixture"],
@@ -3510,9 +3557,11 @@ test("native MCP calls modify only the explicitly authorized target", async () =
     assert.ok(address && typeof address !== "string");
     const base = `http://127.0.0.1:${address.port}`;
     await restart([document]);
+    await waitForActiveDocument(document);
     for (const scenario of ["Deny", "Outside", "Approve"]) {
       await nativeShortcut("ctrl+n");
       await click("Draft with AI");
+      await chooseCustomDraftConnection();
       for (const [label, value] of [
         ["API address", `${base}/v1`],
         ["Model name", "mcp-model-fixture"],
@@ -3910,6 +3959,16 @@ test("external Agent consent gates a real CLI process and keeps the manuscript o
   const writeTarget = join(fixture, "agent-write.txt");
   const initial = "Unsent paragraph.\n\nOn-disk sentence.";
   const configuredAccessNotice = "Configured file access may include writes across your account.";
+  const chooseAgentRecipient = () =>
+    waitForView(
+      "the approved Codex connection to be selected in Ask AI",
+      `const option = [...document.querySelectorAll('section[aria-label="Ask AI"] select option')]
+         .find(option => option.textContent === ${JSON.stringify(`Codex · ${executable}`)});
+       if (!option || option.disabled) return false;
+       option.parentElement.value = option.value;
+       option.parentElement.dispatchEvent(new Event('change', { bubbles: true }));
+       return true;`,
+    );
   await writeFile(draft, initial);
   await writeFile(
     executable,
@@ -3996,6 +4055,7 @@ if (prompt.instruction === ${JSON.stringify(cancelInstruction)}) {
   );
   await keyActions([...chord(keys.control, keys.end), ...chord(keys.shift, keys.home)]);
   await click("Ask AI");
+  await chooseAgentRecipient();
   await command("POST", `/session/${session}/execute/sync`, {
     script: `const action = document.querySelector('section[aria-label="Ask AI"] select');
       action.value = 'comment';
@@ -4277,11 +4337,7 @@ if (prompt.instruction === ${JSON.stringify(cancelInstruction)}) {
   await clickPath(sourceTab);
   await keyActions([...chord(keys.control, keys.end), ...chord(keys.shift, keys.home)]);
   await click("Ask AI");
-  await waitForView(
-    "the configured Agent to appear in Ask AI",
-    `return [...document.querySelectorAll('section[aria-label="Ask AI"] select option')]
-      .some((option) => option.textContent.includes(${JSON.stringify(path)}));`,
-  );
+  await chooseAgentRecipient();
   await command("POST", `/session/${session}/execute/sync`, {
     script: `const action = document.querySelector('section[aria-label="Ask AI"] select');
       action.value = 'comment';
@@ -4319,6 +4375,7 @@ if (prompt.instruction === ${JSON.stringify(cancelInstruction)}) {
   await clickPath(`${composer}//button[normalize-space(.)='Close']`);
   await keyActions([...chord(keys.control, keys.end), ...chord(keys.shift, keys.home)]);
   await click("Ask AI");
+  await chooseAgentRecipient();
   await clickPath(`${composer}//label[normalize-space(.)='Temporary session']/input`);
   await addPastedWritingMaterial(privateMaterial);
   await clickPath(`${composer}//label[normalize-space(.)='Instruction']/input`);
@@ -4425,7 +4482,7 @@ if (prompt.instruction === ${JSON.stringify(cancelInstruction)}) {
   await clickSettingsButton("Close");
 });
 
-test("Codex provides manuscript and folder reviews from approved task copies", async () => {
+test("Codex provides manuscript and folder reviews from approved task copies", async (t) => {
   const codex = process.env.MINT_SMOKE_CODEX;
   assert.ok(codex, "the hosted smoke job provisions the Codex CLI sandbox");
   const fixture = await mkdtemp(join(dir, "agent-task-copy-"));
@@ -4437,6 +4494,14 @@ test("Codex provides manuscript and folder reviews from approved task copies", a
   const batchReceived = join(dir, "folder-batch-received.json");
   const batchRelease = join(dir, "folder-batch-release");
   const appendix = join(fixture, "batch-appendix.md");
+  const sandboxFailure = join(dir, "task-copy-sandbox-error.log");
+  t.after(async () => {
+    try {
+      t.diagnostic(await readFile(sandboxFailure, "utf8"));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  });
   const initial = "First paragraph.  \r\n\r\nOriginal.\r\n";
   const unsaved = initial.replace("Original.", "Original. Unsaved note.");
   const changed = unsaved.replace("Original.", "Revised.");
@@ -4466,8 +4531,24 @@ const fs = require("node:fs");
 const { spawnSync } = require("node:child_process");
 const codex = ${JSON.stringify(codex)};
 const args = process.argv.slice(2);
+function sandbox(args) {
+  // MINT grants read access to the selected launcher. The fixture delegates to
+  // a separate native binary that bubblewrap must be able to re-enter.
+  const profile = args.findIndex(arg => arg.startsWith("permissions.mint-task-copy.filesystem={"));
+  if (profile === -1 || !args[profile].endsWith("}")) throw new Error("Missing task copy profile");
+  args[profile] = args[profile].slice(0, -1) + "," + JSON.stringify(codex) + '="read"}';
+  const result = spawnSync(codex, ["sandbox", ...args], {
+    stdio: ["ignore", "inherit", "pipe"],
+  });
+  if (result.status !== 0) {
+    fs.appendFileSync(${JSON.stringify(sandboxFailure)},
+      "Codex sandbox exit " + result.status + ": " + (result.error ?? result.stderr) + "\\n");
+    process.exit(result.status ?? 1);
+  }
+}
 if (args[0] === "sandbox") {
-  process.exit(spawnSync(codex, args, { stdio: "inherit" }).status ?? 1);
+  sandbox(args.slice(1));
+  process.exit(0);
 }
 const prompt = JSON.parse(fs.readFileSync(0, "utf8"));
 const config = args.flatMap((arg, i) =>
@@ -4534,16 +4615,15 @@ rm expected.txt
 printf '%s' "$5" > draft.md
 printf 'unapproved new file' > unapproved-new.md
 `)};
-const result = spawnSync(codex, [
-  "sandbox", ...config, "--permission-profile", "mint-task-copy",
+sandbox([
+  ...config, "--permission-profile", "mint-task-copy",
   "--cd", process.cwd(), "--", "/bin/sh", "-c", shell, "fixture",
   ${JSON.stringify(draft)}, ${JSON.stringify(sibling)}, ${JSON.stringify(approved)},
   ${JSON.stringify(unsaved)}, ${JSON.stringify(changed)},
   ${JSON.stringify(changed.replace("Unsaved note.", "Unsaved note. New note."))},
   ${JSON.stringify(changed.replace("Revised.", "Folder revision.").replace("Unsaved note.", "Unsaved note. New note."))},
   ${JSON.stringify(batchDraft)},
-], { stdio: "inherit" });
-if (result.status !== 0) process.exit(result.status ?? 1);
+]);
 console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "Edited task copy." } }));
 console.log(JSON.stringify({ type: "turn.completed" }));
 `,
@@ -4551,6 +4631,7 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   );
 
   await restart([fixture, draft]);
+  await waitForActiveDocument(draft);
   await openSettings();
   const autosave = await command<boolean>("POST", `/session/${session}/execute/sync`, {
     script: `return Boolean([...document.querySelectorAll('dialog[open] label')]
@@ -4787,8 +4868,11 @@ console.log(JSON.stringify({ type: "turn.completed" }));
   await showsIn('aside[aria-label="Writing Assistant"]', preference.guidance);
   await clickPath(`${assistant}//label[normalize-space(.)='Instruction']/input`);
   await keyActions([...typing("Organize these documents."), ...typing(keys.enter)]);
-  await shows("Requires chapter/renamed.md, notes.md");
-  await shows("Folder revision. Unsaved note. New note.");
+  await showsIn('aside[aria-label="Writing Assistant"]', "Requires chapter/renamed.md, notes.md");
+  await showsIn(
+    'aside[aria-label="Writing Assistant"]',
+    "Folder revision. Unsaved note. New note.",
+  );
   assert.equal(await readFile(draft, "utf8"), changed);
   assert.equal(await readFile(index, "utf8"), "[Old](old.md#section)\n");
   assert.equal(await readFile(old, "utf8"), "## Section\n");

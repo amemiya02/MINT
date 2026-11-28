@@ -50,45 +50,44 @@ export function useInlineWritingCompletion(
         setFailure(undefined);
       }
     });
-    void loadWritingRecipients(platform, "readOnly").then(({ available }) => {
-      if (!isCurrent()) return;
+    const recipients = loadWritingRecipients(platform, "readOnly");
+    editor.setInlineCompletion(async (context) => {
+      const { available } = await recipients;
+      if (context.signal.aborted || !isCurrent()) return null;
       const recipient = effectiveWritingRecipient(available, choice);
-      if (!recipient) return;
+      if (!recipient) return null;
       const send = inlineCompletionFor(platform.sendModelMessage, recipient);
-      editor.setInlineCompletion(async (context) => {
-        if (!isCurrent()) return null;
-        setFailure(undefined);
-        try {
-          return await send(context);
-        } catch (problem) {
-          if (
-            !context.signal.aborted &&
-            isCurrent() &&
-            recipient.kind === "model" &&
-            isLocalModelOffline(recipient.endpoint, problem)
-          ) {
-            const { before, after } = context;
-            setFailure({
-              recipient,
-              alternatives: available.filter(
-                (item) => item.kind === "model" && !isLocalModelEndpoint(item.endpoint),
-              ),
-              retry(alternate) {
-                setFailure(undefined);
-                if (!isCurrent()) return;
-                const retry = inlineCompletionFor(platform.sendModelMessage, alternate);
-                editor.focus();
-                editor.requestInlineCompletion((next) =>
-                  isCurrent() && next.before === before && next.after === after
-                    ? retry(next)
-                    : Promise.resolve(null),
-                );
-              },
-            });
-          }
-          return null;
+      setFailure(undefined);
+      try {
+        return await send(context);
+      } catch (problem) {
+        if (
+          !context.signal.aborted &&
+          isCurrent() &&
+          recipient.kind === "model" &&
+          isLocalModelOffline(recipient.endpoint, problem)
+        ) {
+          const { before, after } = context;
+          setFailure({
+            recipient,
+            alternatives: available.filter(
+              (item) => item.kind === "model" && !isLocalModelEndpoint(item.endpoint),
+            ),
+            retry(alternate) {
+              setFailure(undefined);
+              if (!isCurrent()) return;
+              const retry = inlineCompletionFor(platform.sendModelMessage, alternate);
+              editor.focus();
+              editor.requestInlineCompletion((next) =>
+                isCurrent() && next.before === before && next.after === after
+                  ? retry(next)
+                  : Promise.resolve(null),
+              );
+            },
+          });
         }
-      });
+        return null;
+      }
     });
     return () => {
       attached = false;

@@ -1360,6 +1360,10 @@ function Composer({
         const next = eligible[index + 1]?.from;
         return !overlapsEarlier && (next === undefined || (next >= to && next !== from));
       });
+      if (!replacements.length) return 0;
+      // Undo restores the selection from before the edit. Keep the author's reading
+      // position in that entry while leaving the review's scroll position in place.
+      reading.current.restore({ scroll: false });
       const id = crypto.randomUUID();
       const ranges = editor.replaceRanges(replacements, { lineEndings: "match", historyId: id });
       const edited = editor.getText();

@@ -1,4 +1,5 @@
 import { expect, type Page, type Route, test } from "@playwright/test";
+import type { MemoryPlatform } from "../src/platform/memory.ts";
 import { launch, readFile, settingsPath } from "./memory-platform.ts";
 
 const address = "https://completion.example.test/v1";
@@ -11,7 +12,7 @@ async function openSettings(page: Page) {
   return page.getByRole("dialog", { name: "Settings" });
 }
 
-async function enableCompletion(page: Page) {
+async function enableCompletion(page: Page, beforeClose?: () => Promise<void>) {
   const settings = await openSettings(page);
   await settings.getByRole("button", { name: "Model connections" }).click();
   await settings.getByLabel("Connection name").fill(connectionName);
@@ -19,12 +20,54 @@ async function enableCompletion(page: Page) {
   await settings.getByLabel("Model name").fill("fixture-model");
   await settings.getByRole("button", { name: "Use for this launch" }).click();
   await settings.getByLabel("Inline completion").selectOption({ label: connectionName });
+  await beforeClose?.();
   await settings.getByRole("button", { name: "Close", exact: true }).click();
 }
 
 function response(text: string) {
   return { json: { choices: [{ message: { content: text }, finish_reason: "stop" }] } };
 }
+
+test("typing while the writing connection loads still produces a continuation", async ({
+  page,
+}) => {
+  const received: string[] = [];
+  await page.route(endpoint, (route) => {
+    received.push(route.request().postDataJSON().messages.at(-1).content);
+    return route.fulfill(response(" leads to the ridge"));
+  });
+  await launch(page, {
+    locale: "en-US",
+    files: { [draft]: "The" },
+    openedPaths: [{ path: draft, kind: "file" }],
+  });
+  let release!: () => void;
+  const connectionReady = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.exposeFunction("waitForCompletionConnection", () => connectionReady);
+  await enableCompletion(page, () =>
+    page.evaluate(() => {
+      const { __MINT_MEMORY_PLATFORM__: platform, waitForCompletionConnection } =
+        window as unknown as {
+          __MINT_MEMORY_PLATFORM__: MemoryPlatform;
+          waitForCompletionConnection(): Promise<void>;
+        };
+      const list = platform.listModelConnections;
+      platform.listModelConnections = async () => {
+        await waitForCompletionConnection();
+        return list();
+      };
+    }),
+  );
+  const editor = page.getByRole("tabpanel").getByRole("textbox", { name: "", exact: true });
+  await editor.press("End");
+  await page.keyboard.type(" trail");
+  await expect(editor).toHaveText("The trail");
+  release();
+  await expect(editor.getByText("leads to the ridge", { exact: true })).toBeVisible();
+  expect(received).toEqual([JSON.stringify({ before: "The trail", after: "" })]);
+});
 
 test("a paused writer can accept a faint continuation with Tab and undo it", async ({ page }) => {
   await page.route(endpoint, (route) => route.fulfill(response(" leads to the ridge")));

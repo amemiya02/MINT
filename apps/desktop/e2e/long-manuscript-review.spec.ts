@@ -263,9 +263,10 @@ test("section acceptance preserves prior decisions and can be undone in one edit
 test("a proposal returned to pending by section undo follows replacement typing", async ({
   page,
 }) => {
-  const source = "# Methods\n\nOld opening.\n\nKeep this.\n\nOld result.";
+  const source = "# Methods\n\nOld opening.\n\nKeep this.\n\nOld result.\n\nReading anchor.";
   const replacement = source.replaceAll("Old ", "New ");
   const { assistant, editor } = await openProposals(page, source, replacement);
+  await editor.press("ControlOrMeta+End");
   await assistant.getByRole("button", { name: "Review proposed edits" }).click();
   const review = page.getByRole("dialog", { name: "Review proposed edits" });
   await review.getByRole("combobox", { name: "Section" }).selectOption({
@@ -276,6 +277,9 @@ test("a proposal returned to pending by section undo follows replacement typing"
   await page.keyboard.press("Escape");
   await expect(editor).toBeFocused();
   await editor.press("ControlOrMeta+Z");
+  await expect
+    .poll(() => page.evaluate(() => getSelection()?.focusNode?.textContent))
+    .toBe("Reading anchor.");
 
   const authored = "Author's result.";
   await editor.getByText("Old result.", { exact: true }).click();
