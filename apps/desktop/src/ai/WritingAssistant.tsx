@@ -2,7 +2,9 @@ import type { MintEditor } from "@mint/editor";
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { useT } from "../i18n/index.ts";
 import type { Platform } from "../platform/platform.ts";
+import { MaterialRequestNotice, useMaterialRequests } from "./MaterialRequest.tsx";
 import { type EditStatus, ProposedSelectionEdit } from "./ProposedSelectionEdit.tsx";
+import { TaskContextChecklist, useNamedMaterials } from "./TaskContext.tsx";
 import { loadWritingRecipients, type WritingRecipient } from "./writing-recipients.ts";
 import { replacementFromReply, type WritingTurn } from "./writing-sender.ts";
 
@@ -34,6 +36,7 @@ interface Props {
   readonly name: string;
   readonly active: boolean;
   readonly platform: Platform;
+  readonly folder: string | null;
   readonly askRequest: number | null;
   readonly settingsOpen: boolean;
   readonly onAsk: () => void;
@@ -48,6 +51,7 @@ export function WritingAssistant({
   name,
   active,
   platform,
+  folder,
   askRequest,
   settingsOpen,
   onAsk,
@@ -120,6 +124,7 @@ export function WritingAssistant({
           placement={placement}
           setPlacement={setPlacement}
           platform={platform}
+          folder={folder}
           settingsOpen={settingsOpen}
           onSettings={onSettings}
           canApply={canApply}
@@ -135,10 +140,11 @@ function Composer({
   placement,
   setPlacement,
   platform,
+  folder,
   settingsOpen,
   onSettings,
   canApply,
-}: Pick<Props, "name" | "platform" | "settingsOpen" | "onSettings" | "canApply"> & {
+}: Pick<Props, "name" | "platform" | "folder" | "settingsOpen" | "onSettings" | "canApply"> & {
   readonly origin: Origin;
   readonly placement: "inline" | "sidebar" | null;
   readonly setPlacement: (placement: "inline" | "sidebar" | null) => void;
@@ -148,6 +154,11 @@ function Composer({
   const [scope, setScope] = useState<Scope>("selection");
   const [actionOverride, setActionOverride] = useState<Action | null>(null);
   const [documentText, setDocumentText] = useState("");
+  const [includeDraft, setIncludeDraft] = useState(false);
+  const [allowedFolder, setAllowedFolder] = useState<string | null>(null);
+  const searchFolder = allowedFolder === folder ? folder : null;
+  const named = useNamedMaterials();
+  const materialRequests = useMaterialRequests();
   const [includeHistory, setIncludeHistory] = useState(true);
   const [recipients, setRecipients] = useState<readonly WritingRecipient[]>([]);
   const [recipientId, setRecipientId] = useState<string | null>(null);
@@ -165,8 +176,9 @@ function Composer({
     candidate.kind === "agent"
       ? t("writing.recipient.agent", { path: candidate.path })
       : t("writing.recipient.model", { name: candidate.name, endpoint: candidate.endpoint });
-  const material =
-    scope === "selection" ? origin.text : scope === "document" ? documentText : undefined;
+  const selectedText = scope === "selection" ? origin.text : undefined;
+  const sendDraft = scope === "document" || (scope === "selection" && includeDraft);
+  const currentDraft = sendDraft ? { name, text: documentText } : undefined;
   const explicitDirect = /(?:^|[,，]\s*)(?:apply directly|直接改)[.!。！]?\s*$/i.test(instruction);
   const action =
     scope !== "selection"
@@ -181,13 +193,13 @@ function Composer({
   }, []);
 
   useEffect(() => {
-    if (scope !== "document") return;
+    if (!sendDraft) return;
     const refresh = () => setDocumentText(origin.editor.getText().replace(/^\uFEFF/, ""));
     refresh();
     return origin.editor.subscribe((event) => {
       if (event.type === "change") refresh();
     });
-  }, [scope, origin]);
+  }, [sendDraft, origin]);
 
   useEffect(() => {
     if (settingsOpen) return;
@@ -239,7 +251,7 @@ function Composer({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!instruction.trim() || !recipient || busy || loading) return;
+    if (!instruction.trim() || !recipient || busy || loading || named.loading) return;
     const prompt = instruction.trim();
     const history =
       includeHistory && turns.length
@@ -250,12 +262,28 @@ function Composer({
     if (placement === "inline") origin.editor.focus();
 
     try {
-      const result = await recipient.send({
-        instruction: prompt,
-        selectedText: material,
-        history,
-        responseFormat: action === "comment" ? undefined : "replacement",
-      });
+      const draft = sendDraft
+        ? { name, text: origin.editor.getText().replace(/^\uFEFF/, "") }
+        : undefined;
+      const result = await materialRequests.send(
+        recipient.send,
+        {
+          instruction: prompt,
+          selectedText,
+          history,
+          responseFormat: action === "comment" ? undefined : "replacement",
+          taskContext:
+            draft || named.materials.length || searchFolder
+              ? {
+                  currentDraft: draft,
+                  materials: named.materials.length ? named.materials : undefined,
+                  folderSearch: searchFolder ? true : undefined,
+                }
+              : undefined,
+        },
+        labelFor(recipient),
+        searchFolder,
+      );
       if (!mounted.current) return;
       const replacement = action === "comment" ? undefined : replacementFromReply(result);
       const edit = replacement ? (action === "direct" ? apply(replacement) : "preview") : undefined;
@@ -264,13 +292,14 @@ function Composer({
         {
           instruction: prompt,
           reply: replacement ?? result.text,
-          material,
+          material: selectedText ?? draft?.text,
           recipient: labelFor(recipient),
           edit,
         },
       ]);
       setInstruction("");
       setActionOverride(null);
+      setAllowedFolder(null);
     } catch (problem) {
       if (!mounted.current) return;
       const code = problem instanceof Error ? problem.message : problem;
@@ -355,7 +384,7 @@ function Composer({
             </article>
           );
         })}
-        {busy && <p>{t("agent.working")}</p>}
+        {busy && !materialRequests.pending && <p>{t("agent.working")}</p>}
       </div>
       {error && (
         <p role="alert">{t(error === "agentChanged" ? "agent.reviewAgain" : `writing.${error}`)}</p>
@@ -419,7 +448,11 @@ function Composer({
                   className={fieldClass}
                   value={recipient?.id ?? ""}
                   title={recipient && labelFor(recipient)}
-                  onChange={(event) => setRecipientId(event.target.value)}
+                  onChange={(event) => {
+                    setRecipientId(event.target.value);
+                    setAllowedFolder(null);
+                    setIncludeHistory(false);
+                  }}
                 >
                   {!recipient && (
                     <option value="">
@@ -446,14 +479,17 @@ function Composer({
               </p>
             )}
             {loadFailed && <p role="alert">{t("writing.connectionsFailed")}</p>}
-            {material !== undefined && (
-              <div>
-                <p className="text-xs text-(--mint-muted)">{t("writing.context")}</p>
-                <pre className="max-h-28 overflow-auto whitespace-pre-wrap wrap-anywhere rounded bg-(--mint-hover) p-2">
-                  {material}
-                </pre>
-              </div>
-            )}
+            <TaskContextChecklist
+              platform={platform}
+              named={named}
+              recipient={recipient && labelFor(recipient)}
+              selection={selectedText}
+              draft={currentDraft}
+              includeDraft={scope === "selection" ? setIncludeDraft : undefined}
+              folder={folder}
+              searchEnabled={!!searchFolder}
+              onSearchChange={(checked) => setAllowedFolder(checked ? folder : null)}
+            />
             {turns.length > 0 && (
               <label className="flex items-start gap-2 text-xs">
                 <input
@@ -468,7 +504,7 @@ function Composer({
               <button
                 type="submit"
                 className={buttonClass}
-                disabled={!recipient || loading || !instruction.trim()}
+                disabled={!recipient || loading || !instruction.trim() || named.loading}
               >
                 {t("writing.send")}
               </button>
@@ -477,6 +513,14 @@ function Composer({
               </button>
             </div>
           </fieldset>
+          {materialRequests.pending && (
+            <MaterialRequestNotice
+              key={materialRequests.pending.id}
+              pending={materialRequests.pending}
+              platform={platform}
+              onDecision={materialRequests.decide}
+            />
+          )}
         </form>
       )}
     </Container>

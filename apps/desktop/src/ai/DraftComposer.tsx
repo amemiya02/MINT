@@ -3,7 +3,9 @@ import { type MessageKey, useT } from "../i18n/index.ts";
 import type { Platform } from "../platform/platform.ts";
 import { ExternalAgentAccessNotice } from "./ExternalAgentPanel.tsx";
 import { type ExternalAgent, externalAgentSender } from "./external-agent.ts";
+import { MaterialRequestNotice, useMaterialRequests } from "./MaterialRequest.tsx";
 import { modelEndpoint, modelWritingSender, type SavedModelConnection } from "./model.ts";
+import { TaskContextChecklist, useNamedMaterials } from "./TaskContext.tsx";
 
 const field =
   "w-full rounded-md border border-(--mint-border) bg-(--mint-bg) px-2 py-1 focus-visible:outline-2 focus-visible:outline-(--mint-accent)";
@@ -12,12 +14,14 @@ const button =
 
 export function DraftComposer({
   platform,
+  folder,
   settingsOpen,
   canApplyDraft,
   onDraft,
   onClose,
 }: {
   readonly platform: Platform;
+  readonly folder: string | null;
   readonly settingsOpen: boolean;
   readonly canApplyDraft: () => boolean;
   readonly onDraft: (text: string) => boolean;
@@ -37,6 +41,10 @@ export function DraftComposer({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<MessageKey | null>(null);
   const [unapplied, setUnapplied] = useState("");
+  const named = useNamedMaterials();
+  const [allowedFolder, setAllowedFolder] = useState<string | null>(null);
+  const searchFolder = allowedFolder === folder ? folder : null;
+  const materialRequests = useMaterialRequests();
   const agent = agents.find(({ path }) => `agent:${path}` === choice);
   const remembered = models.find(({ id }) => `model:${id}` === choice);
   const custom = !choice;
@@ -47,6 +55,13 @@ export function DraftComposer({
   } catch {
     // Sending stays unavailable until the endpoint is valid.
   }
+  const recipient = agent
+    ? t("writing.recipient.agent", { path: agent.path })
+    : !unavailable && endpoint
+      ? remembered
+        ? t("writing.recipient.model", { name: remembered.name, endpoint })
+        : endpoint
+      : undefined;
 
   useEffect(() => {
     input.current?.focus();
@@ -86,6 +101,7 @@ export function DraftComposer({
 
   const canSend =
     !!instruction.trim() &&
+    !named.loading &&
     (!!agent || (!!endpoint && (!!remembered || (custom && !!model.trim()))));
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -104,9 +120,21 @@ export function DraftComposer({
         : remembered
           ? modelWritingSender(platform.sendModelMessage, remembered)
           : modelWritingSender(platform.sendModelMessage, { address, model }, { apiKey: key });
-      const reply = await send({
-        instruction: t("draft.prompt", { instruction: instruction.trim() }),
-      });
+      const reply = await materialRequests.send(
+        send,
+        {
+          instruction: t("draft.prompt", { instruction: instruction.trim() }),
+          taskContext:
+            named.materials.length || searchFolder
+              ? {
+                  materials: named.materials.length ? named.materials : undefined,
+                  folderSearch: searchFolder ? true : undefined,
+                }
+              : undefined,
+        },
+        recipient ?? "",
+        searchFolder,
+      );
       if (request !== generation.current) return;
       if (
         !reply.text.trim() ||
@@ -138,7 +166,7 @@ export function DraftComposer({
     <form
       aria-labelledby={id}
       onSubmit={submit}
-      className="space-y-2 border-b border-(--mint-border) px-4 py-3 text-sm"
+      className="max-h-[70%] shrink-0 space-y-2 overflow-auto border-b border-(--mint-border) px-4 py-3 text-sm"
     >
       <div className="flex items-center justify-between gap-2">
         <h2 id={id} className="font-medium">
@@ -167,6 +195,7 @@ export function DraftComposer({
               onChange={(event) => {
                 setChoice(event.target.value);
                 setKey("");
+                setAllowedFolder(null);
               }}
             >
               <option value="">{t("models.custom")}</option>
@@ -202,6 +231,7 @@ export function DraftComposer({
                   setChoice("");
                   setAddress(event.target.value);
                   setKey("");
+                  setAllowedFolder(null);
                 }}
               />
             </label>
@@ -229,10 +259,16 @@ export function DraftComposer({
         {custom && address && !endpoint && (
           <p className="text-xs text-(--mint-muted)">{t("models.error.address")}</p>
         )}
-        <p className="wrap-anywhere text-xs text-(--mint-muted)">
-          {t("draft.scope")}
-          {agent ? ` · Codex · ${agent.path}` : !unavailable && endpoint && ` · ${endpoint}`}
-        </p>
+        <p className="text-xs text-(--mint-muted)">{t("draft.scope")}</p>
+        <TaskContextChecklist
+          platform={platform}
+          named={named}
+          emptyDraft
+          recipient={recipient}
+          folder={folder}
+          searchEnabled={!!searchFolder}
+          onSearchChange={(checked) => setAllowedFolder(checked ? folder : null)}
+        />
         {agent && (
           <details className="space-y-1 text-xs text-(--mint-muted)">
             <summary>
@@ -245,7 +281,16 @@ export function DraftComposer({
           {t("draft.generate")}
         </button>
       </fieldset>
-      {busy && <p role="status">{t("draft.generating")}</p>}
+      {materialRequests.pending ? (
+        <MaterialRequestNotice
+          key={materialRequests.pending.id}
+          pending={materialRequests.pending}
+          platform={platform}
+          onDecision={materialRequests.decide}
+        />
+      ) : (
+        busy && <p role="status">{t("draft.generating")}</p>
+      )}
       {error && <p role="alert">{t(error)}</p>}
       {unapplied && (
         <pre className="max-h-32 overflow-auto whitespace-pre-wrap wrap-anywhere">{unapplied}</pre>
