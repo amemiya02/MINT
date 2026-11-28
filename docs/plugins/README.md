@@ -160,3 +160,19 @@ A package can provide its own starting Markdown. The host expands `{{date}}` to 
   "journalTemplate": "# {{date}}\n\n## Observations\n\n"
 }
 ```
+
+## Task summary
+
+Install **Task summary** in Settings → Plugins, grant folder read access, and open its sidebar. Each task shows its completion state, relative Markdown path, and line number. Select a task to jump to its source. The sidebar refreshes when you save a document or another editor changes files in the folder. Browsing requires only `folder.read`.
+
+A local package can contribute this view with its own name and identifier.
+
+```json
+{
+  "apiVersion": 1,
+  "id": "example.research-checklist",
+  "name": "Research checklist",
+  "permissions": ["folder.read"],
+  "sidebar": "tasks"
+}
+```

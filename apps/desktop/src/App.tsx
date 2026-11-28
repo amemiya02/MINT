@@ -29,6 +29,7 @@ import { PresentationEntry } from "./plugins/Presentation.tsx";
 import { PropertyTable } from "./plugins/PropertyTable.tsx";
 import { RelationshipGraph } from "./plugins/RelationshipGraph.tsx";
 import { TagBrowser } from "./plugins/TagBrowser.tsx";
+import { TaskSummary } from "./plugins/TaskSummary.tsx";
 import { timingRenderer } from "./plugins/timing-diagrams.ts";
 import { ZoteroCitation } from "./plugins/ZoteroCitation.tsx";
 import { QuickOpen } from "./quick-open/QuickOpen.tsx";
@@ -158,6 +159,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     properties: PropertyTable,
     kanban: KanbanBoard,
     tags: TagBrowser,
+    tasks: TaskSummary,
   }[selectedPlugin?.manifest.sidebar ?? "tags"];
   const removed = sidebarView.startsWith("plugin:") && !selectedPlugin;
   useEffect(() => {

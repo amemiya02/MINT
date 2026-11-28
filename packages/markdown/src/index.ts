@@ -7,3 +7,4 @@ export { exportHtml } from "./document.ts";
 export { renderHtml } from "./export.ts";
 export { headingAnchors, markdownHeadings, matchingHeadings } from "./heading-anchor.ts";
 export { htmlToMarkdown } from "./html-to-markdown.ts";
+export { markdownTasks } from "./tasks.ts";

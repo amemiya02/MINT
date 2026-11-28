@@ -20,6 +20,7 @@ import {
   relationshipGraph,
   slidePresentation,
   tagBrowser,
+  taskSummary,
   timingDiagrams,
   uninstall,
   update,
@@ -55,6 +56,7 @@ export function pluginName(m: PluginManifest, t: Translate) {
   if (m.id === propertyTable.id) return t("plugin.properties");
   if (m.id === kanbanBoard.id) return t("kanban.name");
   if (m.id === relationshipGraph.id) return t("graph.name");
+  if (m.id === taskSummary.id) return t("tasks.name");
   if (m.id === tagBrowser.id) return t("plugin.tags");
   return m.id === writingStatistics.id ? t("plugin.statistics") : m.name;
 }
@@ -90,6 +92,7 @@ export function PluginSettings() {
     writingTemplates,
     dailyJournal,
     tagBrowser,
+    taskSummary,
     relationshipGraph,
     kanbanBoard,
     propertyTable,

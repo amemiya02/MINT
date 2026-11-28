@@ -1,11 +1,9 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useState } from "react";
 import type { FolderTree } from "../folder/file-tree.ts";
+import { useFolderRows } from "../folder/useFolderRows.ts";
 import type { Platform } from "../platform/platform.ts";
 import { useDialect } from "../settings/useDialect.ts";
 import { type FolderReference, folderReferences } from "./references.ts";
-
-const noSubscription = () => () => {};
-const noRevision = () => null;
 
 export function useFolderReferences(
   platform: Platform,
@@ -14,10 +12,7 @@ export function useFolderReferences(
   target?: string,
   hasAccess?: () => boolean,
 ) {
-  const revision = useSyncExternalStore(
-    tree?.subscribe ?? noSubscription,
-    tree?.getRows ?? noRevision,
-  );
+  const revision = useFolderRows(tree);
   const dialect = useDialect(wikilinks);
   const [results, setResults] = useState<FolderReference[] | "error" | null>(null);
   useEffect(() => {

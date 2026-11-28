@@ -20,7 +20,7 @@ export interface PluginManifest {
   statistics?: (keyof WordCount)[];
   templates?: { name: string; text: string }[];
   exportFormat?: PluginFormat;
-  sidebar?: "tags" | "properties" | "kanban" | "graph";
+  sidebar?: "tags" | "properties" | "kanban" | "graph" | "tasks";
   presentation?: "slides";
   diagram?: "timing";
   citation?: "zotero";
@@ -90,6 +90,14 @@ export const propertyTable: PluginManifest = {
   name: "Property table",
   permissions: ["folder.read"],
   sidebar: "properties",
+};
+
+export const taskSummary: PluginManifest = {
+  apiVersion: 1,
+  id: "mint.task-summary",
+  name: "Task summary",
+  permissions: ["folder.read"],
+  sidebar: "tasks",
 };
 
 export const kanbanBoard: PluginManifest = {
@@ -198,7 +206,10 @@ export function isManifest(value: unknown): value is PluginManifest {
   }
   if ("sidebar" in m) {
     if (m.sidebar === "kanban") required.add("folder.status.write");
-    else if (m.sidebar !== "tags" && m.sidebar !== "properties" && m.sidebar !== "graph")
+    else if (
+      typeof m.sidebar !== "string" ||
+      !["tags", "properties", "graph", "tasks"].includes(m.sidebar)
+    )
       return false;
     required.add("folder.read");
   }

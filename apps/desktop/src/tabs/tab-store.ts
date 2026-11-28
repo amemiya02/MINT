@@ -37,7 +37,9 @@ export type ConflictChoice = "keepMine" | "loadDisk";
 export interface LineRange {
   /** Original line text when navigating from a search result on disk. */
   readonly text?: string;
-  /** 1-based line number; lines end at a line feed. */
+  /** Folder search counts line feeds. Markdown also counts a standalone carriage return. */
+  readonly lineEndings?: "lf" | "markdown";
+  /** 1-based line number. */
   readonly line: number;
   /** `[from, to)` as UTF-16 offsets into the line. */
   readonly from: number;
@@ -50,7 +52,8 @@ function startOfMatch(text: string, range: LineRange): number | null {
   let start = 0;
   let matches = 0;
   let candidate = 0;
-  for (const [index, line] of text.split("\n").entries()) {
+  const lines = range.lineEndings === "markdown" ? text.replace(/\r(?!\n)/g, "\n") : text;
+  for (const [index, line] of lines.split("\n").entries()) {
     if (range.text === undefined || line.replace(/\r+$/, "") === range.text) {
       if (index + 1 === range.line) return start;
       candidate = start;
