@@ -166,4 +166,4 @@ jobs:
           Xvfb :99 -screen 0 1280x1024x24 &
           tauri-driver &
           sleep 3
-          node --test smoke/open-edit-save.smoke.ts
+          node --test --test-reporter=tap smoke/open-edit-save.smoke.ts
