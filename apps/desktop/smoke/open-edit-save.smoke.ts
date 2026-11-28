@@ -114,6 +114,24 @@ async function openSettings() {
   }).catch(explain);
 }
 
+/** WebDriver selects a real disk file directly on the WebView's upload control. */
+async function choosePackage(button: string, path: string) {
+  await command("POST", `/session/${session}/execute/sync`, {
+    script: `document.addEventListener('click', function intercept(event) {
+      if (!event.target.matches?.('input[type=file]')) return;
+      event.preventDefault();
+      document.removeEventListener('click', intercept, true);
+    }, true);`,
+    args: [],
+  });
+  await click(button);
+  const input = await command<Record<string, string>>("POST", `/session/${session}/element`, {
+    using: "css selector",
+    value: "dialog[open] input[type=file]",
+  });
+  await command("POST", `/session/${session}/element/${input[elementKey]}/value`, { text: path });
+}
+
 /** GTK file pickers are native windows outside the WebDriver DOM. */
 async function chooseNativePath(button: string, titlePattern: string, path: string) {
   const choose = async () => {
@@ -629,11 +647,7 @@ test("declining a plugin update keeps its native read grant and withholds its wr
   const upload = async (manifest: object) => {
     const path = join(dir, "smoke.mint.json");
     await writeFile(path, JSON.stringify(manifest));
-    await chooseNativePath(
-      "Install a MINT plugin file",
-      "^(Open|Choose|Select|Upload|File Upload)",
-      path,
-    );
+    await choosePackage("Install a MINT plugin file", path);
   };
   const path = join(dir, "update.md");
   await writeFile(path, "plugin update draft");
@@ -1017,11 +1031,7 @@ test("import a hidden Notion attachment and embed its granted bytes in a native 
     );
   };
   await chooseFormat("Notion import");
-  await chooseNativePath(
-    "Notion export (.zip)",
-    "^(Open|Choose|Select|Upload|File Upload)",
-    archive,
-  );
+  await choosePackage("Notion export (.zip)", archive);
   await chooseNativePath("Import", "^Choose the parent folder for the import$", folder);
   await click("Open imported folder");
   await clickPath("//*[@role='treeitem' and @aria-label='Map.md']");
