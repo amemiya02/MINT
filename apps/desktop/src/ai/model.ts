@@ -1,4 +1,4 @@
-import { replacementInstruction, type WritingReply, type WritingSender } from "./writing-sender.ts";
+import { replacementInstruction, type WritingReply, type WritingOptions, type WritingSender } from "./writing-sender.ts";
 
 export interface ModelConnection {
   readonly address: string;
@@ -24,10 +24,9 @@ export interface ModelMessage {
   readonly content: string;
 }
 
-interface ModelOptions {
+interface ModelOptions extends WritingOptions {
   /** Supply credentials for this request only. */
   readonly apiKey?: string;
-  readonly onDelta?: (text: string) => void;
 }
 
 interface ModelReply extends WritingReply {
@@ -49,7 +48,7 @@ export function modelWritingSender(
   connection: ModelTarget,
   options?: ModelOptions,
 ): WritingSender<ModelReply> {
-  return ({ instruction, selectedText, history, responseFormat }) => {
+  return ({ instruction, selectedText, history, responseFormat }, writingOptions) => {
     const messages: ModelMessage[] = [];
     if (responseFormat === "replacement")
       messages.push({ role: "system", content: replacementInstruction });
@@ -64,7 +63,7 @@ export function modelWritingSender(
       content:
         selectedText === undefined ? instruction : JSON.stringify({ instruction, selectedText }),
     });
-    return send(connection, messages, options);
+    return send(connection, messages, { ...options, ...writingOptions });
   };
 }
 
@@ -92,6 +91,7 @@ export type ModelResponseEvent =
 type ModelTransport = (
   request: ModelRequest | ConnectedModelRequest,
   receive: (event: ModelResponseEvent) => void,
+  signal?: AbortSignal,
 ) => Promise<void>;
 
 export const modelTimeoutMs = 120_000;
@@ -149,9 +149,10 @@ export function createModelSender(transport: ModelTransport): SendModelMessage {
     let eventData: string[] = [];
 
     function readEvent() {
-      if (!eventData.length || sawEnd || malformed) return;
+      if (!eventData.length) return;
       const payload = eventData.join("\n");
       eventData = [];
+      if (sawEnd || malformed) return;
       if (payload === "[DONE]") {
         sawEnd = true;
         return;
@@ -170,6 +171,7 @@ export function createModelSender(transport: ModelTransport): SendModelMessage {
     }
 
     function receive(event: ModelResponseEvent) {
+      if (options?.signal?.aborted) return;
       switch (event.kind) {
         case "headers":
           streamed = event.contentType.split(";")[0]?.trim().toLowerCase() === "text/event-stream";
@@ -195,13 +197,13 @@ export function createModelSender(transport: ModelTransport): SendModelMessage {
 
     const body = { messages, stream: !!onDelta };
     if ("id" in connection) {
-      await transport({ connectionId: connection.id, body }, receive);
+      await transport({ connectionId: connection.id, body }, receive, options?.signal);
     } else {
       const url = modelEndpoint(connection.address);
       const model = connection.model.trim();
       if (!model) throw "invalidRequest";
       const apiKey = modelApiKey(options?.apiKey ?? "");
-      await transport({ url, apiKey, body: { ...body, model } }, receive);
+      await transport({ url, apiKey, body: { ...body, model } }, receive, options?.signal);
     }
     if (streamed) {
       if (malformed) throw "invalidReply";

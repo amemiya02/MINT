@@ -1,7 +1,8 @@
 import type { MintEditor } from "@mint/editor";
-import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useT } from "../i18n/index.ts";
 import type { Platform } from "../platform/platform.ts";
+import { useTabStore } from "../tabs/context.ts";
 import { type EditStatus, ProposedSelectionEdit } from "./ProposedSelectionEdit.tsx";
 import { ReplyExcerpt } from "./ReplyExcerpt.tsx";
 import { type SelectionEdit, selectionEdits } from "./selection-edits.ts";
@@ -11,7 +12,9 @@ import {
   captureWritingSelection,
   type WritingSelection,
 } from "./writing-selection.ts";
-import { replacementFromReply, type WritingTurn } from "./writing-sender.ts";
+import { failureStatus, replyStatus, type AttemptStatus } from "./writing-attempt.ts";
+import { replacementFromReply, splitWritingProgress, type WritingRequest, type WritingTurn } from "./writing-sender.ts";
+import { useWritingTask } from "./WritingTasks.tsx";
 
 const buttonClass =
   "rounded-md border border-(--mint-border) bg-(--mint-bg) px-2 py-1 hover:bg-(--mint-hover) focus-visible:outline-2 focus-visible:outline-(--mint-accent) disabled:opacity-50";
@@ -27,7 +30,24 @@ interface Origin extends WritingSelection {
   readonly id: number;
 }
 
+interface Task {
+  readonly request: WritingRequest;
+  readonly action: Action;
+  readonly scope: Scope;
+  readonly seen: Set<string>;
+}
+
+interface Attempt {
+  readonly task: Task;
+  readonly recipientId: string;
+  readonly recipient: string;
+  readonly status: AttemptStatus;
+  readonly partial: string;
+}
+
 interface Turn extends WritingTurn {
+  readonly status?: AttemptStatus;
+  readonly partial?: string;
   readonly material?: string;
   readonly recipient: string;
   readonly recipientId: string;
@@ -76,6 +96,7 @@ export function WritingAssistant({
   const t = useT();
   const [hasSelection, setHasSelection] = useState(false);
   const [origin, setOrigin] = useState<Origin | null>(null);
+  const taskRunning = useRef(false);
   const [placement, setPlacement] = useState<"inline" | "sidebar" | null>(null);
 
   useEffect(() => {
@@ -92,6 +113,10 @@ export function WritingAssistant({
 
   useEffect(() => {
     if (!askRequest || !editor) return;
+    if (taskRunning.current) {
+      setPlacement("sidebar");
+      return;
+    }
     const selection = captureWritingSelection(editor);
     if (!selection) return;
     setOrigin({ id: askRequest, ...selection });
@@ -132,6 +157,7 @@ export function WritingAssistant({
           placement={placement}
           setPlacement={setPlacement}
           active={active}
+          taskRunning={taskRunning}
           platform={platform}
           settingsOpen={settingsOpen}
           onSettings={onSettings}
@@ -149,6 +175,7 @@ function Composer({
   name,
   placement,
   setPlacement,
+  taskRunning,
   active,
   platform,
   settingsOpen,
@@ -168,6 +195,7 @@ function Composer({
 > & {
   readonly origin: Origin;
   readonly placement: "inline" | "sidebar" | null;
+  readonly taskRunning: { current: boolean };
   readonly setPlacement: (placement: "inline" | "sidebar" | null) => void;
 }) {
   const t = useT();
@@ -180,7 +208,12 @@ function Composer({
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
   const [turns, setTurns] = useState<readonly Turn[]>([]);
-  const [busy, setBusy] = useState(false);
+  const [rewriting, setBusy] = useState(false);
+  const [attempt, setAttempt] = useState<Attempt | null>(null);
+  const [retryId, setRetryId] = useState("");
+  const controller = useRef<AbortController | null>(null);
+  const busy = attempt?.status === "working" || rewriting;
+  const store = useTabStore();
   const [error, setError] = useState<"sendFailed" | "agentChanged" | "missingSelection" | null>(
     null,
   );
@@ -214,10 +247,12 @@ function Composer({
     const tracked = trackedSuggestions.current;
     return () => {
       mounted.current = false;
+      taskRunning.current = false;
+      controller.current?.abort();
       for (const range of tracked) range.release();
       tracked.clear();
     };
-  }, []);
+  }, [taskRunning]);
 
   useEffect(() => {
     const refresh = () => setDraft(origin.editor.getText());
@@ -245,8 +280,8 @@ function Composer({
   }, [platform, settingsOpen]);
 
   useEffect(() => {
-    if (placement && !settingsOpen) input.current?.focus();
-  }, [placement, settingsOpen]);
+    if (placement && active && !settingsOpen) input.current?.focus();
+  }, [placement, active, settingsOpen]);
 
   function close() {
     setPlacement(null);
@@ -263,16 +298,17 @@ function Composer({
     origin.editor.focus();
   }
 
-  async function applyDirectly(replacement: string): Promise<boolean> {
+  async function applyDirectly(replacement: string, signal: AbortSignal): Promise<boolean> {
     return (
       (await refreshDisk()) &&
       mounted.current &&
+      !signal.aborted &&
       applyWritingSelection(origin, replacement, true).status === "applied"
     );
   }
 
-  function preview(replacement: string): Suggestion[] {
-    return selectionEdits(origin.text, replacement).map((edit) => {
+  function preview(edits: SelectionEdit[]): Suggestion[] {
+    return edits.map((edit) => {
       const range = origin.range.trackSubrange(edit);
       trackedSuggestions.current.add(range);
       return { id: edit.from, before: edit.before, after: edit.after, range, status: "preview" };
@@ -376,56 +412,129 @@ function Composer({
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!instruction.trim() || !recipient || busy || loading || checkingDisk.current) return;
-    const prompt = instruction.trim();
-    const history =
-      includeHistory && turns.length
-        ? turns.flatMap(({ instruction, reply, suggestions }) => [
-            { instruction, reply },
-            ...(suggestions?.flatMap(
-              ({ comments }) =>
-                comments?.map(({ instruction, reply }) => ({ instruction, reply })) ?? [],
-            ) ?? []),
-          ])
-        : undefined;
-    setBusy(true);
-    setError(null);
-    if (placement === "inline") origin.editor.focus();
-
-    try {
-      const result = await recipient.send({
-        instruction: prompt,
+    const history = includeHistory
+      ? turns.flatMap(({ status, instruction, reply, suggestions }) => [
+          ...(status === "complete" && reply ? [{ instruction, reply }] : []),
+          ...(suggestions?.flatMap(
+            ({ comments }) =>
+              comments?.map(({ instruction, reply }) => ({ instruction, reply })) ?? [],
+          ) ?? []),
+        ])
+      : [];
+    const task: Task = {
+      request: {
+        instruction: instruction.trim(),
         selectedText: material,
-        history,
+        history: history.length ? history : undefined,
         responseFormat: action === "comment" ? undefined : "replacement",
-      });
-      if (!mounted.current) return;
-      const replacement = action === "comment" ? undefined : replacementFromReply(result);
-      const appliedDirectly =
-        replacement !== undefined && action === "direct" && (await applyDirectly(replacement));
-      if (!mounted.current) return;
-      const suggestions =
-        replacement !== undefined && !appliedDirectly ? preview(replacement) : undefined;
-      setTurns((previous) => [
-        ...previous,
-        {
-          instruction: prompt,
-          reply: replacement ?? result.text,
-          material,
-          recipient: labelFor(recipient),
-          recipientId: recipient.id,
-          appliedDirectly,
-          suggestions,
-        },
-      ]);
-      setInstruction("");
-      setActionOverride(null);
-    } catch (problem) {
-      if (mounted.current) reportSendError(problem);
-    } finally {
-      if (mounted.current) setBusy(false);
-    }
+      },
+      action,
+      scope,
+      seen: new Set(),
+    };
+    setInstruction("");
+    setActionOverride(null);
+    if (placement === "inline") origin.editor.focus();
+    await runTask(task, recipient);
   }
 
+  async function runTask(task: Task, connection: WritingRecipient) {
+    if (controller.current || rewriting || checkingDisk.current) return;
+    const running = new AbortController();
+    const { signal } = running;
+    controller.current = running;
+    taskRunning.current = true;
+    const recipient = labelFor(connection);
+    const entry = { task, recipientId: connection.id, recipient };
+    const editing = task.action !== "comment";
+    let text = "";
+    let status: AttemptStatus;
+    let finalReplacement: string | undefined;
+    setRetryId("");
+    setError(null);
+    setAttempt({ ...entry, status: "working", partial: "" });
+
+    try {
+      const result = await connection.send(task.request, {
+        signal,
+        onDelta: (delta) => {
+          if (signal.aborted) return;
+          text += delta;
+          setAttempt({ ...entry, status: "working", partial: text });
+        },
+      });
+      text = result.text;
+      status = signal.aborted ? "stopped" : replyStatus(result);
+      if (editing && status === "complete") finalReplacement = replacementFromReply(result);
+    } catch (problem) {
+      status = failureStatus(problem, signal);
+      if (mounted.current && status === "failed") reportSendError(problem);
+    }
+    if (!mounted.current) return;
+
+    let appliedDirectly = false;
+    if (finalReplacement !== undefined && task.action === "direct" && task.seen.size === 0) {
+      try {
+        appliedDirectly = await applyDirectly(finalReplacement, signal);
+      } catch {
+        // The proposal remains available for comparison if the disk cannot be refreshed.
+      }
+    }
+    if (!mounted.current) return;
+    if (signal.aborted && !appliedDirectly) status = "stopped";
+    const progress = splitWritingProgress(text, editing);
+    const replacement = status === "complete" ? finalReplacement : progress.replacement;
+    const partial = status === "complete" ? "" : progress.partial;
+    const edits = replacement === undefined ? undefined : selectionEdits(origin.text, replacement);
+    const newEdits = edits?.filter((edit) => {
+      const key = JSON.stringify([edit.from, edit.to, edit.before, edit.after]);
+      if (task.seen.has(key)) return false;
+      task.seen.add(key);
+      return true;
+    });
+    const suggestions = newEdits && !appliedDirectly ? preview(newEdits) : undefined;
+    setTurns((previous) => [
+      ...previous,
+      {
+        instruction: task.request.instruction,
+        reply: status === "complete" ? (replacement ?? text) : (replacement ?? ""),
+        material: task.request.selectedText,
+        recipient,
+        recipientId: connection.id,
+        appliedDirectly,
+        suggestions,
+        status,
+        partial,
+      },
+    ]);
+    setAttempt({ ...entry, status, partial: "" });
+    controller.current = null;
+    taskRunning.current = false;
+  }
+
+  const progress = splitWritingProgress(attempt?.partial ?? "", attempt?.task.action !== "comment");
+  const inFlightCount = progress.replacement === undefined
+    ? 0
+    : selectionEdits(origin.text, progress.replacement).length;
+  const stop = () => controller.current?.abort();
+  const report = useMemo(() => attempt && ({
+    tabId,
+    name,
+    recipient: attempt.recipient,
+    material: t(`writing.scope.${attempt.task.scope}`),
+    status: attempt.status,
+    count: Math.max(inFlightCount, attempt.task.seen.size),
+    stop: attempt.status === "working" ? () => controller.current?.abort() : undefined,
+    reveal: () => {
+      store.activate(tabId);
+      setPlacement("sidebar");
+    },
+  }), [attempt, inFlightCount, name, setPlacement, store, t, tabId]);
+  useWritingTask(report);
+
+  const canRetry = attempt && attempt.status !== "working" && attempt.status !== "complete";
+  const sameConnection = canRetry && recipients.find(({ id }) => id === attempt.recipientId);
+  const otherConnection = canRetry && recipients.find(({ id }) => id === retryId);
   if (!placement) return null;
   const sidebar = placement === "sidebar";
   const Container = sidebar ? "aside" : "section";
@@ -558,13 +667,56 @@ function Composer({
                   <pre className="whitespace-pre-wrap wrap-anywhere">{turn.reply}</pre>
                 </>
               ) : null}
+              {turn.partial && (
+                <div>
+                  <p>{t("writing.task.partial")}</p>
+                  <pre className="whitespace-pre-wrap wrap-anywhere">{turn.partial}</pre>
+                </div>
+              )}
               {!!turn.reply &&
                 renderReplyExcerpt(turn.reply, !!(suggestions || turn.appliedDirectly))}
             </article>
           );
         })}
-        {busy && <p>{t("agent.working")}</p>}
+        {attempt?.status === "working" && (
+          <>
+            <p>{t("writing.task.working")}</p>
+            {progress.partial && <pre className="whitespace-pre-wrap wrap-anywhere">{progress.partial}</pre>}
+          </>
+        )}
+        {rewriting && <p>{t("agent.working")}</p>}
+        {canRetry && <p role="status">{t(`writing.task.${attempt.status}`)}</p>}
       </div>
+      {attempt?.status === "working" && (
+        <button type="button" className={buttonClass} onClick={stop}>
+          {t("writing.task.stop")}
+        </button>
+      )}
+      {canRetry && (
+        <div className="flex flex-wrap items-end gap-2">
+          <button type="button" className={buttonClass} disabled={!sameConnection || busy}
+            onClick={() => sameConnection && void runTask(attempt.task, sameConnection)}>
+            {t("writing.task.retry")}
+          </button>
+          {recipients.some(({ id }) => id !== attempt.recipientId) && (
+            <>
+              <label className="grid gap-1">
+                {t("writing.task.retryConnection")}
+                <select className={fieldClass} value={retryId} onChange={(event) => setRetryId(event.target.value)}>
+                  <option value="">{t("writing.chooseRecipient")}</option>
+                  {recipients.filter(({ id }) => id !== attempt.recipientId).map((candidate) => (
+                    <option key={candidate.id} value={candidate.id}>{labelFor(candidate)}</option>
+                  ))}
+                </select>
+              </label>
+              <button type="button" className={buttonClass} disabled={!otherConnection || busy}
+                onClick={() => otherConnection && void runTask(attempt.task, otherConnection)}>
+                {t("writing.task.retryOther")}
+              </button>
+            </>
+          )}
+        </div>
+      )}
       {error && (
         <p role="alert">{t(error === "agentChanged" ? "agent.reviewAgain" : `writing.${error}`)}</p>
       )}

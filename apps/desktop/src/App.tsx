@@ -12,6 +12,7 @@ import { DraftComposer } from "./ai/DraftComposer.tsx";
 import { ExternalAgentDialog } from "./ai/ExternalAgentPanel.tsx";
 import { inlineCompletionSender } from "./ai/inline-completion.ts";
 import { ReplyExcerpt } from "./ai/ReplyExcerpt.tsx";
+import { type WritingTask, WritingTasks, WritingTasksContext } from "./ai/WritingTasks.tsx";
 import { captureWritingSelection, type WritingSelection } from "./ai/writing-selection.ts";
 import { AnnotationDialog, AnnotationPanel } from "./annotations/Annotations.tsx";
 import { createAnnotationStorage } from "./annotations/annotation-storage.ts";
@@ -141,6 +142,16 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   } = useOverlays();
   const { shortcuts, wikilinkFolders, inlineCompletionModel } = useSettings().settings;
   const active = tabs.find((tab) => tab.id === activeId) ?? null;
+  const [writingTasks, setWritingTasks] = useState<ReadonlyMap<string, WritingTask>>(() => new Map());
+  const publishWritingTask = useCallback((id: string, task: WritingTask | null) => {
+    setWritingTasks((previous) => {
+      if (!task && !previous.has(id)) return previous;
+      const next = new Map(previous);
+      if (task) next.set(id, task);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
   const [draftTabs, setDraftTabs] = useState<ReadonlySet<number>>(() => new Set());
   const [writingRequest, setWritingRequest] = useState<{ tabId: number; sequence: number } | null>(
     null,
@@ -693,6 +704,8 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
                 onClose={() => setFind(null)}
               />
             )}
+            <WritingTasks tasks={writingTasks} activeId={activeId} />
+            <WritingTasksContext value={publishWritingTask}>
             <main
               className={`grid min-h-0 flex-1 grid-rows-1 ${selected.reference === null ? "grid-cols-1" : "grid-cols-2"}`}
             >
@@ -764,6 +777,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
                 />
               )}
             </main>
+            </WritingTasksContext>
             {active && (
               <StatusBar
                 openHistory={() => setHistoryPath(active.path)}

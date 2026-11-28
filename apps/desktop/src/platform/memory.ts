@@ -307,8 +307,8 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
   >();
 
   return {
-    sendModelMessage: createModelSender(async (request, receive) => {
-      if ("url" in request) return sendBrowserModelRequest(request, receive);
+    sendModelMessage: createModelSender(async (request, receive, signal) => {
+      if ("url" in request) return sendBrowserModelRequest(request, receive, signal);
       const connection = modelConnections.get(request.connectionId);
       if (!connection) throw "connectionMissing";
       return sendBrowserModelRequest(
@@ -318,6 +318,7 @@ export function createMemoryPlatform(options: MemoryPlatformOptions = {}): Memor
           body: { ...request.body, model: connection.model },
         },
         receive,
+        signal,
       );
     }),
     async listModelConnections() {
