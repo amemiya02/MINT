@@ -1,8 +1,8 @@
-import { useId, useMemo, useState } from "react";
+import { useId, useState } from "react";
 import { useT } from "../i18n/index.ts";
 import { useModalDialog } from "../window/useModalDialog.ts";
 import { useTabStore } from "./context.ts";
-import { diffLines } from "./line-diff.ts";
+import { DocumentDiff } from "./DocumentDiff.tsx";
 import { tabName } from "./tab-name.ts";
 import type { Tab } from "./tab-store.ts";
 
@@ -91,7 +91,6 @@ function CompareDialog({ name, local, disk, onChoose, onClose }: CompareDialogPr
   const t = useT();
   const { close, props: dialogProps } = useModalDialog(onClose);
   const titleId = useId();
-  const lines = useMemo(() => diffLines(local, disk), [local, disk]);
 
   const choose = (choice: "keepMine" | "loadDisk") => {
     close();
@@ -110,24 +109,7 @@ function CompareDialog({ name, local, disk, onChoose, onClose }: CompareDialogPr
         </h2>
         <p className="text-xs text-(--mint-muted)">{t("external.compare.legend", { name })}</p>
       </div>
-      <pre className="min-h-0 flex-1 overflow-auto px-5 py-3 font-(family-name:--mint-font-editor) text-sm leading-relaxed">
-        {lines.map((line, i) => {
-          const key = `${i}`;
-          if (line.kind === "removed")
-            return (
-              <del key={key} className="block bg-(--mint-diff-removed-bg) no-underline">
-                {`- ${line.text}`}
-              </del>
-            );
-          if (line.kind === "added")
-            return (
-              <ins key={key} className="block bg-(--mint-diff-added-bg) no-underline">
-                {`+ ${line.text}`}
-              </ins>
-            );
-          return <span key={key} className="block">{`  ${line.text}`}</span>;
-        })}
-      </pre>
+      <DocumentDiff before={local} after={disk} />
       <div className="flex justify-end gap-2 border-t border-(--mint-border) px-5 py-3 text-sm">
         <button
           type="button"

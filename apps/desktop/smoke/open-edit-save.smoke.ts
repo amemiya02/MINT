@@ -8,7 +8,7 @@
 // The document is handed to MINT on the command line, as a file manager does,
 // so no native dialog is involved.
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -178,6 +178,35 @@ test("a document opened from the command line can be edited and saved", async ()
     "the first view to undo the edit and restore the original bytes",
     async () => (await readFile(document)).equals(linked) || null,
   ).catch(explain);
+});
+
+test("saved versions survive a native restart outside the working folder", async () => {
+  await command("DELETE", `/session/${session}`);
+  session = "";
+  const created = await command<{ sessionId: string }>("POST", "/session", {
+    capabilities: { alwaysMatch: { "tauri:options": { application, args: [document] } } },
+  });
+  session = created.sessionId;
+  const clickHistory = await until("version history button", async () => {
+    const item = await command<Record<string, string>>("POST", `/session/${session}/element`, {
+      using: "css selector",
+      value: 'footer button[aria-label="Version History"]',
+    });
+    return item[elementKey] ?? null;
+  });
+  await command("POST", `/session/${session}/element/${clickHistory}/click`, {});
+  await until(
+    "the saved text to appear in a comparison",
+    async () =>
+      (await command<boolean>("POST", `/session/${session}/execute/sync`, {
+        script: `const dialog = document.querySelector('dialog[open]');
+        return dialog?.querySelector('select')?.options.length >= 3 &&
+          dialog.querySelector('pre')?.textContent.includes('second line') === true;`,
+        args: [],
+      })) || null,
+  ).catch(explain);
+  assert.deepEqual(await readdir(dir), ["smoke.md"]);
+  await keyActions(typing("\uE00C"));
 });
 
 test("the native statistics view refuses a denied read and allows an explicit grant", async () => {

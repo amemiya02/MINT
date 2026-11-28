@@ -54,7 +54,7 @@ export interface TabsState {
 export type TabError =
   | { readonly kind: "missingHeading" | "ambiguousHeading"; readonly fragment: string }
   | { readonly kind: "open"; readonly path: string; readonly reason: string }
-  | { readonly kind: "save"; readonly path: string; readonly reason: string }
+  | { readonly kind: "save" | "history"; readonly path: string; readonly reason: string }
   /** The document cannot be watched: changes other programs make to it go unnoticed. */
   | { readonly kind: "watch"; readonly path: string; readonly reason: string };
 
@@ -383,6 +383,12 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
       if (path === null || !versions.has(id)) return false;
       try {
         await platform.writeTextFile(path, text);
+        let historyError: TabError | null = null;
+        try {
+          await platform.recordVersion(path, text);
+        } catch (e) {
+          historyError = { kind: "history", path, reason: reasonOf(e) };
+        }
         if (!versions.has(id)) return true;
         diskTexts.set(id, text);
         cleanVersions.set(id, version);
@@ -393,7 +399,7 @@ export function createTabStore({ platform, askUnsaved, askSavePath }: TabStoreOp
           ...(moved ? { path, untitled: null } : {}),
         });
         if (moved) watch(id, path);
-        set({ error: null });
+        set({ error: historyError });
         return true;
       } catch (e) {
         if (versions.has(id)) set({ error: { kind: "save", path, reason: reasonOf(e) } });

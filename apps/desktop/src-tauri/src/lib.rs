@@ -7,6 +7,7 @@ mod assets;
 mod folder;
 mod fs;
 mod grants;
+mod history;
 mod opened;
 mod recovery;
 mod search;
@@ -213,6 +214,34 @@ async fn write_text_file(app: AppHandle, path: PathBuf, text: String) -> Result<
         fs::write_atomic(&path, text.as_bytes()).map_err(|e| e.to_string())
     })
     .await
+}
+
+fn history_directory(app: &AppHandle, path: &std::path::Path) -> Result<PathBuf, String> {
+    let document = app
+        .state::<Grants>()
+        .check(path)
+        .map_err(|e| e.to_string())?;
+    Ok(history::directory(&app_data_dir(app)?, &document))
+}
+
+#[tauri::command]
+async fn record_version(app: AppHandle, path: PathBuf, text: String) -> Result<(), String> {
+    blocking(move || {
+        history::record(&history_directory(&app, &path)?, &text).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+async fn list_versions(app: AppHandle, path: PathBuf) -> Result<Vec<u64>, String> {
+    blocking(move || history::versions(&history_directory(&app, &path)?).map_err(|e| e.to_string()))
+        .await
+}
+
+#[tauri::command]
+async fn read_version(app: AppHandle, path: PathBuf, id: u64) -> Result<String, String> {
+    blocking(move || history::read(&history_directory(&app, &path)?, id).map_err(|e| e.to_string()))
+        .await
 }
 
 /// Save a pasted or dropped asset (base64 `data`) under a name that is not
@@ -590,6 +619,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             read_text_file,
             write_text_file,
+            record_version,
+            list_versions,
+            read_version,
             save_asset,
             show_open_dialog,
             show_save_dialog,

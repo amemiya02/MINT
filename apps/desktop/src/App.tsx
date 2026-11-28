@@ -14,6 +14,7 @@ import { FindBar, type FindMode } from "./find/FindBar.tsx";
 import { FolderTree } from "./folder/file-tree.ts";
 import { useRecent } from "./folder/recent.ts";
 import { NavigationRail, Sidebar, type SidebarTool } from "./folder/Sidebar.tsx";
+import { HistoryDialog } from "./history/HistoryDialog.tsx";
 import { type Translate, useT } from "./i18n/index.ts";
 import { documentExtensions } from "./paths.ts";
 import type { Platform } from "./platform/platform.ts";
@@ -106,6 +107,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
   } = useOverlays();
   const { shortcuts } = useSettings().settings;
   const active = tabs.find((tab) => tab.id === activeId) ?? null;
+  const [historyPath, setHistoryPath] = useState<string | null>(null);
   const updates = useUpdates(platform);
   const [tree, setTree] = useState<FolderTree | null>(null);
   const folder = tree?.root ?? null;
@@ -238,6 +240,7 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
     "file.saveAs": () => {
       if (activeId !== null) void store.saveAs(activeId);
     },
+    "file.history": () => setHistoryPath(active?.path ?? null),
     "file.exportHtml": () => {
       if (activeId !== null) setExporting({ tab: activeId, format: "html" });
     },
@@ -436,7 +439,15 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
               />
             )}
           </main>
-          {active && <StatusBar tab={active} name={name ?? ""} mode={mode} wordCount={wordCount} />}
+          {active && (
+            <StatusBar
+              openHistory={() => setHistoryPath(active.path)}
+              tab={active}
+              name={name ?? ""}
+              mode={mode}
+              wordCount={wordCount}
+            />
+          )}
         </div>
       </div>
       <PluginEntries
@@ -471,6 +482,16 @@ function Window({ platform, store, recovery, onEdited }: WindowProps) {
           recentDocuments={recent.documents}
           onOpenDocument={(path) => void store.openDocument(path)}
           onClose={() => setQuickOpenVisible(false)}
+        />
+      )}
+      {historyPath && (
+        <HistoryDialog
+          path={historyPath}
+          platform={platform}
+          onClose={() => {
+            setHistoryPath(null);
+            if (activeId !== null) store.editor(activeId)?.focus();
+          }}
         />
       )}
       {exportedTab && (

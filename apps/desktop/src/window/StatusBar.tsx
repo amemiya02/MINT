@@ -6,6 +6,7 @@ import type { Tab } from "../tabs/tab-store.ts";
 export function StatusBar(props: {
   readonly tab: Tab;
   readonly name: string;
+  readonly openHistory: () => void;
   readonly mode: EditorMode;
   readonly wordCount: WordCount | null;
 }) {
@@ -17,7 +18,19 @@ export function StatusBar(props: {
       <span className="flex gap-4">
         {wordCount && <WordCountStatus count={wordCount} />}
         <span>{t(mode === "source" ? "status.mode.source" : "status.mode.livePreview")}</span>
-        <span>{t(tab.dirty ? "status.unsaved" : "status.saved")}</span>
+        {tab.path ? (
+          <button
+            type="button"
+            title={t("command.file.history")}
+            aria-label={t("command.file.history")}
+            className="hover:underline"
+            onClick={props.openHistory}
+          >
+            {t(tab.dirty ? "status.unsaved" : "status.saved")}
+          </button>
+        ) : (
+          <span>{t(tab.dirty ? "status.unsaved" : "status.saved")}</span>
+        )}
       </span>
     </footer>
   );
