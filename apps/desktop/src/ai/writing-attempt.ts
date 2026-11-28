@@ -14,6 +14,10 @@ export function replyStatus(reply: WritingReply): AttemptStatus {
   return reply.finishReason == null || reply.finishReason === "stop" ? "complete" : "interrupted";
 }
 
+export function isMaterialCapacityError(problem: unknown): boolean {
+  return problem === 413 || problem === "materialCapacity";
+}
+
 export function failureStatus(problem: unknown, signal: AbortSignal): AttemptStatus {
   if (signal.aborted) return "stopped";
   const code = problem instanceof Error ? problem.message : problem;

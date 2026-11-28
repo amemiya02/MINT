@@ -26,7 +26,8 @@ export async function sendBrowserModelRequest(
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
     });
     if (!response.ok) {
-      await response.body?.cancel();
+      if (response.status === 400 && (await rejectsContext(response))) throw "materialCapacity";
+      await response.body?.cancel().catch(() => {});
       throw response.status;
     }
     receive({ kind: "headers", contentType: response.headers.get("content-type") ?? "" });
@@ -50,5 +51,30 @@ export async function sendBrowserModelRequest(
     if (typeof error === "number" || typeof error === "string") throw error;
     if (error instanceof DOMException && error.name === "TimeoutError") throw "timeout";
     throw "network";
+  }
+}
+
+// Some compatible endpoints use HTTP 400 for context-window errors. Match the structured
+// code and bound the amount of error data read just as we bound successful replies.
+async function rejectsContext(response: Response): Promise<boolean> {
+  const reader = response.body?.getReader();
+  if (!reader) return false;
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let body = "";
+  try {
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      bytes += chunk.value.length;
+      if (bytes > 16 * 1024) return false;
+      body += decoder.decode(chunk.value, { stream: true });
+    }
+    return JSON.parse(body + decoder.decode())?.error?.code === "context_length_exceeded";
+  } catch {
+    return false;
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
   }
 }

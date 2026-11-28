@@ -2372,6 +2372,95 @@ async function addPastedWritingMaterial(text: string) {
   await clickPath("//form//button[normalize-space(.)='Add pasted text']");
 }
 
+test("native writing sends only the approved excerpt after a model capacity error", async () => {
+  const publicLine = "Ridge is open.\n";
+  const privateLine = "Private ranger contact details.";
+  const received: { name: string; text: string }[][] = [];
+  const endpoint = createServer(async (request, response) => {
+    let body = "";
+    for await (const chunk of request) body += chunk;
+    const { taskContext } = JSON.parse(JSON.parse(body).messages.at(-1).content);
+    const materials = taskContext.materials as (typeof received)[number];
+    received.push(materials);
+    const oversized = Buffer.byteLength(materials.map(({ text }) => text).join("")) > 16;
+    response.writeHead(oversized ? 400 : 200, { "Content-Type": "application/json" });
+    response.end(
+      JSON.stringify(
+        oversized
+          ? { error: { code: "context_length_exceeded" } }
+          : { choices: [{ message: { content: "Ridge bulletin." }, finish_reason: "stop" }] },
+      ),
+    );
+  });
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      endpoint.once("error", reject);
+      endpoint.listen(0, "127.0.0.1", resolve);
+    });
+    const address = endpoint.address();
+    assert.ok(address && typeof address !== "string");
+    const model = `http://127.0.0.1:${address.port}/v1`;
+    await restart([document]);
+    await nativeShortcut("ctrl+n");
+    await click("Draft with AI");
+    for (const [label, value] of [
+      ["API address", model],
+      ["Model name", "bounded-native-fixture"],
+      ["Drafting instruction", "Write a ridge bulletin."],
+    ] as const) {
+      await clickPath(`//form//label[normalize-space(.)='${label}']/input`);
+      await keyActions(typing(value));
+    }
+    await clickPath("//form//summary[normalize-space(.)='Add files or paste text']");
+    await clickPath("//form//label[normalize-space(.)='Pasted material']/textarea");
+    await keyActions([
+      ...typing(publicLine.trimEnd()),
+      ...typing(keys.enter),
+      ...typing(privateLine),
+    ]);
+    await click("Add pasted text");
+    await clickPath("//form//button[not(@disabled) and normalize-space(.)='Generate draft']");
+    await waitForView(
+      "the capacity rejection in the draft form",
+      `return [...document.querySelectorAll('form [role="alert"]')].some((notice) =>
+        notice.textContent.includes("The recipient rejected the material because of its capacity."));`,
+    );
+    assert.deepEqual(received, [[{ name: "Pasted text", text: publicLine + privateLine }]]);
+
+    await clickPath("//form//label[normalize-space(.)='Material limit (UTF-8 bytes)']/input");
+    await keyActions(typing("16"));
+    await waitForView(
+      "the excerpt method to be selected",
+      `const option = document.querySelector('form select option[value="excerpt"]');
+        if (!option || !option.parentElement) return false;
+        option.parentElement.value = option.value;
+        option.parentElement.dispatchEvent(new Event("change", { bubbles: true }));
+        return true;`,
+    );
+    await clickPath("//form//label[normalize-space(.)='Last line']/input");
+    await keyActions(typing("1"));
+    await waitForView(
+      "the exact excerpt and loopback recipient before sending",
+      `const plan = document.querySelector('section[aria-label="Material send plan"]');
+        return plan?.innerText.includes("Excerpt · ${model}/chat/completions") &&
+          plan.innerText.includes("Pasted text · lines 1–1") &&
+          !plan.textContent.includes("Private ranger contact details.");`,
+    );
+    assert.equal(received.length, 1);
+    await clickPath("//form//button[not(@disabled) and normalize-space(.)='Generate draft']");
+    await waitForView(
+      "the response to appear in the untitled editor",
+      `return [...document.querySelectorAll('[role=tabpanel]:not([hidden]) .cm-content')]
+        .some((editor) => editor.textContent === "Ridge bulletin.");`,
+    );
+    assert.deepEqual(received.slice(1), [[{ name: "Pasted text · lines 1–1", text: publicLine }]]);
+  } finally {
+    endpoint.closeAllConnections();
+    await new Promise<void>((resolve) => endpoint.close(() => resolve()));
+  }
+});
+
 const credentialPolicy = process.env.MINT_SMOKE_CREDENTIAL_POLICY;
 test("model keys survive a restart only when remembered and disconnect removes the OS credential", {
   skip: !credentialPolicy && "requires the hosted smoke suite's isolated Secret Service",

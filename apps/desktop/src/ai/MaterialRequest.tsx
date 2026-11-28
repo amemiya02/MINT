@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useT } from "../i18n/index.ts";
 import { documentExtensions, relativePath } from "../paths.ts";
 import type { Platform } from "../platform/platform.ts";
+import { type MaterialPlan, materialBytes } from "./MaterialCapacity.tsx";
 import {
   type MaterialEntry,
   MaterialPicker,
@@ -10,6 +11,7 @@ import {
 } from "./TaskContext.tsx";
 import type {
   MaterialDecision,
+  TaskContext,
   WritingOptions,
   WritingReply,
   WritingRequest,
@@ -26,6 +28,7 @@ interface PendingMaterial extends MaterialRequest {
   readonly id: number;
   readonly recipient: string;
   readonly folder: string | null;
+  readonly remainingBytes?: number;
 }
 
 function requestedMaterial(reply: WritingReply): MaterialRequest | undefined {
@@ -83,49 +86,102 @@ export function useMaterialRequests() {
       request: WritingRequest,
       recipient: string,
       folder: string | null,
-      options?: WritingOptions & {
-        readonly onApproval?: () => void;
-        readonly onResume?: (decision: MaterialDecision | null) => void;
+      options?: Omit<WritingOptions, "onDelta"> & {
+        readonly plan?: MaterialPlan;
+        readonly onContext?: (context: TaskContext | undefined) => void;
+        readonly onApproval?: (text: string) => void;
+        readonly onResume?: (decision: MaterialDecision | null, text: string) => void;
+        readonly onProgress?: (text: string) => void;
       },
-    ) {
+    ): Promise<WritingReply> {
       const id = ++sequence.current;
-      let outbound = request;
-      while (true) {
-        if (options?.signal?.aborted) throw "stopped";
-        const reply = await send(outbound, options);
-        const extra = requestedMaterial(reply);
-        if (!extra) return reply;
-        if (options?.signal?.aborted) throw "stopped";
-        // A skipped or supplied request is already resolved for this task.
-        const previous = outbound.taskContext?.materialDecisions ?? [];
-        if (id !== sequence.current || previous.some(({ name }) => name === extra.name))
-          throw new Error("unresolvedMaterialRequest");
+      const { signal, taskId, plan, onContext, onApproval, onResume, onProgress } = options ?? {};
+      const contexts = plan?.contexts ?? [request.taskContext];
+      const limit = plan?.limit;
+      const dispatched: (TaskContext | undefined)[] = [];
+      const completed: string[] = [];
+      const combined = (text: string) => [...completed, text].filter(Boolean).join("\n\n");
+      let approvalId = 0;
 
-        const response = await new Promise<MaterialDecision | null>((resolve) => {
-          const signal = options?.signal;
-          const abort = () => decision.current?.(null);
-          decision.current = (value) => {
-            signal?.removeEventListener("abort", abort);
-            resolve(value);
+      async function sendBatch(taskContext: TaskContext | undefined, index: number) {
+        const instruction =
+          contexts.length === 1
+            ? request.instruction
+            : `${request.instruction}\n\nThis is material batch ${index + 1} of ${contexts.length}. Answer using this batch as source. Write only the part supported by this batch, without a repeated introduction or conclusion. MINT combines the parts in order.`;
+        let outbound = { ...request, instruction, taskContext };
+        while (true) {
+          if (signal?.aborted || id !== sequence.current) throw "stopped";
+          const remainingBytes = limit === undefined ? undefined : limit - materialBytes(outbound);
+          if (remainingBytes !== undefined && remainingBytes < 0) throw "materialCapacity";
+
+          dispatched[index] = outbound.taskContext;
+          const sentContext =
+            contexts.length === 1
+              ? outbound.taskContext
+              : {
+                  materials: dispatched.flatMap((context) => context?.materials ?? []),
+                  materialDecisions: dispatched.flatMap(
+                    (context) => context?.materialDecisions ?? [],
+                  ),
+                  folderSearch: taskContext?.folderSearch,
+                };
+          onContext?.(sentContext);
+          let streamed = "";
+          const reply = await send(outbound, {
+            taskId,
+            signal,
+            onDelta:
+              onProgress &&
+              ((delta) => {
+                streamed += delta;
+                onProgress(combined(streamed));
+              }),
+          });
+          const extra = requestedMaterial(reply);
+          if (!extra) return reply;
+          if (signal?.aborted) throw "stopped";
+          const previous = outbound.taskContext?.materialDecisions ?? [];
+          if (id !== sequence.current || previous.some(({ name }) => name === extra.name))
+            throw new Error("unresolvedMaterialRequest");
+
+          const response = await new Promise<MaterialDecision | null>((resolve) => {
+            const abort = () => decision.current?.(null);
+            decision.current = (value) => {
+              signal?.removeEventListener("abort", abort);
+              resolve(value);
+            };
+            signal?.addEventListener("abort", abort, { once: true });
+            setPending({ ...extra, id: approvalId++, recipient, folder, remainingBytes });
+            onApproval?.(combined(""));
+          });
+          if (id === sequence.current) {
+            decision.current = null;
+            setPending(null);
+            onResume?.(response, combined(""));
+          }
+          if (!response || id !== sequence.current) throw "stopped";
+          outbound = {
+            ...outbound,
+            taskContext: {
+              ...outbound.taskContext,
+              materialDecisions: [...previous, response],
+            },
           };
-          signal?.addEventListener("abort", abort, { once: true });
-          setPending({ ...extra, id: previous.length, recipient, folder });
-          options?.onApproval?.();
-        });
-        if (id === sequence.current) {
-          decision.current = null;
-          setPending(null);
-          options?.onResume?.(response);
         }
-        if (!response || id !== sequence.current) throw new Error("cancelled");
-        outbound = {
-          ...outbound,
-          taskContext: {
-            ...outbound.taskContext,
-            materialDecisions: [...previous, response],
-          },
-        };
       }
+
+      for (const [index, context] of contexts.entries()) {
+        const reply = await sendBatch(context, index);
+        const text = combined(reply.text);
+        if (
+          index === contexts.length - 1 ||
+          (reply.finishReason != null && reply.finishReason !== "stop")
+        )
+          return { ...reply, text };
+        completed.push(reply.text);
+        onProgress?.(text);
+      }
+      throw "invalidRequest";
     },
   };
 }
@@ -144,7 +200,7 @@ export function MaterialRequestNotice({
   const [matches, setMatches] = useState<readonly MaterialEntry[]>([]);
   const [selected, setSelected] = useState<MaterialEntry | null>(null);
   const [status, setStatus] = useState<"searching" | "done" | "failed">("searching");
-  const { name, purpose, query, folder, recipient } = pending;
+  const { name, purpose, query, folder, recipient, remainingBytes } = pending;
 
   useEffect(() => {
     if (!folder || !query) return;
@@ -202,6 +258,10 @@ export function MaterialRequestNotice({
 
   const candidates = [...matches, ...named.entries];
   const approved = selected && candidates.includes(selected) ? selected.material : null;
+  const exceedsLimit =
+    !!approved &&
+    remainingBytes !== undefined &&
+    materialBytes({ selectedText: approved.text }) > remainingBytes;
   return (
     <fieldset
       aria-label={t("materials.requested")}
@@ -243,13 +303,19 @@ export function MaterialRequestNotice({
         </ul>
       )}
       <MaterialPicker platform={platform} named={named} />
+      {exceedsLimit && (
+        <p role="status">
+          {t("materials.capacity.approvalTooLarge", { bytes: String(remainingBytes) })}
+        </p>
+      )}
       <div className="flex gap-2">
         <button
           type="button"
           className="rounded border border-(--mint-border) px-2 py-1 hover:bg-(--mint-hover) disabled:opacity-50"
-          disabled={!approved || named.loading}
+          disabled={!approved || named.loading || exceedsLimit}
           onClick={() => {
-            if (approved) onDecision({ name, purpose, outcome: "allowed", material: approved });
+            if (approved && !exceedsLimit)
+              onDecision({ name, purpose, outcome: "allowed", material: approved });
           }}
         >
           {t("materials.allowOnce")}
