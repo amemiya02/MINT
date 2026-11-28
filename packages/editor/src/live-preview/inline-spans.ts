@@ -52,14 +52,15 @@ function renderLink(node: SyntaxNode, cx: PreviewContext) {
   markerRange(cx, revealed, close.from, node.to);
 }
 
-/** `<https://example.com>`: the angle brackets are markers. */
-function renderAutolink(node: SyntaxNode, cx: PreviewContext) {
-  const url = node.getChild("URL");
-  if (!url) return;
-  cx.add(url.from, url.to, link);
+/** Show the link label, revealing the surrounding source while editing the span. */
+function renderLabel(node: SyntaxNode, cx: PreviewContext) {
+  const label =
+    node.getChild("URL") ?? node.getChild("WikilinkAlias") ?? node.getChild("WikilinkTarget");
+  if (!label) return;
+  cx.add(label.from, label.to, link);
   const revealed = cx.touchesSelection(node.from, node.to);
-  markerRange(cx, revealed, node.from, url.from);
-  markerRange(cx, revealed, url.to, node.to);
+  markerRange(cx, revealed, node.from, label.from);
+  markerRange(cx, revealed, label.to, node.to);
 }
 
 /** Nodes whose `URL` child is part of their own syntax rather than a bare URL. */
@@ -77,10 +78,10 @@ function renderBareUrl(node: SyntaxNode, cx: PreviewContext) {
 
 /** Inline spans: emphasis, strong, strikethrough, inline code, links (and enabled extended spans). */
 export const inlineSpans: PreviewRenderer = {
-  nodes: [...Object.keys(delimited), "Link", "Autolink", "URL"],
+  nodes: [...Object.keys(delimited), "Wikilink", "Link", "Autolink", "URL"],
   render(node, cx) {
     if (node.name === "Link") renderLink(node, cx);
-    else if (node.name === "Autolink") renderAutolink(node, cx);
+    else if (node.name === "Wikilink" || node.name === "Autolink") renderLabel(node, cx);
     else if (node.name === "URL") renderBareUrl(node, cx);
     else renderDelimited(node, cx);
     return undefined;

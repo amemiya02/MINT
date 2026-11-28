@@ -69,6 +69,11 @@ export const settingsSchema = {
   extendedHighlight: toggle({ label: "settings.extendedHighlight", default: false }),
   extendedSuperscript: toggle({ label: "settings.extendedSuperscript", default: false }),
   extendedSubscript: toggle({ label: "settings.extendedSubscript", default: false }),
+  wikilinkFolders: {
+    kind: "folderToggle",
+    label: "settings.wikilinks",
+    default: [] as readonly string[],
+  },
   /** Where pasted and dropped images are saved (the asset folder). */
   assetFolder: choice({
     label: "settings.assetFolder",
@@ -149,7 +154,13 @@ export interface ShortcutsSetting extends BaseSetting<ShortcutOverrides> {
   readonly kind: "shortcuts";
 }
 
+/** A setting enabled independently for each listed working folder. */
+interface FolderToggleSetting extends BaseSetting<readonly string[]> {
+  readonly kind: "folderToggle";
+}
+
 export type SettingDefinition =
+  | FolderToggleSetting
   | ChoiceSetting
   | ToggleSetting
   | NumberSetting

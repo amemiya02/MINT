@@ -12,10 +12,12 @@ const noRevision = () => null;
 export function Backlinks({
   platform,
   tree,
+  wikilinks,
   targetPath,
   onOpen,
 }: {
   platform: Platform;
+  wikilinks: boolean;
   tree: FolderTree | null;
   targetPath: string | null;
   onOpen: (link: Backlink) => void;
@@ -26,7 +28,7 @@ export function Backlinks({
     tree?.subscribe ?? noSubscription,
     tree?.getRows ?? noRevision,
   );
-  const dialect = useDialect();
+  const dialect = useDialect(wikilinks);
   const [results, setResults] = useState<Backlink[] | "error" | null>(null);
   useEffect(() => {
     if (!folder || !targetPath || !revision) return;

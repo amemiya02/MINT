@@ -1,8 +1,9 @@
 import { type DocumentLink, documentFragment, renderLinkPreview } from "@mint/editor";
 import { useEffect, useRef, useState } from "react";
 import { documentImageUrl } from "../assets/image-host.ts";
+import { resolveDocumentLink } from "../folder/wikilinks.ts";
 import { useT } from "../i18n/index.ts";
-import { isAbsolutePath, resolveFrom } from "../paths.ts";
+import { isAbsolutePath } from "../paths.ts";
 import type { Platform } from "../platform/platform.ts";
 import { useDialect } from "../settings/useDialect.ts";
 import { useTabStore } from "../tabs/context.ts";
@@ -12,11 +13,13 @@ import { useModalDialog } from "./useModalDialog.ts";
 
 export function LinkPreview({
   source,
+  wikilinkFolder,
   link,
   platform,
   onClose,
 }: {
   readonly source: Tab;
+  readonly wikilinkFolder: string | null;
   readonly link: DocumentLink;
   readonly platform: Platform;
   readonly onClose: () => void;
@@ -25,19 +28,25 @@ export function LinkPreview({
   const store = useTabStore();
   const dialect = useDialect();
   const { close, props } = useModalDialog(onClose);
-  const path = link.path
-    ? source.path
-      ? resolveFrom(source.path, link.path)
-      : link.path
-    : source.path;
-  const name = path ?? tabName(t, source);
   const article = useRef<HTMLElement>(null);
-  const [status, setStatus] = useState<"loading" | "ready" | { error: string }>("loading");
+  const [status, setStatus] = useState<{ path: string | null } | { error: string } | null>(null);
+  const ready = status && "path" in status ? status : null;
+  const label = link.path || tabName(t, source);
+  const name = ready?.path ?? label;
 
   useEffect(() => {
     let current = true;
-    setStatus("loading");
+    setStatus(null);
+    let displayPath = label;
     async function load() {
+      const target = await resolveDocumentLink(platform, wikilinkFolder, source.path, link, t);
+      if (!current) return;
+      if ("error" in target) {
+        setStatus(target);
+        return;
+      }
+      const { path } = target;
+      displayPath = path ?? label;
       const tab = link.path ? store.getState().tabs.find((tab) => tab.path === path) : source;
       let text: string;
       if (tab) text = store.getText(tab.id) ?? tab.text;
@@ -58,15 +67,16 @@ export function LinkPreview({
       // A preview is a reading surface. Links in it must not navigate the app's webview.
       for (const anchor of content.querySelectorAll("a[href]")) anchor.removeAttribute("href");
       article.current?.replaceChildren(content);
-      setStatus("ready");
+      setStatus(target);
     }
     void load().catch((error: unknown) => {
-      if (current) setStatus({ error: t("error.open", { path: name, reason: String(error) }) });
+      if (current)
+        setStatus({ error: t("error.open", { path: displayPath, reason: String(error) }) });
     });
     return () => {
       current = false;
     };
-  }, [dialect, link, name, path, platform, source, store, t]);
+  }, [dialect, link, label, platform, source, store, t, wikilinkFolder]);
 
   return (
     <dialog
@@ -76,7 +86,7 @@ export function LinkPreview({
     >
       <header className="flex items-center justify-between gap-4 border-b border-(--mint-border) px-4 py-2">
         <span className="truncate" title={name}>
-          {link.path || tabName(t, source)}
+          {label}
           {link.fragment && `#${link.fragment}`}
         </span>
         <div className="flex shrink-0 gap-1">
@@ -89,11 +99,12 @@ export function LinkPreview({
           </button>
           <button
             type="button"
-            disabled={status !== "ready"}
+            disabled={!ready}
             className="rounded px-2 py-1 hover:bg-(--mint-hover) focus-visible:outline-2 focus-visible:outline-(--mint-accent) disabled:opacity-50"
             onClick={() => {
+              if (!ready) return;
               close();
-              store.openInOtherPane(source.id, { path, fragment: link.fragment });
+              store.openInOtherPane(source.id, { path: ready.path, fragment: link.fragment });
             }}
           >
             {t("command.view.openInOtherPane")}
@@ -106,13 +117,9 @@ export function LinkPreview({
         tabIndex={0}
         className="max-h-[60vh] overflow-auto px-5 py-4 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-(--mint-accent)"
       >
-        {status === "loading" && <p role="status">{t("preview.loading")}</p>}
-        {typeof status === "object" && <p role="alert">{status.error}</p>}
-        <article
-          hidden={status !== "ready"}
-          ref={article}
-          className="mint-document mint-link-preview"
-        />
+        {!status && <p role="status">{t("preview.loading")}</p>}
+        {status && "error" in status && <p role="alert">{status.error}</p>}
+        <article hidden={!ready} ref={article} className="mint-document mint-link-preview" />
       </section>
     </dialog>
   );

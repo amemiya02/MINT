@@ -372,3 +372,60 @@ test("declining a plugin update keeps its native read grant and withholds its wr
   await click("Uninstall");
   await click("Close");
 });
+
+test("recognizing and previewing a native folder's wikilinks preserves its files", async () => {
+  assert.ok(application);
+  const folder = await mkdtemp(join(dir, "wikilinks-"));
+  const source = join(folder, "draft.md");
+  const target = join(folder, "Report.md");
+  const draft = Buffer.from("\uFEFF# Draft\r\n\r\nSee [[Report#Results|evidence]].  \r\n");
+  const report = Buffer.from("# Report\n\n## Results\n\nA flock of herons.\n");
+  await writeFile(source, draft);
+  await writeFile(target, report);
+  // The single-instance handler forwards both paths to the existing window.
+  await exec(application, [folder, source], { timeout: 15_000 });
+  await until("the folder and draft to open", () =>
+    command<boolean>("POST", `/session/${session}/execute/sync`, {
+      script: `return document.querySelector('[role=tab][aria-selected=true]')?.title === arguments[0] &&
+        !!document.querySelector('[role=treeitem][aria-label="Report.md"]');`,
+      args: [source],
+    }).then((ready) => ready || null),
+  ).catch(explain);
+  const toggleSetting = async (enabled: boolean) => {
+    await nativeShortcut("ctrl+comma");
+    await shows(`Recognize wikilinks in ${folder}`);
+    const settingsPath = await command<string>("POST", `/session/${session}/execute/sync`, {
+      script: "return document.querySelector('dialog[open] span[title$=\"settings.json\"]')?.title",
+      args: [],
+    });
+    const checkbox = await command<Record<string, string>>("POST", `/session/${session}/element`, {
+      using: "xpath",
+      value: `//input[@id=//label[normalize-space(.)='Recognize wikilinks in ${folder}']/@for]`,
+    });
+    await command("POST", `/session/${session}/element/${checkbox[elementKey]}/click`, {});
+    await until(
+      "the folder setting to reach disk",
+      async () =>
+        JSON.parse(await readFile(settingsPath, "utf8")).wikilinkFolders?.includes(folder) ===
+          enabled || null,
+    ).catch(explain);
+    await click("Close");
+  };
+  await toggleSetting(true);
+  // Place the caret on the visible alias and use the same Preview Link shortcut as the UI.
+  const alias = await until("the wikilink label", async () => {
+    const item = await command<Record<string, string>>("POST", `/session/${session}/element`, {
+      using: "xpath",
+      value: "//span[normalize-space(.)='evidence']",
+    });
+    return item[elementKey] ?? null;
+  }).catch(explain);
+  await command("POST", `/session/${session}/element/${alias}/click`, {});
+  await nativeShortcut("ctrl+alt+Return");
+  await shows("A flock of herons.");
+  await click("Close");
+  await toggleSetting(false);
+  assert.deepEqual(await readFile(source), draft);
+  assert.deepEqual(await readFile(target), report);
+  assert.deepEqual((await readdir(folder)).sort(), ["Report.md", "draft.md"]);
+});

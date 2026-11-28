@@ -3,8 +3,8 @@ import { type EditorState, type Extension, Facet } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import type { SyntaxNode, Tree } from "@lezer/common";
 import { parser } from "@lezer/markdown";
-import { type Dialect, defaultDialect } from "@mint/markdown";
-import { dialectParserExtensions } from "./dialect.ts";
+import { defaultDialect } from "@mint/markdown";
+import { dialectParserExtensions, type EditorDialect } from "./dialect.ts";
 import { parseFileText } from "./file-text.ts";
 import { linkClass, urlOwners } from "./live-preview/inline-spans.ts";
 
@@ -17,7 +17,12 @@ export type LinkTarget =
    * query or fragment in the path). An empty path refers to the current
    * document. The host resolves relative paths and the decoded heading fragment.
    */
-  | { readonly kind: "document"; readonly path: string; readonly fragment?: string };
+  | {
+      readonly kind: "document";
+      readonly path: string;
+      readonly fragment?: string;
+      readonly wikilink?: true;
+    };
 
 export type DocumentLink = Extract<LinkTarget, { kind: "document" }>;
 
@@ -26,6 +31,10 @@ export function linkAt(state: EditorState, pos: number): LinkTarget | null {
   const tree = syntaxTree(state);
   for (const side of [1, -1] as const) {
     for (let node: SyntaxNode | null = tree.resolveInner(pos, side); node; node = node.parent) {
+      if (node.name === "Wikilink") {
+        const target = node.getChild("WikilinkTarget");
+        return target ? wikilinkTarget(state.sliceDoc(target.from, target.to)) : null;
+      }
       const href = hrefOf(state, node);
       if (href !== undefined) return href === null ? null : classify(href);
     }
@@ -58,6 +67,13 @@ function hrefOf(state: EditorState, node: SyntaxNode): string | null | undefined
     default:
       return undefined;
   }
+}
+
+function wikilinkTarget(destination: string): DocumentLink {
+  const hash = destination.indexOf("#");
+  const path = (hash < 0 ? destination : destination.slice(0, hash)).trim();
+  const fragment = hash < 0 ? undefined : destination.slice(hash + 1).trim();
+  return { kind: "document", wikilink: true, path, fragment };
 }
 
 type Slice = (from: number, to: number) => string;
@@ -110,7 +126,7 @@ export interface DocumentReference {
 
 export function documentReferences(
   source: string,
-  dialect: Dialect = defaultDialect,
+  dialect: EditorDialect = defaultDialect,
 ): DocumentReference[] {
   const { doc } = parseFileText(source);
   const text = doc.toString();
@@ -126,10 +142,14 @@ export function documentReferences(
   const references: DocumentReference[] = [];
   tree.iterate({
     enter(ref) {
-      if (ref.name !== "Link") return;
-      const url = destinationOf(ref.node, slice, () => urls);
+      if (ref.name !== "Link" && ref.name !== "Wikilink") return;
+      const wiki = ref.name === "Wikilink";
+      const url = wiki
+        ? ref.node.getChild("WikilinkTarget")
+        : destinationOf(ref.node, slice, () => urls);
       if (!url) return;
-      const target = classify(slice(url.from, url.to));
+      const destination = slice(url.from, url.to);
+      const target = wiki ? wikilinkTarget(destination) : classify(destination);
       if (target?.kind !== "document") return;
       const line = doc.lineAt(ref.from);
       references.push({

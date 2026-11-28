@@ -27,6 +27,11 @@ const kinds: { readonly [K in Kind]: KindRules<K> } = {
         values: definition.options.map((o) => JSON.stringify(o.value)).join(", "),
       }),
   },
+  folderToggle: {
+    isValid: (_definition, value) =>
+      Array.isArray(value) && value.every((path) => typeof path === "string"),
+    expected: (_definition, t) => t("settings.expected.folders"),
+  },
   toggle: {
     isValid: (_definition, value) => typeof value === "boolean",
     expected: (_definition, t) => t("settings.expected.toggle"),
