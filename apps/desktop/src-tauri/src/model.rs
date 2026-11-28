@@ -120,7 +120,7 @@ pub(crate) fn require_document_window(window: &WebviewWindow) -> Result<(), Mode
 
 /// Enforce the same recipient rules for trials and connected requests,
 /// including HTTPS except on loopback.
-fn service_url(address: &str) -> Result<Url, ModelError> {
+pub(crate) fn service_url(address: &str) -> Result<Url, ModelError> {
     let url = Url::parse(address.trim()).map_err(|_| ModelError::Request("invalidAddress"))?;
     let host = url.host_str().unwrap_or_default();
     if !(url.scheme() == "https" || url.scheme() == "http" && is_loopback(host))

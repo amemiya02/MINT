@@ -7,7 +7,16 @@ import {
   type ExternalAgentPlatform,
   externalAgentSender,
 } from "./external-agent.ts";
+import type { McpTransport } from "./mcp.ts";
 import { useWritingTask } from "./WritingTasks.tsx";
+import {
+  useWritingToolApproval,
+  useWritingToolPicker,
+  WritingToolNotice,
+  WritingToolOutcome,
+  WritingToolPicker,
+  type WritingToolPlan,
+} from "./WritingTool.tsx";
 import { type AttemptStatus, failureStatus, replyStatus } from "./writing-attempt.ts";
 import type { WritingRequest } from "./writing-sender.ts";
 import type { SavedTurn } from "./writing-tasks.ts";
@@ -19,6 +28,7 @@ const fieldClass =
 
 interface Props {
   readonly platform: ExternalAgentPlatform;
+  readonly sendMcpRequest?: McpTransport;
   readonly selection?: string;
 }
 
@@ -138,6 +148,7 @@ export function ExternalAgentDialog({
 
 function ExternalAgentPanel({
   platform,
+  sendMcpRequest,
   selection,
   renderReply,
   target,
@@ -152,7 +163,14 @@ function ExternalAgentPanel({
   const [saved, setSaved] = useState<ExternalAgent[]>([]);
   const [found, setFound] = useState<string[] | null>(null);
   const [instruction, setInstruction] = useState("");
-  const [pending, setPending] = useState<{ id: string; request: WritingRequest } | null>(null);
+  const [pending, setPending] = useState<{
+    id: string;
+    request: WritingRequest;
+    tool?: WritingToolPlan;
+  } | null>(null);
+  const picker = useWritingToolPicker(sendMcpRequest);
+  const toolApproval = useWritingToolApproval();
+  const toolPending = toolApproval.pending;
   const [busy, setBusy] = useState(true);
   const [status, setStatus] = useState<MessageKey | null>(null);
   const [error, setError] = useState<MessageKey | null>(null);
@@ -172,7 +190,7 @@ function ExternalAgentPanel({
     request: WritingRequest;
   } | null>(null);
   const mounted = useRef(true);
-  const taskStatus = pending ? "approval" : attempt?.status;
+  const taskStatus = pending || toolPending ? "approval" : attempt?.status;
   if (target) target.engaged.current = !!taskStatus && taskStatus !== "complete";
   const taskRecipient = pending ? agent?.path : attempt?.recipient;
   const stop = useCallback(() => {
@@ -199,13 +217,15 @@ function ExternalAgentPanel({
             material: t("writing.scope.selection"),
             status: taskStatus,
             count: 0,
-            decisions: Number(!!pending),
+            decisions: Number(!!(pending || toolPending)),
             background: !target.visible,
             notice: pending
               ? { id: pending.id, decisions: 1 }
-              : attempt?.status === "complete"
-                ? { id: attempt.id }
-                : undefined,
+              : toolPending
+                ? { id: toolPending.id, detail: toolPending.name, decisions: 1 }
+                : attempt?.status === "complete"
+                  ? { id: attempt.id }
+                  : undefined,
             stop: taskStatus === "working" || taskStatus === "approval" ? stop : undefined,
             forget: () => {
               setAttempt(null);
@@ -214,7 +234,7 @@ function ExternalAgentPanel({
             reveal: target.reveal,
           }
         : null,
-    [attempt, instruction, pending, stop, t, target, taskRecipient, taskStatus],
+    [attempt, instruction, pending, stop, t, target, taskRecipient, taskStatus, toolPending],
   );
   useWritingTask(task);
 
@@ -284,6 +304,7 @@ function ExternalAgentPanel({
   }
 
   function inspect(candidate: string) {
+    picker.clear();
     void run(async () => {
       select(await platform.inspect(candidate.trim()));
     });
@@ -295,11 +316,18 @@ function ExternalAgentPanel({
     setPartial((previous) => [...previous, reply]);
   }
 
-  function send(current: ExternalAgent, request: WritingRequest, approve: boolean) {
+  function send(
+    current: ExternalAgent,
+    request: WritingRequest,
+    approve: boolean,
+    tool?: WritingToolPlan,
+  ) {
     if (controller.current) return;
     setPending(null);
     setReply("");
     setStreaming("");
+    picker.clear();
+    toolApproval.resetOutcome();
     lastRequest.current = { agent: current, access, request };
     const running = target ? new AbortController() : null;
     const signal = running?.signal;
@@ -316,11 +344,20 @@ function ExternalAgentPanel({
           setSaved((list) => [connection, ...list.filter((item) => item.path !== connection.path)]);
         }
         if (signal?.aborted) throw "stopped";
-        const result = await externalAgentSender(
-          platform,
-          connection,
-          access,
-        )(
+        const recipient = t("writing.recipient.agent", { path: current.path });
+        const sender = externalAgentSender(platform, connection, access);
+        const sendWriting =
+          tool && sendMcpRequest
+            ? toolApproval.wrap(
+                sendMcpRequest,
+                sender,
+                tool,
+                recipient,
+                () => {},
+                () => {},
+              )
+            : sender;
+        const result = await sendWriting(
           request,
           signal
             ? {
@@ -352,7 +389,8 @@ function ExternalAgentPanel({
           instruction: request.instruction,
           material: request.selectedText,
           reply: result.text,
-          recipient: t("writing.recipient.agent", { path: current.path }),
+          recipient,
+          toolOutcome: toolApproval.result(),
           recipientId: `agent:${current.path}`,
           direct: false,
           status: outcome,
@@ -381,7 +419,10 @@ function ExternalAgentPanel({
     access === retry.access;
   return (
     <div className="flex min-w-0 flex-col gap-3 text-sm">
-      <fieldset disabled={pending !== null} className="flex min-w-0 flex-col gap-3">
+      <fieldset
+        disabled={pending !== null || !!toolPending}
+        className="flex min-w-0 flex-col gap-3"
+      >
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
@@ -452,19 +493,19 @@ function ExternalAgentPanel({
             className="flex flex-col gap-2 border-t border-(--mint-border) pt-3"
             onSubmit={(event) => {
               event.preventDefault();
-              if (busy) return;
+              if (busy || picker.incomplete) return;
               const request = {
                 instruction: selection === undefined ? sampleInstruction : instruction.trim(),
                 selectedText: material,
               };
               if (!request.instruction) return;
-              if (agent.approved.includes(access)) send(agent, request, false);
+              if (agent.approved.includes(access)) send(agent, request, false, picker.plan);
               else {
                 setStatus(null);
                 setError(null);
                 setReply("");
                 lastRequest.current = { agent, access, request };
-                setPending({ id: crypto.randomUUID(), request });
+                setPending({ id: crypto.randomUUID(), request, tool: picker.plan });
               }
             }}
           >
@@ -476,6 +517,7 @@ function ExternalAgentPanel({
                 value={access}
                 disabled={busy}
                 onChange={(event) => {
+                  picker.clear();
                   setAccess(event.target.value === "configured" ? "configured" : "readOnly");
                   setReply("");
                   setStatus(null);
@@ -503,14 +545,22 @@ function ExternalAgentPanel({
                 />
               </label>
             )}
+            {sendMcpRequest && <WritingToolPicker picker={picker} />}
             <div>
               <button
                 type="submit"
                 ref={sendButton}
                 className={buttonClass}
-                disabled={busy || (selection !== undefined && !instruction.trim())}
+                disabled={
+                  busy || picker.incomplete || (selection !== undefined && !instruction.trim())
+                }
               >
-                {t(selection === undefined ? "agent.try" : "agent.send")}
+                {picker.plan?.exact
+                  ? t("mcp.send", {
+                      send: t("agent.send"),
+                      effect: t(`mcp.effect.${picker.plan.effect}`),
+                    })
+                  : t(selection === undefined ? "agent.try" : "agent.send")}
               </button>
             </div>
             <p>{t(agent.verified.includes(access) ? "agent.verified" : "agent.unverified")}</p>
@@ -536,6 +586,7 @@ function ExternalAgentPanel({
               className={buttonClass}
               onClick={() => {
                 setPending(null);
+                picker.clear();
                 setStatus("agent.declined");
               }}
             >
@@ -544,13 +595,15 @@ function ExternalAgentPanel({
             <button
               type="button"
               className={buttonClass}
-              onClick={() => send(agent, pending.request, true)}
+              onClick={() => send(agent, pending.request, true, pending.tool)}
             >
               {t("agent.allowSend")}
             </button>
           </div>
         </fieldset>
       )}
+      {toolPending && <WritingToolNotice pending={toolPending} onDecision={toolApproval.decide} />}
+      <WritingToolOutcome outcome={toolApproval.outcome} />
       {target && (taskStatus === "approval" || taskStatus === "working") && (
         <button type="button" className={buttonClass} onClick={stop}>
           {t("writing.task.stop")}

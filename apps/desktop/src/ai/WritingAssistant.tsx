@@ -35,6 +35,13 @@ import {
 } from "./TaskContext.tsx";
 import { useWritingTask, WritingTaskMaterials } from "./WritingTasks.tsx";
 import {
+  useWritingToolPicker,
+  WritingToolNotice,
+  WritingToolOutcome,
+  WritingToolPicker,
+  type WritingToolPlan,
+} from "./WritingTool.tsx";
+import {
   type AttemptStatus,
   failureStatus,
   isMaterialCapacityError,
@@ -438,7 +445,9 @@ function Composer({
   const searchFolder =
     allowedFolder === folder && (!origin.folder || origin.folder === folder) ? folder : null;
   const named = useNamedMaterials();
-  const materialRequests = useMaterialRequests();
+  const materialRequests = useMaterialRequests(platform);
+  const toolPicker = useWritingToolPicker(platform.sendMcpRequest);
+  const toolApproval = materialRequests.externalTool;
   const [includeHistory, setIncludeHistory] = useState(true);
   const [recipients, setRecipients] = useState<readonly WritingRecipient[]>([]);
   const [recipientId, setRecipientId] = useState<string | null>(
@@ -503,6 +512,14 @@ function Composer({
     scope !== "selection"
       ? "comment"
       : (actionOverride ?? (explicitDirect ? "direct" : turns.length ? "comment" : "preview"));
+
+  const sendLabel = recipient
+    ? t("writing.sendAuthorized", {
+        action: t(`writing.${action}`),
+        scope: t(`writing.scope.${scope}`),
+        recipient: labelFor(recipient),
+      })
+    : t("writing.send");
 
   const capacity = useMaterialCapacity({
     recipient: recipient && labelFor(recipient),
@@ -1111,6 +1128,7 @@ function Composer({
     event.preventDefault();
     if (
       !instruction.trim() ||
+      toolPicker.incomplete ||
       !recipient ||
       !capacity.plan ||
       busy ||
@@ -1156,14 +1174,24 @@ function Composer({
       seen: new Set(),
     };
     if (placement === "inline") origin.editor.focus();
-    await runTask(task, recipient, () => {
-      setInstruction("");
-      setActionOverride(null);
-      setAllowedFolder(null);
-    });
+    await runTask(
+      task,
+      recipient,
+      () => {
+        setInstruction("");
+        setActionOverride(null);
+        setAllowedFolder(null);
+      },
+      toolPicker.plan,
+    );
   }
 
-  async function runTask(task: Task, connection: WritingRecipient, onSavedRequest?: () => void) {
+  async function runTask(
+    task: Task,
+    connection: WritingRecipient,
+    onSavedRequest?: () => void,
+    tool?: WritingToolPlan,
+  ) {
     if (controller.current || checkingDisk.current) return false;
     if (
       hasTaskImages(...(task.plan?.contexts ?? [task.request.taskContext])) &&
@@ -1176,6 +1204,7 @@ function Composer({
     const { signal } = running;
     controller.current = running;
     taskRunning.current = true;
+    toolPicker.clear();
     const recipient = labelFor(connection);
     const entry = { id: crypto.randomUUID(), task, recipientId: connection.id, recipient };
     const submitted = {
@@ -1238,6 +1267,7 @@ function Composer({
           taskId: origin.id,
           signal,
           plan: task.plan,
+          tool,
           onContext: (context) => {
             sentContext = context;
             pending.current = { ...submitted, context };
@@ -1342,6 +1372,7 @@ function Composer({
         {
           ...submitted,
           context: sentContext,
+          toolOutcome: toolApproval.result(),
           reply: rewrite ? "" : status === "complete" ? (replacement ?? text) : (replacement ?? ""),
           direct: task.action === "direct",
           suggestions,
@@ -1378,7 +1409,7 @@ function Composer({
   const stop = () => controller.current?.abort();
   const status = attempt?.status;
   const sendingTo = attempt?.recipient;
-  const pendingApproval = materialRequests.pending;
+  const pendingApproval = materialRequests.pending ?? toolApproval.pending;
   const decisions = turns.reduce(
     (total, turn) =>
       total + (turn.suggestions?.filter(({ status }) => status === "preview").length ?? 0),
@@ -1389,7 +1420,7 @@ function Composer({
         t(`writing.scope.${task.scope}`),
         ...writingMaterialNames(task.request),
         ...(attempt?.approved.map(({ name }) => name) ?? []),
-        ...(materialRequests.pending ? [materialRequests.pending.name] : []),
+        ...(pendingApproval ? [pendingApproval.name] : []),
       ].join(" · ")
     : "";
   const report = useMemo(
@@ -1595,6 +1626,7 @@ function Composer({
         className="absolute right-3 bottom-3 z-10 flex max-w-[calc(100%-1.5rem)] flex-wrap items-center gap-2 rounded-lg border border-(--mint-border) bg-(--mint-bg) p-2 text-sm shadow-lg"
       >
         <span role="status">{summary}</span>
+        <WritingToolOutcome outcome={latest.toolOutcome} />
         <button type="button" className={buttonClass} onClick={viewChanges}>
           {t("writing.viewChanges")}
         </button>
@@ -1773,6 +1805,7 @@ function Composer({
                 </details>
               )}
               {sidebar && renderSentContext(turn.context, turn.searchFolder)}
+              <WritingToolOutcome outcome={turn.toolOutcome} />
               {suggestions?.length ? (
                 suggestions.map((suggestion, position) => {
                   const status = reviewStatus(suggestion, draft);
@@ -1974,7 +2007,7 @@ function Composer({
         >
           <fieldset
             disabled={busy}
-            className={materialRequests.pending ? "hidden" : "flex min-w-0 flex-col gap-2"}
+            className={pendingApproval ? "hidden" : "flex min-w-0 flex-col gap-2"}
           >
             <label className="grid gap-1">
               {t("agent.instruction")}
@@ -2028,6 +2061,7 @@ function Composer({
                     setRecipientId(event.target.value);
                     setAllowedFolder(null);
                     setIncludeHistory(false);
+                    toolPicker.clear();
                   }}
                 >
                   {!recipient && (
@@ -2079,6 +2113,7 @@ function Composer({
               onSearchChange={(checked) => setAllowedFolder(checked ? folder : null)}
             />
             {capacity.controls}
+            <WritingToolPicker picker={toolPicker} />
             {turns.length > 0 && (
               <label className="flex items-start gap-2 text-xs">
                 <input
@@ -2096,6 +2131,7 @@ function Composer({
                 disabled={
                   !recipient ||
                   !capacity.plan ||
+                  toolPicker.incomplete ||
                   loading ||
                   !instruction.trim() ||
                   named.loading ||
@@ -2104,13 +2140,12 @@ function Composer({
                   (scope === "folder" && !searchFolder)
                 }
               >
-                {recipient
-                  ? t("writing.sendAuthorized", {
-                      action: t(`writing.${action}`),
-                      scope: t(`writing.scope.${scope}`),
-                      recipient: labelFor(recipient),
+                {toolPicker.plan?.exact
+                  ? t("mcp.send", {
+                      send: sendLabel,
+                      effect: t(`mcp.effect.${toolPicker.plan.effect}`),
                     })
-                  : t("writing.send")}
+                  : sendLabel}
               </button>
               <button type="button" className={buttonClass} onClick={onSettings}>
                 {t("writing.manage")}
@@ -2119,6 +2154,10 @@ function Composer({
           </fieldset>
         </form>
       )}
+      {toolApproval.pending && (
+        <WritingToolNotice pending={toolApproval.pending} onDecision={toolApproval.decide} />
+      )}
+      {busy && <WritingToolOutcome outcome={toolApproval.outcome} />}
       {materialRequests.pending && (
         <MaterialRequestNotice
           key={materialRequests.pending.id}

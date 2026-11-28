@@ -151,6 +151,10 @@ export function createTauriPlatform(): Platform {
         }
       },
     },
+    sendMcpRequest: (request, signal) => {
+      signal?.throwIfAborted();
+      return invoke("send_mcp_request", { request });
+    },
     sendModelMessage: sendTauriModelMessage,
     listModelConnections: () => invoke("list_model_connections"),
     saveModelConnection: (connection) => invoke("save_model_connection", { connection }),

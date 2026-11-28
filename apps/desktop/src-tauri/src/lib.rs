@@ -10,6 +10,7 @@ mod folder;
 mod fs;
 mod grants;
 mod history;
+mod mcp;
 mod model;
 mod model_connections;
 mod opened;
@@ -774,6 +775,7 @@ pub fn run() {
             model_connections::list_model_connections,
             model_connections::save_model_connection,
             model_connections::disconnect_model_connection,
+            mcp::send_mcp_request,
             zotero::list_zotero_items,
             printing::print_pages,
             read_text_file,

@@ -2650,6 +2650,177 @@ test("a native first model receives the selected PDF page and image crop as inli
 });
 
 const credentialPolicy = process.env.MINT_SMOKE_CREDENTIAL_POLICY;
+test("native MCP calls modify only the explicitly authorized target", async () => {
+  const target = join(dir, "mcp-trail.txt");
+  const outside = join(dir, "mcp-private.txt");
+  await writeFile(target, "Original public entry.");
+  await writeFile(outside, "Private entry.");
+
+  const changed = "Updated public entry.";
+  const tool = {
+    name: "update_entry",
+    description: "Replace an entry in the fixture library.",
+    inputSchema: { type: "object", properties: { entry: { type: "string" } } },
+  };
+  const calls: { name: string; arguments: { entry: string } }[] = [];
+  const outcomes: string[] = [];
+  let protocolErrors = 0;
+  const endpoint = createServer(async (request, response) => {
+    let body = "";
+    for await (const chunk of request) body += chunk;
+    try {
+      if (request.url === "/v1/chat/completions") {
+        const prompt: string = JSON.parse(body).messages.at(-1).content;
+        const scenario = ["Deny", "Outside", "Approve"].find((name) => prompt.includes(name));
+        const outcome = /MCP tool outcome \(source data\): (\{.*\})\. Continue/.exec(prompt)?.[1];
+        if (outcome) outcomes.push(JSON.parse(outcome).status);
+        const text = outcome
+          ? `Ridge bulletin for ${scenario}.`
+          : JSON.stringify({
+              requestTool: {
+                name: tool.name,
+                arguments: { entry: scenario === "Outside" ? "private" : "trail" },
+              },
+            });
+        response.writeHead(200, { "Content-Type": "application/json" });
+        response.end(
+          JSON.stringify({ choices: [{ message: { content: text }, finish_reason: "stop" }] }),
+        );
+        return;
+      }
+      assert.equal(request.url, "/mcp");
+      assert.equal(request.headers.accept, "application/json, text/event-stream");
+      assert.equal(request.headers.authorization, undefined);
+      if (request.method === "DELETE") {
+        response.writeHead(200).end();
+        return;
+      }
+      const { id, method, params } = JSON.parse(body);
+      assert.equal(request.method, "POST");
+      if (method !== "initialize") {
+        assert.equal(request.headers["mcp-protocol-version"], "2025-11-25");
+        assert.equal(request.headers["mcp-session-id"], "mint-smoke");
+      }
+      if (method === "notifications/initialized") {
+        response.writeHead(202).end();
+        return;
+      }
+      let result: unknown;
+      if (method === "initialize") {
+        assert.equal(params.protocolVersion, "2025-11-25");
+        response.setHeader("Mcp-Session-Id", "mint-smoke");
+        result = {
+          protocolVersion: "2025-11-25",
+          capabilities: { tools: {} },
+          serverInfo: { name: "MINT smoke", version: "1" },
+        };
+      } else if (method === "tools/list") {
+        result = { tools: [tool] };
+      } else {
+        assert.equal(method, "tools/call");
+        calls.push(params);
+        await writeFile(params.arguments.entry === "trail" ? target : outside, changed);
+        result = { content: [{ type: "text", text: "Entry updated." }] };
+      }
+      const reply = JSON.stringify({ jsonrpc: "2.0", id, result });
+      if (method === "tools/list") {
+        response.writeHead(200, { "Content-Type": "text/event-stream" });
+        response.end(`event: message\ndata: ${reply}\n\n`);
+      } else {
+        response.writeHead(200, { "Content-Type": "application/json" });
+        response.end(reply);
+      }
+    } catch {
+      protocolErrors++;
+      response.writeHead(400).end();
+    }
+  });
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      endpoint.once("error", reject);
+      endpoint.listen(0, "127.0.0.1", resolve);
+    });
+    const address = endpoint.address();
+    assert.ok(address && typeof address !== "string");
+    const base = `http://127.0.0.1:${address.port}`;
+    await restart([document]);
+    for (const scenario of ["Deny", "Outside", "Approve"]) {
+      await nativeShortcut("ctrl+n");
+      await click("Draft with AI");
+      for (const [label, value] of [
+        ["API address", `${base}/v1`],
+        ["Model name", "mcp-model-fixture"],
+        ["Drafting instruction", `${scenario} the update and draft a bulletin.`],
+      ] as const) {
+        await clickPath(`//form//label[normalize-space(.)='${label}']/input`);
+        await keyActions(typing(value));
+      }
+      await clickPath("//form//summary[normalize-space(.)='MCP tools']");
+      await clickPath("//form//label[normalize-space(.)='MCP endpoint']/input");
+      await keyActions(typing(`${base}/mcp`));
+      await click("Find tools");
+      for (const [label, value] of [
+        ["MCP tool", tool.name],
+        ["External effect", "modify"],
+      ]) {
+        await until(`${label} to offer ${value}`, () =>
+          command<boolean>("POST", `/session/${session}/execute/sync`, {
+            script: `const [label, value] = arguments;
+              const select = [...document.querySelectorAll('form label')]
+                .find(element => element.firstChild?.textContent === label)?.control;
+              if (!select || ![...select.options].some(option => option.value === value)) return false;
+              select.value = value;
+              select.dispatchEvent(new Event('change', { bubbles: true }));
+              return true;`,
+            args: [label, value],
+          }).then((ready) => ready || null),
+        ).catch(explain);
+      }
+      if (scenario !== "Deny") {
+        await clickPath(
+          "//form//label[normalize-space(.)='Exact arguments to authorize']/textarea",
+        );
+        await keyActions(typing('{"entry":"trail"}'));
+      }
+      await clickPath(
+        "//form//button[starts-with(normalize-space(.),'Generate draft') and not(@disabled)]",
+      );
+      if (scenario === "Deny") {
+        await waitForView(
+          "the proposed MCP effect, endpoint and target",
+          `const approval = [...document.querySelectorAll('fieldset')].find(
+              field => field.querySelector(':scope > legend')?.textContent === 'External tool approval'
+            );
+            const text = approval?.innerText;
+            return text?.includes('Modify an external target') && text.includes('${base}/mcp')
+              && text.includes('"entry": "trail"');`,
+        );
+        assert.deepEqual(calls, []);
+        await click("Deny tool call");
+      }
+      await waitForView(
+        `the completed ${scenario} draft`,
+        `return [...document.querySelectorAll('.cm-content')].some(
+           editor => editor.textContent === 'Ridge bulletin for ${scenario}.');`,
+      );
+      assert.equal(await readFile(outside, "utf8"), "Private entry.");
+      assert.equal(
+        await readFile(target, "utf8"),
+        scenario === "Approve" ? changed : "Original public entry.",
+      );
+      assert.deepEqual(
+        calls,
+        scenario === "Approve" ? [{ name: tool.name, arguments: { entry: "trail" } }] : [],
+      );
+    }
+    assert.deepEqual(outcomes, ["denied", "outside", "done"]);
+    assert.equal(protocolErrors, 0);
+  } finally {
+    await new Promise<void>((resolve) => endpoint.close(() => resolve()));
+  }
+});
+
 test("model keys survive a restart only when remembered and disconnect removes the OS credential", {
   skip: !credentialPolicy && "requires the hosted smoke suite's isolated Secret Service",
 }, async () => {
