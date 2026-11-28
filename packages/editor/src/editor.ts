@@ -250,7 +250,7 @@ function dialectExtensions(dialect: Dialect): Extension {
 
 export function createEditor(options: EditorOptions): MintEditor {
   const listeners = new Set<(event: EditorEvent) => void>();
-  const parsed = parseFileText(options.document?.currentText() ?? options.text);
+  const parsed = options.document?.currentDocument() ?? parseFileText(options.text);
   const host = options.host ?? {};
   const preview = new Compartment();
   const syntax = new Compartment();
